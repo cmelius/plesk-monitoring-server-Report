@@ -1,2 +1,239 @@
-# plesk-monitoring-server-Report-
-A single bash script that writes an hourly health and security report for a Plesk server and (optionally) uploads it to cloud storage with rclone.
+# plesk-server-report
+
+A single bash script that writes an **hourly health and security report** for a Plesk server and (optionally) uploads it to cloud storage with [rclone](https://rclone.org/).
+
+It is built around the most common way a shared Plesk server gets into trouble: **a compromised mailbox or a hacked website starts sending spam**, the server IP ends up on a blocklist, and every customer's mail bounces. The report is short, plain text and readable by a human or by an AI assistant that summarises it for you once a day.
+
+The script only **reads** logs and system state. It never changes the server configuration, mail queue or websites.
+
+---
+
+## What the report covers
+
+**Hourly (only log lines written since the previous run):**
+
+| Area | Checks | Alerts when … |
+|---|---|---|
+| **Outgoing mail / spam** | recipients per sender, mails per authenticated mailbox, distinct client IPs per mailbox, **login ≠ sender domain**, mails injected by scripts (PHP `mail()`, per Plesk subscription), deferred/bounced, queue size | a mailbox suddenly sends a lot, is used from many IPs, sends with foreign `From` domains, or a website's scripts send mass mail |
+| **Reputation** | server IP against Spamhaus, SpamCop, Barracuda, PSBL; remote rejections mentioning blocklists | the server IP is listed or recipients reject because of reputation |
+| **Brute force** | failed SMTP/IMAP/POP3 logins, most attacked mailboxes, fail2ban jails | failures spike |
+| **Intrusion** | successful SSH and Plesk panel logins, **new PHP files in `wp-content/uploads`** | a login comes from a never-seen IP, or a PHP file appears in an upload folder |
+| **System** | load, CPU per system user (= subscription), RAM, disks, failed systemd units, OOM killer | thresholds are exceeded |
+| **Web** | requests, 5xx errors, WordPress login POSTs and busiest IP per domain, PHP fatal errors with the first message | a domain throws many 5xx/fatal errors or gets hammered |
+
+**Once a day (first run after midnight):** pending (security) updates and reboot-required, TLS certificates of all Plesk domains and the panel (expiry < 14 days), age and status of the latest **Plesk backup**, Acronis agent (if installed).
+
+### Example (shortened, fictional data)
+
+```
+Server report host.example.com – 2026-10-26 10:05 UTC
+STATUS: WARNING (2)
+ ! Mail: mailbox info@shop.example used from 12 different IPs – password compromised?
+ ! Mail: mailbox info@shop.example sent 140 mails with a foreign sender domain – spam?
+
+== MAIL ==
+Delivered: 162 | deferred: 3 | bounced: 1 | queue: 0
+DNS blocklists for 203.0.113.10: zen.spamhaus.org:clean bl.spamcop.net:clean ...
+
+Mailboxes sending with a foreign sender domain (login ≠ from):
+     140  info@shop.example – e.g. support@bank-secure.example
+...
+== DAILY CHECKS ==
+Updates available: 4, security updates: 0
+TLS certificates:
+  all valid certificates are good for at least 14 more days
+Backups:
+  Plesk backup: last run 7 h ago (backup-2026-10-26-03-15-02-123), status: OK (exit code 0)
+```
+
+---
+
+## Requirements
+
+- Plesk Obsidian on Linux with Postfix (tested on Debian; Ubuntu should work the same; RHEL-based systems are partially supported: updates via `dnf`, SSH logins via `/var/log/secure`)
+- root access, `bash`, `awk`, `openssl`, `procps` (`top`, `free`) – all present on a standard Plesk server
+- optional: `fail2ban` (Plesk component), `rclone` for the upload
+
+---
+
+## Installation
+
+```bash
+curl -fsSL -o /usr/local/sbin/plesk-server-report.sh \
+  https://raw.githubusercontent.com/cmelius/plesk-server-report/main/plesk-server-report.sh
+chmod 700 /usr/local/sbin/plesk-server-report.sh
+
+# read it before you run it as root
+less /usr/local/sbin/plesk-server-report.sh
+
+# first test run: prints the report, uploads nothing
+/usr/local/sbin/plesk-server-report.sh --no-upload
+```
+
+The **first run** reads the last 20,000 lines of each log and lists all existing PHP files in upload folders, so it may contain warnings about older events. Review them once (see [First run](#first-run)). From the second run on, only new lines are analysed.
+
+Then set up the storage (next section) and the cron job:
+
+```bash
+echo '5 * * * * root /usr/local/sbin/plesk-server-report.sh' > /etc/cron.d/plesk-server-report
+chmod 644 /etc/cron.d/plesk-server-report
+```
+
+---
+
+## Storage for the reports
+
+> ### ⚠️ Use a dedicated account
+> Reports contain **IP addresses, mailbox names and email addresses** – personal data (GDPR!) and a map of your server's weak spots. Create a **separate account or bucket used only for these reports**, not your personal or company drive. This way:
+> - a stolen rclone token on the server only exposes the reports,
+> - anything (human or AI assistant) you give read access to sees the reports and nothing else,
+> - you can delete everything in one go.
+>
+> Never share the folder with "anyone with the link".
+
+The upload target is the rclone remote in `REMOTE` (default `reports:server-reports/<hostname>`). After every run the script uploads `report-YYYYMMDD-HHMM.txt`, overwrites `latest.txt` and deletes reports older than `RETENTION_DAYS` (default 7). Set `REMOTE=""` to keep reports only locally (in `/var/lib/plesk-server-report/out`).
+
+Install rclone with `apt install rclone` (Debian/Ubuntu) or `dnf install rclone` (RHEL-based, from EPEL). If your distribution's version is very old, see [rclone.org/install](https://rclone.org/install/).
+
+### Option A: Google Drive (headless server)
+
+1. Create a new Google account just for the reports.
+2. On the server run `rclone config` and answer:
+
+   | Prompt | Answer |
+   |---|---|
+   | `n/s/q>` | `n` (new remote) |
+   | `name>` | `reports` |
+   | `Storage>` | `drive` (Google Drive) |
+   | `client_id>` / `client_secret>` | Enter (empty). Fine for one small upload per hour; for heavy use [create your own client ID](https://rclone.org/drive/#making-your-own-client-id). |
+   | `scope>` | **`drive.file`**: rclone can only see files it created itself, not the rest of the drive |
+   | `service_account_file>` | Enter |
+   | `Edit advanced config?` | `n` |
+   | `Use web browser to automatically authenticate?` | **`n`**, the server has no browser |
+
+3. rclone now prints a command like `rclone authorize "drive" "eyJ..."`. Run it **on your desktop** (install rclone there, e.g. `winget install Rclone.Rclone`, `brew install rclone`), log in **with the dedicated Google account** and allow access.
+4. Copy the token printed on your desktop (`{"access_token":...}`) and paste it on the server at `config_token>`.
+5. `Configure this as a Shared Drive?` → `n`, then `y` to save and `q` to quit.
+6. Test:
+   ```bash
+   rclone mkdir reports:server-reports
+   rclone lsd reports:
+   ```
+
+Deleted reports are removed permanently, not moved to the Drive trash.
+
+### Option B: Microsoft OneDrive
+
+Same flow as Google Drive: `rclone config` → `onedrive`, answer `n` to auto config, run `rclone authorize "onedrive"` on your desktop and log in with a **dedicated Microsoft account**. The token usually grants access to the whole OneDrive, which makes the dedicated account even more important. See [rclone.org/onedrive](https://rclone.org/onedrive/).
+
+### Option C: S3-compatible object storage (AWS S3, Backblaze B2, Wasabi, Hetzner, IONOS, …)
+
+The cleanest option security-wise: an access key that can **only write into one bucket**.
+
+```bash
+# example: generic S3 provider
+rclone config create reports s3 provider Other \
+  access_key_id AKIA... secret_access_key ... \
+  endpoint https://s3.example-provider.com region eu-central-1
+```
+
+- Create a dedicated bucket and a key restricted to that bucket.
+- Ideally the key has **no delete permission**. Then set `RETENTION_DAYS=0` and let a **bucket lifecycle rule** delete objects after 7 days.
+- Keys without permission to create buckets need `RCLONE_S3_NO_CHECK_BUCKET=true` (e.g. as a line `export RCLONE_S3_NO_CHECK_BUCKET=true` in the config file).
+- Backblaze B2 natively: `rclone config create reports b2 account <keyID> key <applicationKey>` with an application key limited to the bucket.
+
+### Option D: SFTP (Hetzner Storage Box, your own NAS, another server)
+
+```bash
+ssh-keygen -t ed25519 -N '' -f /root/.ssh/report_upload
+rclone config create reports sftp host storage.example.com user reportuser \
+  key_file /root/.ssh/report_upload
+```
+
+Use a dedicated user that is chrooted or limited to one directory (e.g. a Storage Box sub-account).
+
+### Option E: Nextcloud / WebDAV
+
+```bash
+rclone config create reports webdav vendor nextcloud \
+  url https://cloud.example.com/remote.php/dav/files/reportuser \
+  user reportuser pass "$(rclone obscure 'APP-PASSWORD')"
+```
+
+Use a dedicated Nextcloud user and an app password.
+
+---
+
+## Reading the reports
+
+- **Yourself:** open `latest.txt`. The first lines tell you everything: `STATUS: OK` or `STATUS: WARNING (n)` followed by the list of alerts.
+- **With an AI assistant:** connect an assistant that supports your storage (e.g. a Google Drive or OneDrive connector) **to the dedicated account** and let it review the last 24 reports every morning as a scheduled task. Tell it what is normal on your server (known broken sites, mail-only domains, …) so it only reports real changes. Example prompt:
+
+  > List all files in the folder `server-reports/<hostname>`. Read the reports of the last 24 hours (file names contain the UTC time). Report missing reports (gap > 2 h) as an issue. Summarise: outgoing spam signals, blocklist listings, new PHP files in uploads, logins from unknown IPs, failed services, 5xx/PHP errors, pending security updates, expiring certificates, backup status. Start with "All OK" or "Action required: …", max. 10 bullet points with a concrete next step. Read only, change nothing.
+
+- A daily review **does not replace real-time alerting**. For "server down" use an uptime monitor (e.g. Plesk 360 Monitoring, Uptime Kuma), and set **outgoing mail limits** in Plesk (*Tools & Settings → Outgoing Mail Control*) so a hijacked mailbox is throttled immediately.
+
+---
+
+## Configuration
+
+Override any default in `/etc/plesk-server-report.conf` (bash syntax; it survives script updates):
+
+```bash
+REMOTE="reports:server-reports/myhost"   # "" = local only
+RETENTION_DAYS=7                         # 0 = never delete remotely
+WEB_IGNORE_DOMAINS="legacy.example old.example"   # no web alerts, still listed
+UPLOADS_PHP_IGNORE='/uploads/borlabs-cookie/|/uploads/mailchimp-for-wp/debug-log\.php$|/uploads/my-plugin/'
+WARN_IPS_PER_MAILBOX=6
+WARN_MAILS_PER_SENDER=300
+```
+
+All thresholds apply **per run**. With the hourly cron job that means per hour. The full list is at the top of the script.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `WARN_MAILS_PER_SENDER` | 150 | recipients per envelope sender |
+| `WARN_MAILS_PER_SASL` | 150 | mails submitted by one authenticated mailbox |
+| `WARN_IPS_PER_MAILBOX` | 4 | distinct client IPs per mailbox (raise it if many users roam between networks) |
+| `WARN_FROM_MISMATCH` | 10 | mails with a sender domain different from the login's domain |
+| `WARN_MAILS_PER_SCRIPT` | 100 | mails via PHP `mail()`/sendmail per subscription |
+| `WARN_CPU_USER_PCT` | 80 | CPU of one system user in the snapshot |
+| `WARN_5XX_PER_DOMAIN` / `WARN_PHP_FATAL` | 100 / 20 | web errors per domain |
+| `WARN_CERT_DAYS` | 14 | certificate expiry warning |
+| `WARN_BACKUP_HOURS` | 26 | maximum age of the last Plesk backup |
+
+---
+
+## First run
+
+- **PHP files in `wp-content/uploads`:** the first run lists all existing ones. Some plugins legitimately store PHP files there (Borlabs Cookie and Mailchimp for WP are excluded by default). Add your own to `UPLOADS_PHP_IGNORE`. Anything else deserves a look: this is the classic place for web shells.
+- **Logins:** all IPs with a successful SSH/panel login in the current logs are stored as known (`/var/lib/plesk-server-report/known_login_ips`). Every later login from a new IP raises an alert once. Remove lines from that file to "forget" an IP.
+- **To repeat the daily checks today:** `rm /var/lib/plesk-server-report/daily_date`
+- **For a complete reset:** `rm -rf /var/lib/plesk-server-report`
+
+---
+
+## Notes and limitations
+
+- **Postfix logs `sasl_username` on failed logins too** (recent versions). The script handles this. If you adapt the parsing, keep in mind that a username appearing in the log does not mean the login succeeded.
+- **"Top senders" includes incoming mail** (e.g. newsletters from Amazon SES). The *authenticated mailboxes*, *login ≠ from* and *scripts* sections are the ones that show what your server sends on behalf of your users.
+- **Spamhaus** refuses queries coming through large public DNS resolvers. The report then shows `query-refused`, which means "unknown", not "listed". Use a local resolver for reliable results.
+- **Plesk panel logins** are matched best-effort in `/var/log/plesk/panel.log`, whose format differs between versions. SSH logins are reliable.
+- **TLS check** connects to the server's public IPv4. Domains that are mail-only, redirected elsewhere or without SSL are listed as "no matching certificate". That line is informational, not an alert.
+- **Backup check** covers Plesk's own backup manager (status from `backup.log` in the PMM log directory). Provider-side snapshots are not visible to the script, except whether an Acronis agent is running.
+- The CPU section is a 3-second snapshot, not an average.
+- Report timestamps use the server's time zone (`timedatectl` shows it).
+
+---
+
+## Security
+
+- Runs as root because it needs to read all logs. It writes only to `/var/lib/plesk-server-report` (mode 700) and to the configured rclone remote.
+- No external calls apart from DNS blocklist lookups and the rclone upload.
+- The rclone config (`/root/.config/rclone/rclone.conf`) contains the token for the storage account. That is another reason to use a dedicated account with the narrowest possible scope (`drive.file`, bucket-limited keys, chrooted SFTP user).
+
+---
+
+## License
+
+MIT. Use at your own risk. Contributions, parsers for other log formats and threshold experiences are welcome.
