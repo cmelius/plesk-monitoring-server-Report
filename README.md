@@ -220,41 +220,48 @@ Deleted reports are removed permanently, not moved to the Drive trash.
 
 Same flow as Google Drive: `rclone config` → `onedrive`, answer `n` to auto config, run `rclone authorize "onedrive"` on your desktop and log in with a **dedicated Microsoft account**. The token usually grants access to the whole OneDrive, which makes the dedicated account even more important. See [rclone.org/onedrive](https://rclone.org/onedrive/).
 
+> **In the commands below, replace everything in `<ANGLE BRACKETS>`** with your provider's values. They are placeholders, not working defaults.
+
 ### Option C: S3-compatible object storage (AWS S3, Backblaze B2, Wasabi, Hetzner, IONOS, …)
 
 The cleanest option security-wise: an access key that can **only write into one bucket**.
 
 ```bash
-# example: generic S3 provider
 rclone config create reports s3 provider Other \
-  access_key_id AKIA... secret_access_key ... \
-  endpoint https://s3.example-provider.com region eu-central-1
+  access_key_id <ACCESS_KEY_ID> secret_access_key <SECRET_ACCESS_KEY> \
+  endpoint <https://S3-ENDPOINT-OF-YOUR-PROVIDER> region <REGION>
 ```
 
+- Your provider's documentation lists the endpoint and region (for AWS itself use `provider AWS` and omit `endpoint`).
+- With S3 the remote path **must start with the bucket name**. Put this in `/etc/plesk-server-report.conf`: `REMOTE="reports:<BUCKET>/${HOST}"`
 - Create a dedicated bucket and a key restricted to that bucket.
 - Ideally the key has **no delete permission**. Then set `RETENTION_DAYS=0` and let a **bucket lifecycle rule** delete objects after 7 days.
 - Keys without permission to create buckets need `RCLONE_S3_NO_CHECK_BUCKET=true` (e.g. as a line `export RCLONE_S3_NO_CHECK_BUCKET=true` in the config file).
-- Backblaze B2 natively: `rclone config create reports b2 account <keyID> key <applicationKey>` with an application key limited to the bucket.
+- Backblaze B2 natively: `rclone config create reports b2 account <KEY_ID> key <APPLICATION_KEY>` with an application key limited to the bucket. The remote path also starts with the bucket here: `REMOTE="reports:<BUCKET>/${HOST}"`
 
 ### Option D: SFTP (Hetzner Storage Box, your own NAS, another server)
 
 ```bash
+# 1. key pair for the upload, without passphrase (cron has to use it unattended)
 ssh-keygen -t ed25519 -N '' -f /root/.ssh/report_upload
-rclone config create reports sftp host storage.example.com user reportuser \
+# 2. put /root/.ssh/report_upload.pub into ~/.ssh/authorized_keys of <SFTP_USER> on the target
+# 3. create the remote
+rclone config create reports sftp host <SFTP_HOST> port <PORT, usually 22> user <SFTP_USER> \
   key_file /root/.ssh/report_upload
+rclone lsd reports:
 ```
 
-Use a dedicated user that is chrooted or limited to one directory (e.g. a Storage Box sub-account).
+Use a dedicated user that is chrooted or limited to one directory (e.g. a Storage Box sub-account). The remote path is relative to that user's home directory, so the default `REMOTE="reports:server-reports/${HOST}"` works as is.
 
 ### Option E: Nextcloud / WebDAV
 
 ```bash
 rclone config create reports webdav vendor nextcloud \
-  url https://cloud.example.com/remote.php/dav/files/reportuser \
-  user reportuser pass "$(rclone obscure 'APP-PASSWORD')"
+  url https://<YOUR-NEXTCLOUD>/remote.php/dav/files/<NEXTCLOUD_USER> \
+  user <NEXTCLOUD_USER> pass "$(rclone obscure '<APP_PASSWORD>')"
 ```
 
-Use a dedicated Nextcloud user and an app password.
+Use a dedicated Nextcloud user and an app password (*Personal settings → Security → Devices & sessions*). For other WebDAV servers use `vendor other` and your server's WebDAV URL.
 
 ---
 
