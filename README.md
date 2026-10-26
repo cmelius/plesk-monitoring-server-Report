@@ -154,7 +154,7 @@ The report above is what a hijacked mailbox and a hacked WordPress site look lik
 
 ```bash
 curl -fsSL -o /usr/local/sbin/plesk-server-report.sh \
-  https://raw.githubusercontent.com/cmelius/plesk-server-report/main/plesk-server-report.sh
+  https://raw.githubusercontent.com/cmelius/plesk-monitoring-server-Report-/main/plesk-server-report.sh
 chmod 700 /usr/local/sbin/plesk-server-report.sh
 
 # read it before you run it as root
