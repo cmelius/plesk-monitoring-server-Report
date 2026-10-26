@@ -1,0 +1,516 @@
+#!/bin/bash
+# =============================================================================
+# plesk-server-report.sh
+#
+# Hourly health & security report for Plesk servers (Linux, Postfix/Dovecot).
+#
+# Focus: outgoing spam from compromised mailboxes or hacked websites, CPU/RAM,
+# plus brute-force noise, fail2ban, web errors, successful logins, new PHP files
+# in upload folders, failed services, OOM kills, DNS blocklists – and once a day:
+# pending updates, expiring certificates and Plesk backup status.
+#
+# Only log lines written since the previous run are analysed. The resulting
+# plain-text report is stored locally and (optionally) uploaded with rclone to
+# any storage backend rclone supports (Google Drive, OneDrive, S3, SFTP, ...).
+#
+# Run as root from cron, e.g. hourly:
+#   5 * * * * root /usr/local/sbin/plesk-server-report.sh
+#
+# Options:
+#   --no-upload   print the report to stdout and skip the rclone upload
+#
+# Settings: edit the defaults below or – recommended, survives updates –
+# override them in /etc/plesk-server-report.conf (plain bash variable syntax).
+#
+# License: MIT. No warranty – read the code before running it as root.
+# =============================================================================
+
+set -uo pipefail
+export LC_ALL=C
+
+# ---------------------------------------------------------------- defaults
+HOST=$(hostname -f 2>/dev/null || hostname)
+STATE_DIR=/var/lib/plesk-server-report
+REMOTE="reports:server-reports/${HOST}"  # rclone remote:path – empty = local only
+RETENTION_DAYS=7                         # delete remote reports older than x days (0 = never)
+LOCAL_KEEP_DAYS=7                        # keep local reports x days
+VHOST_LOGS=/var/www/vhosts/system        # Plesk per-domain log directories
+PLESK_PANEL_LOG=/var/log/plesk/panel.log
+
+# Alert thresholds – per run (with an hourly cron job: per hour)
+WARN_MAILS_PER_SENDER=150     # recipients per envelope sender
+WARN_MAILS_PER_SASL=150       # mails submitted per authenticated mailbox
+WARN_MAILS_PER_SCRIPT=100     # mails per system user (PHP mail() / sendmail)
+WARN_IPS_PER_MAILBOX=4        # distinct client IPs per authenticated mailbox
+WARN_FROM_MISMATCH=10         # mails of a mailbox with a foreign sender domain
+WARN_DEFERRED=100             # deferred deliveries
+WARN_BLOCKLIST=1              # remote rejections mentioning a blocklist/reputation
+WARN_QUEUE=200                # messages in the Postfix queue
+WARN_AUTH_FAIL=300            # failed mail logins (SMTP + IMAP/POP3)
+WARN_LOAD_FACTOR=1.5          # 5-min load > CPU cores × factor
+WARN_CPU_USER_PCT=80          # %CPU of a single system user (snapshot)
+WARN_MEM_AVAIL_PCT=10         # available RAM below x %
+WARN_DISK_PCT=85              # filesystem usage above x %
+WARN_5XX_PER_DOMAIN=100       # HTTP 5xx responses per domain
+WARN_LOGIN_POSTS=300          # POSTs to wp-login.php/xmlrpc.php per domain
+WARN_PHP_FATAL=20             # PHP fatal errors per domain
+WARN_CERT_DAYS=14             # certificate expires in less than x days
+WARN_BACKUP_HOURS=26          # latest Plesk backup older than x hours
+
+DNSBL_LISTS="zen.spamhaus.org bl.spamcop.net b.barracudacentral.org psbl.surriel.com"
+WEB_IGNORE_DOMAINS=""         # space-separated domains without web alerts (still listed)
+# Known legitimate PHP files inside wp-content/uploads (regex on the full path)
+UPLOADS_PHP_IGNORE='/uploads/borlabs-cookie/|/uploads/mailchimp-for-wp/debug-log\.php$'
+# -----------------------------------------------------------------------------
+
+CONF=/etc/plesk-server-report.conf
+# shellcheck source=/dev/null
+[[ -r $CONF ]] && . "$CONF"
+
+UPLOAD=1
+[[ ${1:-} == --no-upload ]] && UPLOAD=0
+
+OUT_DIR=$STATE_DIR/out
+mkdir -p "$STATE_DIR/offsets" "$OUT_DIR"
+chmod 700 "$STATE_DIR"
+exec 9>"$STATE_DIR/lock"
+flock -n 9 || exit 0
+
+NOW=$(date '+%Y-%m-%d %H:%M %Z')
+RUN_START=$(date +%s)
+SINCE=$(cat "$STATE_DIR/last_run" 2>/dev/null || date -d '-1 hour' +%s)
+STAMP=$(date '+%Y%m%d-%H%M')
+REPORT="$OUT_DIR/report-$STAMP.txt"
+BODY=$(mktemp); TMP=$(mktemp)
+trap 'rm -f "$BODY" "$TMP" "$TMP.php" "$TMP.u"' EXIT
+ALERTS=()
+alert() { ALERTS+=("$*"); }
+section() { printf '\n== %s ==\n' "$1" >>"$BODY"; }
+out() { printf '%s\n' "$*" >>"$BODY"; }
+ignored_domain() { [[ " $WEB_IGNORE_DOMAINS " == *" $1 "* ]]; }
+
+# Print only the lines appended to a log file since the previous run.
+# Handles logrotate (the remainder of the rotated file .1 is read as well).
+new_lines() {
+  local f=$1 key st ino size off=0 oino="" ooff=0
+  [[ -r $f ]] || return 0
+  key=$(printf '%s' "$f" | md5sum | cut -c1-16)
+  st="$STATE_DIR/offsets/$key"
+  ino=$(stat -c %i "$f"); size=$(stat -c %s "$f")
+  if [[ -f $st ]]; then
+    read -r oino ooff <"$st"
+    if [[ $oino == "$ino" && $ooff -le $size ]]; then
+      off=$ooff
+    elif [[ -r $f.1 && $(stat -c %i "$f.1") == "$oino" ]]; then
+      tail -c +"$((ooff + 1))" "$f.1"          # rest of the file before rotation
+    fi
+  else
+    # first run: only the last 20,000 lines to keep it fast
+    tail -n 20000 "$f" | head -c "$size"
+    echo "$ino $size" >"$st"; return 0
+  fi
+  tail -c +"$((off + 1))" "$f" | head -c "$((size - off))"
+  echo "$ino $size" >"$st"
+}
+
+num_gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
+
+# =============================================================== MAIL
+section "MAIL"
+MAILLOG=""
+for f in /var/log/maillog /var/log/mail.log; do [[ -r $f ]] && { MAILLOG=$f; break; }; done
+
+if [[ -n $MAILLOG ]]; then
+  new_lines "$MAILLOG" >"$TMP"
+else
+  # no log file (no rsyslog): fall back to the journal
+  last=$(cat "$STATE_DIR/journal_since" 2>/dev/null || date -d '-1 hour' +%s)
+  journalctl --since "@$last" -o short -u postfix\* -u dovecot >"$TMP" 2>/dev/null
+  date +%s >"$STATE_DIR/journal_since"
+  MAILLOG="journal"
+fi
+out "Source: $MAILLOG, $(wc -l <"$TMP") new lines"
+
+MAILSTATS=$(awk '
+  function qid(s) { if (match(s, /\]: [0-9A-Za-z]+: /)) return substr(s, RSTART+3, RLENGTH-5); return "" }
+  function dom(a) { a=tolower(a); sub(/.*@/, "", a); return a }
+  function ipof(s) { if (match(s, /\[[0-9a-fA-F]*[.:][0-9a-fA-F:.]*\]/)) return substr(s, RSTART+1, RLENGTH-2); return "?" }
+  # Successfully authenticated submissions (one line per mail with sasl_username).
+  # Note: recent Postfix versions also append sasl_username to FAILED auth warnings.
+  /postfix\/.*smtpd.*sasl_username=/ && !/authentication failed/ {
+    u=$0; sub(/.*sasl_username=/, "", u); sub(/[ ,].*/, "", u)
+    ip=ipof($0); sasl[u]++
+    q=qid($0); if (q != "") sq[q]=u
+    if (!((u SUBSEP ip) in seen)) { seen[u SUBSEP ip]=1; nip[u]++; ipl[u]=ipl[u] " " ip }
+  }
+  # Mails injected locally (PHP mail(), sendmail) – uid = Plesk system user
+  /postfix\/pickup.*uid=/ { m=$0; sub(/.*uid=/, "", m); sub(/[ ,].*/, "", m); pick[m]++ }
+  # Recipients per envelope sender
+  /postfix\/qmgr.*from=<.*nrcpt=/ {
+    f=$0; sub(/.*from=</, "", f); sub(/>.*/, "", f); if (f=="") f="<> (bounce)"
+    n=$0; sub(/.*nrcpt=/, "", n); sub(/[^0-9].*/, "", n); rc[f]+=n
+    # sender domain differs from the domain of the authenticated mailbox?
+    q=qid($0)
+    if (q != "" && (q in sq) && !(q in mdone) && sq[q] ~ /@/ && f ~ /@/ && dom(f) != dom(sq[q])) {
+      mdone[q]=1; su=sq[q]; mm[su]++
+      if (!((su SUBSEP f) in mms) && mmc[su] < 3) { mms[su SUBSEP f]=1; mmc[su]++; mml[su]=mml[su] " " f }
+    }
+  }
+  / status=sent/     { sent++ }
+  / status=deferred/ { def++ }
+  / status=bounced/  { bou++ }
+  / status=(deferred|bounced)/ {
+    l=tolower($0)
+    if (l ~ /blacklist|blocklist|blocked|spamhaus|barracuda|spamcop|listed|reputation|poor ip|banned/) {
+      bl++; if (blx < 3) bex[++blx]=substr($0, 1, 300)
+    }
+  }
+  /SASL (LOGIN|PLAIN|CRAM-MD5) authentication failed/ {
+    sf++; sip[ipof($0)]++
+    if (match($0, /sasl_username=[^ ,]+/)) fu[substr($0, RSTART+14, RLENGTH-14)]++
+  }
+  /(imap|pop3)-login: .*(auth failed|Authentication failed)/ {
+    df++; r=$0; if (match(r, /rip=[0-9a-fA-F:.]+/)) dip[substr(r, RSTART+4, RLENGTH-4)]++
+  }
+  END {
+    printf "TOT\t%d\t%d\t%d\t%d\t%d\t%d\n", sent, def, bou, bl, sf, df
+    for (u in sasl) printf "SASL\t%d\t%d\t%s\t%s\n", sasl[u], nip[u], u, ipl[u]
+    for (m in pick) printf "PICK\t%d\t%s\n", pick[m], m
+    for (f in rc)   printf "RCPT\t%d\t%s\n", rc[f], f
+    for (i in sip)  printf "SFIP\t%d\t%s\n", sip[i], i
+    for (i in dip)  printf "DFIP\t%d\t%s\n", dip[i], i
+    for (u in fu)   printf "FUSR\t%d\t%s\n", fu[u], u
+    for (u in mm)   printf "MISM\t%d\t%s\t%s\n", mm[u], u, mml[u]
+    for (i=1; i<=blx; i++) printf "BLEX\t%s\n", bex[i]
+  }' "$TMP")
+
+read -r _ SENT DEF BOU BL SF DF <<<"$(grep '^TOT' <<<"$MAILSTATS")"
+QUEUE=$(postqueue -j 2>/dev/null | wc -l)
+out "Delivered: $SENT | deferred: $DEF | bounced: $BOU | queue: $QUEUE"
+out "Rejections mentioning blocklist/reputation: $BL"
+(( DEF > WARN_DEFERRED )) && alert "Mail: $DEF deferred deliveries"
+(( BL >= WARN_BLOCKLIST )) && alert "Mail: $BL rejections mentioning a blocklist/reputation – check the server IP"
+(( QUEUE > WARN_QUEUE )) && alert "Mail: $QUEUE messages in the queue"
+grep '^BLEX' <<<"$MAILSTATS" | cut -f2- | sed 's/^/  example: /' >>"$BODY"
+
+PUBIP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<NF;i++) if ($i=="src") print $(i+1)}')
+if [[ $PUBIP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && ! $PUBIP =~ ^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|127\.) ]]; then
+  REV=$(awk -F. '{print $4"."$3"."$2"."$1}' <<<"$PUBIP")
+  BLRES=""
+  for bl in $DNSBL_LISTS; do
+    r=$(getent ahostsv4 "$REV.$bl" 2>/dev/null | awk 'NR==1{print $1}')
+    if [[ -z $r ]]; then BLRES+=" $bl:clean"
+    elif [[ $r == 127.255.255.* ]]; then BLRES+=" $bl:query-refused"
+    else BLRES+=" $bl:LISTED($r)"; alert "Mail: server IP $PUBIP is listed on $bl"
+    fi
+  done
+  out "DNS blocklists for $PUBIP:$BLRES"
+fi
+
+out ""; out "Top senders (total recipients):"
+grep '^RCPT' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -10 |
+  awk -F'\t' '{printf "  %6d  %s\n", $2, $3}' >>"$BODY"
+while IFS=$'\t' read -r _ n who; do
+  [[ $who == "<> (bounce)" ]] && continue
+  (( n > WARN_MAILS_PER_SENDER )) && alert "Mail: $who sent to $n recipients"
+done < <(grep '^RCPT' <<<"$MAILSTATS")
+
+out ""; out "Authenticated mailboxes (mails, distinct IPs):"
+grep '^SASL' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -10 |
+  awk -F'\t' '{ips=$5; if (length(ips)>80) ips=substr(ips,1,80) " …"; printf "  %6d  %2d IPs  %s –%s\n", $2, $3, $4, ips}' >>"$BODY"
+while IFS=$'\t' read -r _ n nip who _; do
+  (( n > WARN_MAILS_PER_SASL )) && alert "Mail: mailbox $who submitted $n mails"
+  (( nip > WARN_IPS_PER_MAILBOX )) && alert "Mail: mailbox $who used from $nip different IPs – password compromised?"
+done < <(grep '^SASL' <<<"$MAILSTATS")
+
+out ""; out "Mailboxes sending with a foreign sender domain (login ≠ from):"
+while IFS=$'\t' read -r _ n who ex; do
+  printf '  %6d  %s – e.g.%s\n' "$n" "$who" "$ex" >>"$BODY"
+  (( n >= WARN_FROM_MISMATCH )) && alert "Mail: mailbox $who sent $n mails with a foreign sender domain – spam?"
+done < <(grep '^MISM' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -10)
+
+out ""; out "Mails sent by scripts (system user = subscription):"
+while IFS=$'\t' read -r _ n uid; do
+  user=$(getent passwd "$uid" | cut -d: -f1); home=$(getent passwd "$uid" | cut -d: -f6)
+  printf '  %6d  uid %s  %s  %s\n' "$n" "$uid" "${user:-?}" "${home:-}" >>"$BODY"
+  (( n > WARN_MAILS_PER_SCRIPT )) && alert "Mail: scripts of ${user:-uid $uid} ($home) sent $n mails"
+done < <(grep '^PICK' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -10)
+
+out ""; out "Failed mail logins: SMTP $SF | IMAP/POP3 $DF – top IPs:"
+(( SF + DF > WARN_AUTH_FAIL )) && alert "Mail: $((SF + DF)) failed mail logins (brute force?)"
+grep -E '^(SFIP|DFIP)' <<<"$MAILSTATS" | awk -F'\t' '{a[$3]+=$2} END{for(i in a) print a[i]"\t"i}' |
+  sort -nr | head -5 | awk -F'\t' '{printf "  %6d  %s\n", $1, $2}' >>"$BODY"
+out "Most attacked mailboxes (failed SMTP logins):"
+grep '^FUSR' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -5 |
+  awk -F'\t' '{printf "  %6d  %s\n", $2, $3}' >>"$BODY"
+
+# =============================================================== CPU / RAM / DISK
+section "SYSTEM"
+CORES=$(nproc)
+read -r L1 L5 L15 _ </proc/loadavg
+out "Load: $L1 / $L5 / $L15 (1/5/15 min) on $CORES cores | $(uptime -p)"
+LIMIT=$(awk -v c="$CORES" -v f="$WARN_LOAD_FACTOR" 'BEGIN{print c*f}')
+num_gt "$L5" "$LIMIT" && alert "CPU: load $L5 above $LIMIT"
+
+# 3-second snapshot (second top iteration = current values)
+top -b -n 2 -d 3 -w 512 2>/dev/null | awk '/^top -/{n++} n==2' >"$TMP"
+out "$(grep -E '^%?Cpu' "$TMP" | head -1)"
+out ""; out "CPU per system user (snapshot):"
+awk 'p && $9 ~ /^[0-9.]+$/ {u[$2]+=$9} /PID +USER/{p=1} END{for(k in u) if (u[k]>=1) printf "%.1f\t%s\n", u[k], k}' "$TMP" |
+  sort -nr | head -8 >"$TMP.u"
+while IFS=$'\t' read -r pct user; do
+  printf '  %6s %%  %s\n' "$pct" "$user" >>"$BODY"
+  num_gt "$pct" "$WARN_CPU_USER_PCT" && alert "CPU: user $user is using $pct % CPU"
+done <"$TMP.u"
+out ""; out "Top processes:"
+awk '/PID +USER/{p=1; next} p {printf "  %5s %%  %-12s %s\n", $9, $2, $12}' "$TMP" | head -8 >>"$BODY"
+
+MEM=$(free -m | awk '/^Mem:/{printf "%d %d %d", $2, $7, ($7*100)/$2}')
+read -r MT MA MP <<<"$MEM"
+SWAP=$(free -m | awk '/^Swap:/{print $3"/"$2}')
+out ""; out "RAM: $MA of $MT MB available ($MP %) | swap used: $SWAP MB"
+(( MP < WARN_MEM_AVAIL_PCT )) && alert "RAM: only $MP % available"
+
+out ""; out "Filesystems:"
+while read -r pct mnt; do
+  p=${pct%\%}; printf '  %4s  %s\n' "$pct" "$mnt" >>"$BODY"
+  (( p > WARN_DISK_PCT )) && alert "Disk: $mnt is $pct full"
+done < <(df -P -x tmpfs -x devtmpfs -x overlay -x squashfs 2>/dev/null | awk 'NR>1{print $5, $6}')
+
+# =============================================================== FAIL2BAN
+section "FAIL2BAN"
+if command -v fail2ban-client >/dev/null; then
+  JAILS=$(fail2ban-client status 2>/dev/null | sed -n 's/.*Jail list:[[:space:]]*//p' | tr -d ' ' | tr ',' ' ')
+  for j in $JAILS; do
+    s=$(fail2ban-client status "$j" 2>/dev/null)
+    cb=$(sed -n 's/.*Currently banned:[[:space:]]*//p' <<<"$s")
+    tb=$(sed -n 's/.*Total banned:[[:space:]]*//p' <<<"$s")
+    cf=$(sed -n 's/.*Currently failed:[[:space:]]*//p' <<<"$s")
+    [[ ${cb:-0} -gt 0 || ${cf:-0} -gt 0 ]] && printf '  %-28s banned: %3s (total %s), currently failed: %s\n' "$j" "$cb" "$tb" "$cf" >>"$BODY"
+  done
+  out "  (jails without bans/failures hidden)"
+else
+  out "fail2ban not installed"; alert "fail2ban is not running"
+fi
+
+# =============================================================== WEB
+section "WEB (since last run)"
+: >"$TMP"; : >"$TMP.php"
+for dir in "$VHOST_LOGS"/*/logs; do
+  [[ -d $dir ]] || continue
+  dom=$(basename "$(dirname "$dir")")
+  for lf in "$dir/access_ssl_log" "$dir/access_log"; do
+    new_lines "$lf"
+  done | awk -v d="$dom" '
+    { n++; ip[$1]++ }
+    $9 ~ /^5[0-9][0-9]$/ { e5++ }
+    $6 == "\"POST" && $7 ~ /wp-login\.php|xmlrpc\.php/ { lp++ }
+    END { if (n) { top=""; m=0; for (i in ip) if (ip[i]>m) { m=ip[i]; top=i }
+                   printf "%d\t%d\t%d\t%s\t%s (%d)\n", n, e5+0, lp+0, d, top, m } }' >>"$TMP"
+  new_lines "$dir/error_log" | awk -v d="$dom" '
+    /PHP Fatal error/ { n++; if (ex == "") { ex=$0; sub(/.*PHP Fatal error: */, "", ex); ex=substr(ex, 1, 160) } }
+    END { if (n) printf "%d\t%s\t%s\n", n, d, ex }' >>"$TMP.php"
+done
+out "requests | 5xx | login POSTs | domain | busiest IP"
+sort -t$'\t' -k1,1nr "$TMP" | head -10 | awk -F'\t' '{printf "  %7d %5d %6d  %s  %s\n", $1, $2, $3, $4, $5}' >>"$BODY"
+while IFS=$'\t' read -r n e5 lp dom _; do
+  ignored_domain "$dom" && continue
+  (( e5 > WARN_5XX_PER_DOMAIN )) && alert "Web: $dom returned $e5 server errors (5xx)"
+  (( lp > WARN_LOGIN_POSTS )) && alert "Web: $dom received $lp login attempts (wp-login/xmlrpc)"
+done <"$TMP"
+out ""; out "PHP fatal errors (count, domain, first message):"
+sort -t$'\t' -k1,1nr "$TMP.php" | head -8 | while IFS=$'\t' read -r n dom ex; do
+  printf '  %5d  %s – %s\n' "$n" "$dom" "$ex" >>"$BODY"
+done
+while IFS=$'\t' read -r n dom _; do
+  ignored_domain "$dom" && continue
+  (( n > WARN_PHP_FATAL )) && alert "Web: $dom logged $n PHP fatal errors"
+done <"$TMP.php"
+
+# =============================================================== NEW PHP FILES IN UPLOAD FOLDERS
+section "WEBROOTS: PHP files in upload folders"
+SCAN_STAMP="$STATE_DIR/last_scan"
+touch "$SCAN_STAMP.new"   # remember the time before scanning
+while IFS= read -r up; do
+  if [[ -f $SCAN_STAMP ]]; then
+    find "$up" -type f \( -iname '*.php' -o -iname '*.php[0-9]' -o -iname '*.phtml' -o -iname '*.phar' \) -newer "$SCAN_STAMP" 2>/dev/null
+  else
+    find "$up" -type f \( -iname '*.php' -o -iname '*.php[0-9]' -o -iname '*.phtml' -o -iname '*.phar' \) ! -name 'index.php' 2>/dev/null
+  fi
+done < <(find "$(dirname "$VHOST_LOGS")" -mindepth 2 -maxdepth 7 -type d -path '*/wp-content/uploads' ! -path '*/system/*' 2>/dev/null) |
+  grep -vE "$UPLOADS_PHP_IGNORE" >"$TMP"
+CNT=$(wc -l <"$TMP")
+if [[ -f $SCAN_STAMP ]]; then
+  out "New since last run: $CNT"
+  (( CNT > 0 )) && alert "Web: $CNT new PHP file(s) in wp-content/uploads – possible malware"
+else
+  out "First run – existing PHP files (excluding index.php): $CNT"
+  (( CNT > 0 )) && alert "Web: $CNT PHP file(s) found in wp-content/uploads – check whether legitimate"
+fi
+head -15 "$TMP" | sed 's/^/  /' >>"$BODY"
+mv "$SCAN_STAMP.new" "$SCAN_STAMP"
+
+# =============================================================== SUCCESSFUL LOGINS
+section "SUCCESSFUL LOGINS (SSH, Plesk panel)"
+KNOWN="$STATE_DIR/known_login_ips"
+FIRST_LOGIN_RUN=0; [[ -f $KNOWN ]] || { FIRST_LOGIN_RUN=1; : >"$KNOWN"; }
+rm -f "$STATE_DIR/new_login_alerts"
+{
+  if [[ -r /var/log/auth.log ]]; then new_lines /var/log/auth.log
+  elif [[ -r /var/log/secure ]]; then new_lines /var/log/secure
+  else journalctl --since "@$SINCE" -u ssh -u sshd -o short 2>/dev/null; fi |
+    awk '/sshd.*Accepted / { for (i=1;i<=NF;i++) { if ($i=="Accepted") m=$(i+1); if ($i=="for") u=$(i+1); if ($i=="from") ip=$(i+1) }
+                             print "SSH\t" u "\t" ip "\t" m }'
+  # Plesk panel: best-effort match of successful login lines (format varies by version)
+  new_lines "$PLESK_PANEL_LOG" | grep -iE 'log(ged)? ?in' | grep -viE 'fail|invalid|wrong|denied|error' |
+    awk '{ ip=""; if (match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) ip=substr($0, RSTART, RLENGTH);
+           u="?"; if (match($0, /login[=: ]+"?[A-Za-z0-9_.@-]+/)) { u=substr($0, RSTART, RLENGTH); sub(/login[=: ]+"?/, "", u) }
+           if (ip != "") print "Plesk\t" u "\t" ip "\tpanel" }'
+} | sort | uniq -c | while read -r cnt rest; do
+  IFS=$'\t' read -r kind user ip meth <<<"$rest"
+  printf '  %4d× %-5s %-14s from %-16s (%s)\n' "$cnt" "$kind" "$user" "$ip" "$meth" >>"$BODY"
+  if ! grep -qxF "$ip" "$KNOWN"; then
+    echo "$ip" >>"$KNOWN"
+    (( FIRST_LOGIN_RUN )) || echo "$kind login as $user from previously unknown IP $ip" >>"$STATE_DIR/new_login_alerts"
+  fi
+done
+if [[ -s $STATE_DIR/new_login_alerts ]]; then
+  while IFS= read -r a; do alert "Login: $a"; done <"$STATE_DIR/new_login_alerts"
+  rm -f "$STATE_DIR/new_login_alerts"
+fi
+(( FIRST_LOGIN_RUN )) && out "  (first run: all IPs stored as known; from now on new IPs raise an alert. List: $KNOWN)"
+
+# =============================================================== SERVICES / OOM
+section "SERVICES"
+if command -v systemctl >/dev/null; then
+  FAILED=$(systemctl --failed --no-legend --plain 2>/dev/null | awk '{print $1}' | xargs)
+  out "Failed units: ${FAILED:-none}"
+  [[ -n $FAILED ]] && alert "Service(s) failed: $FAILED"
+fi
+if command -v journalctl >/dev/null; then
+  OOM=$(journalctl -k --since "@$SINCE" 2>/dev/null | grep -iE 'out of memory|oom-kill|killed process' | grep -oE 'Killed process [0-9]+ \([^)]+\)' | sort | uniq -c | xargs)
+  out "OOM killer: ${OOM:-none}"
+  [[ -n $OOM ]] && alert "RAM: the kernel killed processes due to low memory: $OOM"
+fi
+
+# =============================================================== DAILY CHECKS
+DAILY="$STATE_DIR/daily.txt"; DALERTS="$STATE_DIR/daily_alerts.txt"
+run_daily() {
+  : >"$DALERTS"
+  dalert() { echo "$*" >>"$DALERTS"; }
+  echo "As of: $(date '+%Y-%m-%d %H:%M %Z')"
+
+  # --- updates
+  if command -v apt-get >/dev/null; then
+    local upg sec
+    upg=$(apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep '^Inst' || true)
+    sec=$(grep -ci 'security' <<<"$upg" || true)
+    echo "Updates available: $(grep -c . <<<"$upg" || true), security updates: $sec"
+    grep -i security <<<"$upg" | awk '{print "  " $2}' | head -10
+    (( sec > 0 )) && dalert "Updates: $sec security update(s) pending"
+    if [[ -f /var/run/reboot-required ]]; then
+      echo "Reboot required (since $(date -r /var/run/reboot-required '+%Y-%m-%d'))"
+      dalert "System: reboot required after updates"
+    fi
+  elif command -v dnf >/dev/null; then
+    local sec
+    sec=$(dnf -q updateinfo list --security 2>/dev/null | grep -c . || true)
+    echo "Security updates available: $sec"
+    (( sec > 0 )) && dalert "Updates: $sec security update(s) pending"
+    if command -v needs-restarting >/dev/null && ! needs-restarting -r >/dev/null 2>&1; then
+      echo "Reboot required"; dalert "System: reboot required after updates"
+    fi
+  fi
+
+  # --- TLS certificates (checked live on the server's public IP)
+  echo ""; echo "TLS certificates:"
+  local doms now d c end days san soon=0 nossl="" port
+  now=$(date +%s)
+  doms=$( { command -v plesk >/dev/null && plesk bin site --list 2>/dev/null; echo "$HOST"; } | sort -u)
+  for d in $doms; do
+    port=443; [[ $d == "$HOST" ]] && port=8443
+    c=$(echo | timeout 6 openssl s_client -connect "${PUBIP:-127.0.0.1}:$port" -servername "$d" 2>/dev/null | openssl x509 -noout -enddate -ext subjectAltName 2>/dev/null)
+    [[ -z $c ]] && { nossl+=" $d"; continue; }
+    san=$(grep -o 'DNS:[^,]*' <<<"$c" | sed 's/DNS://' | xargs)
+    if ! grep -qwF -- "$d" <<<"$san" && ! grep -qF -- "*.${d#*.}" <<<"$san"; then nossl+=" $d"; continue; fi
+    end=$(sed -n 's/^notAfter=//p' <<<"$c"); days=$(( ($(date -d "$end" +%s) - now) / 86400 ))
+    if (( days < WARN_CERT_DAYS )); then
+      echo "  $d: expires in $days days ($end)"; soon=$((soon + 1))
+      dalert "TLS: certificate of $d expires in $days days"
+    fi
+  done
+  (( soon == 0 )) && echo "  all valid certificates are good for at least $WARN_CERT_DAYS more days"
+  [[ -n $nossl ]] && echo "  no matching certificate (e.g. no SSL, mail-only, redirect):$nossl"
+
+  # --- backups
+  echo ""; echo "Backups:"
+  local pmm last age st
+  for pmm in /var/log/plesk/PMM /usr/local/psa/PMM/logs /opt/psa/PMM/logs; do [[ -d $pmm ]] && break; pmm=""; done
+  if [[ -n $pmm ]]; then
+    last=$(find -L "$pmm" -maxdepth 2 -type d -name 'backup-*' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)
+    if [[ -n $last ]]; then
+      age=$(( (now - $(stat -c %Y "$last")) / 3600 ))
+      local blog="$last/backup.log" nerr=0 nwarn=0 ec="" ex=""
+      if [[ -r $blog ]]; then
+        nerr=$(grep -cE '\] (ERROR|CRITICAL|FATAL):' "$blog"); nwarn=$(grep -cE '\] WARNING:' "$blog")
+        ec=$(grep -oE 'Exit code: [0-9]+' "$blog" | tail -1 | grep -oE '[0-9]+$')
+        ex=$(grep -m1 -E '\] (ERROR|CRITICAL|FATAL):' "$blog" | cut -c1-220)
+      fi
+      if [[ ! -r $blog ]]; then st="unknown (no backup.log)"
+      elif (( nerr > 0 )) || [[ -n $ec && $ec != 0 ]]; then st="ERROR ($nerr error lines, exit code ${ec:-?})"
+      elif (( nwarn > 0 )); then st="OK with $nwarn warnings"
+      else st="OK (exit code ${ec:-?})"; fi
+      echo "  Plesk backup: last run $age h ago ($(basename "$last")), status: $st"
+      [[ -n $ex ]] && echo "    first error: $ex"
+      (( age > WARN_BACKUP_HOURS )) && dalert "Backup: latest Plesk backup is $age hours old"
+      [[ $st == ERROR* ]] && dalert "Backup: latest Plesk backup finished with errors"
+    else
+      echo "  Plesk backup: no backup logs found in $pmm"
+    fi
+  else
+    echo "  Plesk backup: log directory not found"
+  fi
+  # Acronis agent (used by several hosting providers for image backups) – only if installed
+  if pgrep -x aakore >/dev/null || pgrep -f '[a]cronis' >/dev/null; then
+    echo "  Acronis agent: running"
+  elif [[ -d /usr/lib/Acronis || -d /opt/acronis || -d /var/lib/Acronis ]]; then
+    echo "  Acronis agent: installed but NOT running"; dalert "Backup: Acronis agent is not running"
+  fi
+}
+if [[ $(cat "$STATE_DIR/daily_date" 2>/dev/null) != "$(date +%F)" ]]; then
+  run_daily >"$DAILY.new" 2>/dev/null; mv "$DAILY.new" "$DAILY"
+  date +%F >"$STATE_DIR/daily_date"
+fi
+section "DAILY CHECKS"
+cat "$DAILY" >>"$BODY" 2>/dev/null
+[[ -f $DALERTS ]] && while IFS= read -r a; do [[ -n $a ]] && alert "$a"; done <"$DALERTS"
+
+# =============================================================== WRITE REPORT
+{
+  echo "Server report $HOST – $NOW"
+  if (( ${#ALERTS[@]} )); then
+    echo "STATUS: WARNING (${#ALERTS[@]})"
+    printf ' ! %s\n' "${ALERTS[@]}"
+  else
+    echo "STATUS: OK"
+  fi
+  cat "$BODY"
+} >"$REPORT"
+chmod 600 "$REPORT"
+
+# =============================================================== UPLOAD
+if (( ! UPLOAD )); then
+  cat "$REPORT"
+elif [[ -n $REMOTE ]] && command -v rclone >/dev/null; then
+  rclone copyto "$REPORT" "$REMOTE/$(basename "$REPORT")" --quiet &&
+  rclone copyto "$REPORT" "$REMOTE/latest.txt" --quiet ||
+    logger -t plesk-server-report "upload to $REMOTE failed"
+  if (( RETENTION_DAYS > 0 )); then
+    # delete old reports permanently (Google Drive: not into the trash)
+    rclone delete "$REMOTE" --include 'report-*.txt' --min-age "${RETENTION_DAYS}d" \
+      --drive-use-trash=false --quiet ||
+      logger -t plesk-server-report "deleting old reports in $REMOTE failed"
+  fi
+fi
+find "$OUT_DIR" -name 'report-*.txt' -mtime +"$LOCAL_KEEP_DAYS" -delete
+echo "$RUN_START" >"$STATE_DIR/last_run"
