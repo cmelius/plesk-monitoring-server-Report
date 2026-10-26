@@ -184,6 +184,13 @@ chmod 644 /etc/cron.d/plesk-server-report
 > - you can delete everything in one go.
 >
 > Never share the folder with "anyone with the link".
+>
+> **No AI review? Then your own account can be fine,** as long as the token on the server is limited to the report files and the folder is never shared:
+> - **Google Drive with scope `drive.file`:** rclone only sees files it created itself. A stolen token exposes the reports, not the rest of your drive. A folder in your own account is acceptable.
+> - **S3/B2 with a bucket-limited key, or SFTP with a chrooted user:** same, the key only reaches the report bucket or directory.
+> - **OneDrive or Nextcloud/WebDAV:** the token or app password usually grants access to the **whole** account. Keep a dedicated account here.
+>
+> As soon as an AI assistant (or anyone else) gets read access, use a dedicated account. Connectors typically see the entire account, not just one folder.
 
 The upload target is the rclone remote in `REMOTE` (default `reports:server-reports/<hostname>`). After every run the script uploads `report-YYYYMMDD-HHMM.txt`, overwrites `latest.txt` and deletes reports older than `RETENTION_DAYS` (default 7). Set `REMOTE=""` to keep reports only locally (in `/var/lib/plesk-server-report/out`).
 
