@@ -8,6 +8,8 @@
 # plus brute-force noise, fail2ban, web errors, successful logins, new PHP files
 # in upload folders, failed services, OOM kills, DNS blocklists – and once a day:
 # pending updates, expiring certificates and Plesk backup status.
+# Successful logins are annotated with country and network operator (local
+# GeoIP database, optional alerts for logins from unexpected countries).
 #
 # Only log lines written since the previous run are analysed. The resulting
 # plain-text report is stored locally and (optionally) uploaded with rclone to
@@ -65,6 +67,15 @@ DNSBL_LISTS="zen.spamhaus.org bl.spamcop.net b.barracudacentral.org psbl.surriel
 WEB_IGNORE_DOMAINS=""         # space-separated domains without web alerts (still listed)
 # Known legitimate PHP files inside wp-content/uploads (regex on the full path)
 UPLOADS_PHP_IGNORE='/uploads/borlabs-cookie/|/uploads/mailchimp-for-wp/debug-log\.php$'
+
+# GeoIP: country + network operator of IPs from a local DB-IP Lite database
+# (downloaded and refreshed monthly by the script). Needs mmdblookup:
+#   Debian/Ubuntu: apt install mmdb-bin    RHEL-based: dnf install libmaxminddb (EPEL)
+GEOIP=1                       # 0 = off
+GEOIP_DIR=""                  # default: $STATE_DIR/geoip
+ALLOWED_COUNTRIES=""          # e.g. "DE AT CH": alert on successful logins from other countries ("" = no alerts)
+GEO_TRUSTED_ORGS=""           # regex of operators exempt from country alerts, e.g. "Microsoft|Google"
+GEO_DATACENTER_RE='amazon|google|microsoft|oracle|digitalocean|ovh|hetzner|linode|akamai|vultr|contabo|alibaba|tencent|huawei|leaseweb|scaleway|m247|choopa|hostinger|hostwinds|colocrossing|datacamp|cloudflare|ionos|strato|netcup|hosting|server|cloud|data ?cent'
 # -----------------------------------------------------------------------------
 
 CONF=/etc/plesk-server-report.conf
@@ -77,6 +88,62 @@ UPLOAD=1
 OUT_DIR=$STATE_DIR/out
 mkdir -p "$STATE_DIR/offsets" "$OUT_DIR"
 chmod 700 "$STATE_DIR"
+
+# ---------------------------------------------------------------- GeoIP
+GEOIP_DIR=${GEOIP_DIR:-$STATE_DIR/geoip}
+GEO_CC_DB="$GEOIP_DIR/dbip-country-lite.mmdb"; GEO_ASN_DB="$GEOIP_DIR/dbip-asn-lite.mmdb"
+GEO_OK=0; GEO_NOTE=""
+geo_update() {   # download/refresh the DB-IP Lite databases (monthly)
+  local kind f m
+  mkdir -p "$GEOIP_DIR"
+  for kind in country asn; do
+    f="$GEOIP_DIR/dbip-$kind-lite.mmdb"
+    [[ -s $f && -z $(find "$f" -mtime +35 2>/dev/null) ]] && continue
+    for m in "$(date +%Y-%m)" "$(date -d "$(date +%Y-%m-15) -1 month" +%Y-%m)"; do
+      if curl -fsS --max-time 180 -o "$f.gz.tmp" "https://download.db-ip.com/free/dbip-$kind-lite-$m.mmdb.gz" 2>/dev/null &&
+         gunzip -c "$f.gz.tmp" >"$f.tmp" 2>/dev/null &&
+         mmdblookup --file "$f.tmp" --ip 1.1.1.1 >/dev/null 2>&1; then
+        mv "$f.tmp" "$f"; break
+      fi
+    done
+    rm -f "$f.gz.tmp" "$f.tmp"
+  done
+}
+if (( GEOIP )); then
+  if command -v mmdblookup >/dev/null; then
+    geo_update
+    if [[ -s $GEO_CC_DB ]]; then GEO_OK=1
+    else GEO_NOTE="GeoIP: no database – download from download.db-ip.com failed"; fi
+  else
+    GEO_NOTE="GeoIP: off – install mmdblookup (Debian/Ubuntu: apt install mmdb-bin)"
+  fi
+fi
+declare -A GEO_CACHE=()
+# geo IP – sets GEO_CC, GEO_ORG and GEO_LABEL ("DE, Deutsche Telekom AG" / "US, Amazon.com [datacenter]")
+geo() {
+  local ip=$1 v cc="" org=""
+  if [[ -n ${GEO_CACHE[$ip]+x} ]]; then v=${GEO_CACHE[$ip]}
+  else
+    if (( GEO_OK )) && [[ $ip =~ ^[0-9a-fA-F:.]+$ ]]; then
+      cc=$(mmdblookup --file "$GEO_CC_DB" --ip "$ip" country iso_code 2>/dev/null | awk -F'"' 'NF>2{print $2; exit}')
+      [[ -s $GEO_ASN_DB ]] && org=$(mmdblookup --file "$GEO_ASN_DB" --ip "$ip" autonomous_system_organization 2>/dev/null | awk -F'"' 'NF>2{print $2; exit}')
+    fi
+    v="$cc|$org"; GEO_CACHE[$ip]=$v
+  fi
+  GEO_CC=${v%%|*}; GEO_ORG=${v#*|}; GEO_LABEL=""
+  (( GEO_OK )) || return 0
+  GEO_LABEL=${GEO_CC:-??}
+  [[ -n $GEO_ORG ]] && GEO_LABEL+=", ${GEO_ORG:0:40}"
+  if [[ -n $GEO_ORG ]] && grep -qiE "$GEO_DATACENTER_RE" <<<"$GEO_ORG"; then GEO_LABEL+=" [datacenter]"; fi
+  return 0
+}
+# geo_foreign – after geo(): true if country alerts are on and the IP is outside ALLOWED_COUNTRIES
+geo_foreign() {
+  (( GEO_OK )) && [[ -n $ALLOWED_COUNTRIES && -n $GEO_CC ]] || return 1
+  [[ " $ALLOWED_COUNTRIES " == *" $GEO_CC "* ]] && return 1
+  if [[ -n $GEO_TRUSTED_ORGS && -n $GEO_ORG ]] && grep -qiE "$GEO_TRUSTED_ORGS" <<<"$GEO_ORG"; then return 1; fi
+  return 0
+}
 exec 9>"$STATE_DIR/lock"
 flock -n 9 || exit 0
 
@@ -146,6 +213,7 @@ MAILSTATS=$(awk '
     ip=ipof($0); sasl[u]++
     q=qid($0); if (q != "") sq[q]=u
     if (!((u SUBSEP ip) in seen)) { seen[u SUBSEP ip]=1; nip[u]++; ipl[u]=ipl[u] " " ip }
+    sic[u SUBSEP ip]++
   }
   # Mails injected locally (PHP mail(), sendmail) – uid = Plesk system user
   /postfix\/pickup.*uid=/ { m=$0; sub(/.*uid=/, "", m); sub(/[ ,].*/, "", m); pick[m]++ }
@@ -179,6 +247,7 @@ MAILSTATS=$(awk '
   END {
     printf "TOT\t%d\t%d\t%d\t%d\t%d\t%d\n", sent, def, bou, bl, sf, df
     for (u in sasl) printf "SASL\t%d\t%d\t%s\t%s\n", sasl[u], nip[u], u, ipl[u]
+    for (k in sic) { split(k, kk, SUBSEP); printf "SAIP\t%d\t%s\t%s\n", sic[k], kk[1], kk[2] }
     for (m in pick) printf "PICK\t%d\t%s\n", pick[m], m
     for (f in rc)   printf "RCPT\t%d\t%s\n", rc[f], f
     for (i in sip)  printf "SFIP\t%d\t%s\n", sip[i], i
@@ -219,9 +288,30 @@ while IFS=$'\t' read -r _ n who; do
   (( n > WARN_MAILS_PER_SENDER )) && alert "Mail: $who sent to $n recipients"
 done < <(grep '^RCPT' <<<"$MAILSTATS")
 
-out ""; out "Authenticated mailboxes (mails, distinct IPs):"
-grep '^SASL' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -10 |
-  awk -F'\t' '{ips=$5; if (length(ips)>80) ips=substr(ips,1,80) " …"; printf "  %6d  %2d IPs  %s –%s\n", $2, $3, $4, ips}' >>"$BODY"
+out ""; out "Authenticated mailboxes (mails, distinct IPs; IPs with country/operator, mails per IP):"
+SAIP=$(grep '^SAIP' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr)
+while IFS=$'\t' read -r _ n nip who _; do
+  printf '  %6d  %2d IPs  %s\n' "$n" "$nip" "$who" >>"$BODY"
+  line=""; k=0
+  while IFS=$'\t' read -r _ c _ ip; do
+    k=$((k + 1)); (( k > 5 )) && { line+=", …"; break; }
+    geo "$ip"; line+="${line:+, }$ip${GEO_LABEL:+ ($GEO_LABEL)} ×$c"
+  done < <(awk -F'\t' -v u="$who" '$3 == u' <<<"$SAIP")
+  [[ -n $line ]] && printf '          %s\n' "$line" >>"$BODY"
+done < <(grep '^SASL' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -10)
+# country alerts: mailbox submitted mails after a login from an unexpected country
+declare -A FOREIGN_N=() FOREIGN_W=()
+while IFS=$'\t' read -r _ c who ip; do
+  [[ -n $ip ]] || continue
+  geo "$ip"
+  if geo_foreign; then
+    FOREIGN_N[$who]=$(( ${FOREIGN_N[$who]:-0} + c ))
+    [[ ${FOREIGN_W[$who]:-} == *"$ip "* ]] || FOREIGN_W[$who]+="$ip ($GEO_LABEL) "
+  fi
+done <<<"$SAIP"
+for who in "${!FOREIGN_N[@]}"; do
+  alert "Mail: mailbox $who submitted ${FOREIGN_N[$who]} mails after logins from outside $ALLOWED_COUNTRIES: ${FOREIGN_W[$who]% } – password compromised?"
+done
 while IFS=$'\t' read -r _ n nip who _; do
   (( n > WARN_MAILS_PER_SASL )) && alert "Mail: mailbox $who submitted $n mails"
   (( nip > WARN_IPS_PER_MAILBOX )) && alert "Mail: mailbox $who used from $nip different IPs – password compromised?"
@@ -242,8 +332,9 @@ done < <(grep '^PICK' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -10)
 
 out ""; out "Failed mail logins: SMTP $SF | IMAP/POP3 $DF – top IPs:"
 (( SF + DF > WARN_AUTH_FAIL )) && alert "Mail: $((SF + DF)) failed mail logins (brute force?)"
-grep -E '^(SFIP|DFIP)' <<<"$MAILSTATS" | awk -F'\t' '{a[$3]+=$2} END{for(i in a) print a[i]"\t"i}' |
-  sort -nr | head -5 | awk -F'\t' '{printf "  %6d  %s\n", $1, $2}' >>"$BODY"
+while IFS=$'\t' read -r c ip; do
+  geo "$ip"; printf '  %6d  %s%s\n' "$c" "$ip" "${GEO_LABEL:+ ($GEO_LABEL)}" >>"$BODY"
+done < <(grep -E '^(SFIP|DFIP)' <<<"$MAILSTATS" | awk -F'\t' '{a[$3]+=$2} END{for(i in a) print a[i]"\t"i}' | sort -nr | head -5)
 out "Most attacked mailboxes (failed SMTP logins):"
 grep '^FUSR' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -5 |
   awk -F'\t' '{printf "  %6d  %s\n", $2, $3}' >>"$BODY"
@@ -318,7 +409,7 @@ for dir in "$VHOST_LOGS"/*/logs; do
     END { if (n) { top=""; m=0; for (i in ip) if (ip[i]>m) { m=ip[i]; top=i }
                    nl=0; lt="-"; lm=0; for (i in lip) { nl++; if (lip[i]>lm) { lm=lip[i]; lt=i } }
                    succ=""; nsucc=0; brute=""
-                   for (i in ws) { nsucc+=ws[i]; succ=succ " " i " (" (wf[i]+0) " failures)"
+                   for (i in ws) { nsucc+=ws[i]; succ=succ " " i "=" (wf[i]+0)
                                    if (wf[i] >= bf) brute=brute " " i }
                    if (succ == "") succ="-"; if (brute == "") brute="-"
                    printf "%d\t%d\t%d\t%s\t%s (%d)\t%d\t%d\t%d\t%d\t%d\t%s (%d)\t%s\t%s\n",
@@ -338,6 +429,16 @@ done <"$TMP"
 
 out ""; out "WordPress login attacks (domains with at least $WARN_LOGIN_DETAIL login POSTs):"
 while IFS=$'\t' read -r n e5 lp dom top wl ws xr xb nl lt succ brute; do
+  sline=""
+  if [[ $succ != - ]]; then
+    for tok in $succ; do
+      sip=${tok%=*}; geo "$sip"
+      sline+="${sline:+, }$sip${GEO_LABEL:+ ($GEO_LABEL)}, ${tok##*=} failures before"
+      if geo_foreign && ! ignored_domain "$dom"; then
+        alert "Web: $dom – successful WordPress login from $sip ($GEO_LABEL), outside $ALLOWED_COUNTRIES"
+      fi
+    done
+  fi
   if [[ $brute != - ]] && ! ignored_domain "$dom"; then
     alert "Web: $dom – successful WordPress login from$brute after repeated failures – brute force succeeded? Check the users of this site"
   fi
@@ -345,7 +446,7 @@ while IFS=$'\t' read -r n e5 lp dom top wl ws xr xb nl lt succ brute; do
   xnote=""; (( xr > 0 && xb == 0 )) && xnote=" – xmlrpc.php is NOT blocked"
   printf '  %s: %d POSTs from %d IPs (busiest %s)\n    wp-login.php: %d, successful (302): %d | xmlrpc.php: %d, blocked (4xx): %d%s\n' \
     "$dom" "$lp" "$nl" "$lt" "$wl" "$ws" "$xr" "$xb" "$xnote" >>"$BODY"
-  [[ $succ != - ]] && printf '    successful wp-login from:%s\n' "$succ" >>"$BODY"
+  [[ $succ != - ]] && printf '    successful wp-login from: %s\n' "$sline" >>"$BODY"
 done < <(sort -t$'\t' -k3,3nr "$TMP")
 out ""; out "PHP fatal errors (count, domain, first message):"
 sort -t$'\t' -k1,1nr "$TMP.php" | head -8 | while IFS=$'\t' read -r n dom ex; do
@@ -397,10 +498,12 @@ rm -f "$STATE_DIR/new_login_alerts"
            if (ip != "") print "Plesk\t" u "\t" ip "\tpanel" }'
 } | sort | uniq -c | while read -r cnt rest; do
   IFS=$'\t' read -r kind user ip meth <<<"$rest"
-  printf '  %4d× %-5s %-14s from %-16s (%s)\n' "$cnt" "$kind" "$user" "$ip" "$meth" >>"$BODY"
+  geo "$ip"
+  printf '  %4d× %-5s %-14s from %-16s (%s)%s\n' "$cnt" "$kind" "$user" "$ip" "$meth" "${GEO_LABEL:+  $GEO_LABEL}" >>"$BODY"
   if ! grep -qxF "$ip" "$KNOWN"; then
     echo "$ip" >>"$KNOWN"
-    (( FIRST_LOGIN_RUN )) || echo "$kind login as $user from previously unknown IP $ip" >>"$STATE_DIR/new_login_alerts"
+    fnote=""; geo_foreign && fnote=" – OUTSIDE $ALLOWED_COUNTRIES"
+    (( FIRST_LOGIN_RUN )) || echo "$kind login as $user from previously unknown IP $ip${GEO_LABEL:+ ($GEO_LABEL)}$fnote" >>"$STATE_DIR/new_login_alerts"
   fi
 done
 if [[ -s $STATE_DIR/new_login_alerts ]]; then
@@ -524,6 +627,9 @@ cat "$DAILY" >>"$BODY" 2>/dev/null
     echo "STATUS: OK"
   fi
   cat "$BODY"
+  echo ""
+  if (( GEO_OK )); then echo "IP geolocation: DB-IP.com Lite databases (CC BY 4.0)"
+  elif [[ -n $GEO_NOTE ]]; then echo "$GEO_NOTE"; fi
 } >"$REPORT"
 chmod 600 "$REPORT"
 

@@ -20,6 +20,7 @@ The script only **reads** logs and system state. It never changes the server con
 | **Reputation** | server IP against Spamhaus, SpamCop, Barracuda, PSBL; remote rejections mentioning blocklists | the server IP is listed or recipients reject because of reputation |
 | **Brute force** | failed SMTP/IMAP/POP3 logins, most attacked mailboxes, fail2ban jails | failures spike |
 | **Intrusion** | successful SSH and Plesk panel logins, **new PHP files in `wp-content/uploads`**, **successful WordPress logins during a brute-force attack** | a login comes from a never-seen IP, a PHP file appears in an upload folder, or an IP logs in to WordPress after repeated failures |
+| **Geolocation** (optional) | country and network operator of every IP with a successful login (mailboxes, SSH, Plesk panel, WordPress) and of the top failed-login IPs, datacenter networks marked, from a **local** database, so no IP leaves the server | a mailbox sends mail, or someone logs in, from a country outside `ALLOWED_COUNTRIES` |
 | **System** | load, CPU per system user (= subscription), RAM, disks, failed systemd units, OOM killer | thresholds are exceeded |
 | **Web** | requests, 5xx errors, WordPress login POSTs and busiest IP per domain, login-attack details (distinct IPs, wp-login vs. xmlrpc, successful logins, whether xmlrpc.php is blocked), PHP fatal errors with the first message | a domain throws many 5xx/fatal errors or gets hammered |
 
@@ -29,7 +30,8 @@ The script only **reads** logs and system state. It never changes the server con
 
 ```
 Server report host.example.com – 2026-10-26 10:05 UTC
-STATUS: WARNING (5)
+STATUS: WARNING (6)
+ ! Mail: mailbox info@shop.example submitted 140 mails after logins from outside DE AT CH: 192.0.2.15 (BR, Example Cloud Ltd [datacenter]) 203.0.113.99 (VN, Example Telecom) – password compromised?
  ! Mail: mailbox info@shop.example used from 12 different IPs – password compromised?
  ! Mail: mailbox info@shop.example sent 140 mails with a foreign sender domain – spam?
  ! Web: 2 new PHP file(s) in wp-content/uploads – possible malware
@@ -48,10 +50,13 @@ Top senders (total recipients):
        6  <> (bounce)
        4  newsletter@shop.example
 
-Authenticated mailboxes (mails, distinct IPs):
-     140  12 IPs  info@shop.example – 198.51.100.4 198.51.100.77 192.0.2.15 192.0.2.201 203.0.113.99 …
-       9   1 IPs  office@agency.example – 198.51.100.20
-       3   1 IPs  jane@lawfirm.example – 192.0.2.44
+Authenticated mailboxes (mails, distinct IPs; IPs with country/operator, mails per IP):
+     140  12 IPs  info@shop.example
+          192.0.2.15 (BR, Example Cloud Ltd [datacenter]) ×61, 203.0.113.99 (VN, Example Telecom) ×40, 192.0.2.201 (BR, Example Cloud Ltd [datacenter]) ×20, 198.51.100.4 (DE, Example Telekom AG) ×3, …
+       9   1 IPs  office@agency.example
+          198.51.100.20 (DE, Example Telekom AG) ×9
+       3   1 IPs  jane@lawfirm.example
+          198.51.100.44 (AT, Example Kabel GmbH) ×3
 
 Mailboxes sending with a foreign sender domain (login ≠ from):
      140  info@shop.example – e.g. support@bank-secure.example
@@ -62,9 +67,9 @@ Mails sent by scripts (system user = subscription):
        1  uid 999  psaadm  /opt/psa/admin
 
 Failed mail logins: SMTP 64 | IMAP/POP3 3 – top IPs:
-       9  192.0.2.200
-       3  198.51.100.66
-       1  203.0.113.45
+       9  192.0.2.200 (NL, Example Hosting B.V. [datacenter])
+       3  198.51.100.66 (US, Example Cloud Ltd [datacenter])
+       1  203.0.113.45 (CN, Example Telecom)
 Most attacked mailboxes (failed SMTP logins):
        8  admin@agency.example
        4  info@lawfirm.example
@@ -109,7 +114,7 @@ requests | 5xx | login POSTs | domain | busiest IP
 WordPress login attacks (domains with at least 20 login POSTs):
   agency.example: 122 POSTs from 54 IPs (busiest 203.0.113.150 (20))
     wp-login.php: 80, successful (302): 1 | xmlrpc.php: 42, blocked (4xx): 0 – xmlrpc.php is NOT blocked
-    successful wp-login from: 198.51.100.200 (0 failures)
+    successful wp-login from: 198.51.100.200 (DE, Example Telekom AG), 0 failures before
 
 PHP fatal errors (count, domain, first message):
      48  blog.example – Uncaught Error: Call to undefined function create_function() in /var/www/vhosts/blog.example/httpdocs/wp-content/plugins/old-slider/slider.php:12
@@ -120,8 +125,8 @@ New since last run: 2
   /var/www/vhosts/shop.example/httpdocs/wp-content/uploads/2026/10/wp-tmp.php
 
 == SUCCESSFUL LOGINS (SSH, Plesk panel) ==
-     2× SSH   root           from 198.51.100.200   (publickey)
-     1× Plesk admin          from 198.51.100.200   (panel)
+     2× SSH   root           from 198.51.100.200   (publickey)  DE, Example Telekom AG
+     1× Plesk admin          from 198.51.100.200   (panel)  DE, Example Telekom AG
 
 == SERVICES ==
 Failed units: none
@@ -141,6 +146,8 @@ TLS certificates:
 Backups:
   Plesk backup: last run 7 h ago (backup-2026-10-26-03-15-02-123), status: OK (exit code 0)
   Acronis agent: running
+
+IP geolocation: DB-IP.com Lite databases (CC BY 4.0)
 ```
 
 The report above is what a hijacked mailbox and a hacked WordPress site look like: one mailbox, used from twelve different IPs, suddenly sends 140 mails pretending to be a bank, and two PHP files show up in the uploads folder of the same customer.
@@ -151,7 +158,7 @@ The report above is what a hijacked mailbox and a hacked WordPress site look lik
 
 - Plesk Obsidian on Linux with Postfix (tested on Debian; Ubuntu should work the same; RHEL-based systems are partially supported: updates via `dnf`, SSH logins via `/var/log/secure`)
 - root access, `bash`, `awk`, `openssl`, `procps` (`top`, `free`) – all present on a standard Plesk server
-- optional: `fail2ban` (Plesk component), `rclone` for the upload
+- optional: `fail2ban` (Plesk component), `rclone` for the upload, `mmdblookup` for geolocation (see below)
 
 ---
 
@@ -165,8 +172,17 @@ chmod 700 /usr/local/sbin/plesk-server-report.sh
 # read it before you run it as root
 less /usr/local/sbin/plesk-server-report.sh
 
+# optional, recommended: geolocation of login IPs
+apt install mmdb-bin            # RHEL-based: dnf install libmaxminddb (EPEL)
+
 # first test run: prints the report, uploads nothing
 /usr/local/sbin/plesk-server-report.sh --no-upload
+```
+
+**Geolocation:** with `mmdblookup` installed, the script downloads the free [DB-IP Lite](https://db-ip.com/db/lite.php) country and ASN databases (a few MB each) on the first run into `/var/lib/plesk-server-report/geoip` and refreshes them once a month. This needs outbound HTTPS to `download.db-ip.com`. Lookups are done locally, so no IP address is sent to any service. Without `mmdblookup` the script works as before and says so at the end of the report. To get **alerts**, set your customers' countries (see [Configuration](#configuration)):
+
+```bash
+echo 'ALLOWED_COUNTRIES="DE AT CH"' >> /etc/plesk-server-report.conf
 ```
 
 The **first run** reads the last 20,000 lines of each log and lists all existing PHP files in upload folders, so it may contain warnings about older events. Review them once (see [First run](#first-run)). From the second run on, only new lines are analysed.
@@ -299,6 +315,8 @@ WEB_IGNORE_DOMAINS="legacy.example old.example"   # no web alerts, still listed
 UPLOADS_PHP_IGNORE='/uploads/borlabs-cookie/|/uploads/mailchimp-for-wp/debug-log\.php$|/uploads/my-plugin/'
 WARN_IPS_PER_MAILBOX=6
 WARN_MAILS_PER_SENDER=300
+ALLOWED_COUNTRIES="DE AT CH"              # alert on logins from other countries
+GEO_TRUSTED_ORGS="Microsoft"             # no country alerts for this operator (see notes)
 ```
 
 All thresholds apply **per run**. With the hourly cron job that means per hour. The full list is at the top of the script.
@@ -314,6 +332,10 @@ All thresholds apply **per run**. With the hourly cron job that means per hour. 
 | `WARN_5XX_PER_DOMAIN` / `WARN_PHP_FATAL` | 100 / 20 | web errors per domain |
 | `WARN_LOGIN_DETAIL` | 20 | show login-attack details for domains with at least this many login POSTs |
 | `WARN_LOGIN_BRUTE_FAILS` | 5 | alert when an IP logs in to WordPress successfully after at least this many failures |
+| `GEOIP` | 1 | 0 switches geolocation off |
+| `ALLOWED_COUNTRIES` | empty | ISO country codes, e.g. `"DE AT CH"`. Successful logins from other countries raise an alert. Empty = annotate only, no alerts |
+| `GEO_TRUSTED_ORGS` | empty | regex of network operators exempt from country alerts, e.g. `"Microsoft\|Google"` |
+| `GEO_DATACENTER_RE` | list of cloud/hosting providers | operators marked as `[datacenter]` |
 | `WARN_CERT_DAYS` | 14 | certificate expiry warning |
 | `WARN_BACKUP_HOURS` | 26 | maximum age of the last Plesk backup |
 
@@ -337,6 +359,8 @@ All thresholds apply **per run**. With the hourly cron job that means per hour. 
 - **TLS check** connects to the server's public IPv4. Domains that are mail-only, redirected elsewhere or without SSL are listed as "no matching certificate". That line is informational, not an alert.
 - **Backup check** covers Plesk's own backup manager (status from `backup.log` in the PMM log directory). Provider-side snapshots are not visible to the script, except whether an Acronis agent is running.
 - **WordPress login success** is derived from the HTTP status: a successful `wp-login.php` POST returns `302`, a failed one `200`. Security plugins that change the login flow (custom login URLs, 2FA, CAPTCHAs) may change these codes. Logins via `xmlrpc.php` always return `200`, so their success cannot be told from the access log. Block `xmlrpc.php` if you don't need it (Plesk: *WordPress Toolkit → Security*).
+- **Country alerts and mail apps:** some apps connect to your mail server **from their provider's cloud**, not from the user's device. The Outlook app (iOS/Android) for IMAP accounts uses Microsoft servers, Gmail's "send mail as" uses Google servers, both often outside your country. Those logins show up as `[datacenter]` in another country. If your customers use such apps, add the operator to `GEO_TRUSTED_ORGS`, accepting that attackers on that cloud are then not flagged by country (the IP count and login ≠ from checks still apply). Geolocation is an additional signal, not proof: attackers can use VPNs in your country.
+- **DB-IP Lite** data is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The attribution line at the end of every report satisfies this. Country accuracy is high, city data is not used.
 - The CPU section is a 3-second snapshot, not an average.
 - Report timestamps use the server's time zone (`timedatectl` shows it).
 
@@ -369,7 +393,7 @@ Watch the repository (*Watch → Custom → Releases* or *All activity*) to get 
 
 ### Changelog
 
-- **2026-10-29**: WordPress login-attack analysis with brute-force success detection; full `PATH` for cron runs (Plesk domain list for the TLS check and the mail queue size were missing under cron)
+- **2026-10-29**: optional geolocation (country + network operator, local DB-IP Lite database, monthly refresh) for successful logins and top failed-login IPs, alerts via `ALLOWED_COUNTRIES` for mailboxes, SSH, Plesk panel and WordPress logins from unexpected countries; WordPress login-attack analysis with brute-force success detection; full `PATH` for cron runs (Plesk domain list for the TLS check and the mail queue size were missing under cron)
 - **2026-10-26**: first public version
 
 ---
