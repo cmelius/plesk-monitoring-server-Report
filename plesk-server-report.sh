@@ -8,6 +8,8 @@
 # plus brute-force noise, fail2ban, web errors, successful logins, new PHP files
 # in upload folders, failed services, OOM kills, DNS blocklists – and once a day:
 # pending updates, expiring certificates and Plesk backup status.
+# Mail sent through Roundcube webmail is analysed separately (its SMTP
+# connections come from localhost and are invisible in the mail log).
 # Successful logins are annotated with country and network operator (local
 # GeoIP database, optional alerts for logins from unexpected countries).
 #
@@ -40,6 +42,7 @@ RETENTION_DAYS=7                         # delete remote reports older than x da
 LOCAL_KEEP_DAYS=7                        # keep local reports x days
 VHOST_LOGS=/var/www/vhosts/system        # Plesk per-domain log directories
 PLESK_PANEL_LOG=/var/log/plesk/panel.log
+ROUNDCUBE_LOG_DIR=""          # default: /var/log/plesk-roundcube (or /usr/share/psa-roundcube/logs)
 
 # Alert thresholds – per run (with an hourly cron job: per hour)
 WARN_MAILS_PER_SENDER=150     # recipients per envelope sender
@@ -338,6 +341,72 @@ done < <(grep -E '^(SFIP|DFIP)' <<<"$MAILSTATS" | awk -F'\t' '{a[$3]+=$2} END{fo
 out "Most attacked mailboxes (failed SMTP logins):"
 grep '^FUSR' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -5 |
   awk -F'\t' '{printf "  %6d  %s\n", $2, $3}' >>"$BODY"
+
+# --------------------------------------------------------------- webmail (Roundcube)
+# Roundcube connects to Postfix/Dovecot from localhost, so the mail log shows neither
+# the real client IP nor (on Plesk) the mailbox. Roundcube's own logs have both:
+#   sendmail: "User <mailbox> [<ip>]; Message <id> for <rcpt>, <rcpt>; 250: ..."
+#   errors:   "Login failed for <mailbox> against localhost from <ip>."
+RC_DIR=$ROUNDCUBE_LOG_DIR
+if [[ -z $RC_DIR ]]; then
+  for d in /var/log/plesk-roundcube /usr/share/psa-roundcube/logs; do [[ -d $d ]] && { RC_DIR=$d; break; }; done
+fi
+out ""; out "Webmail (Roundcube) – mails sent (mails, recipients, IPs):"
+if [[ -n $RC_DIR && -d $RC_DIR ]]; then
+  WEBMAIL=$( { new_lines "$RC_DIR/sendmail" | sed 's/^/S /'; new_lines "$RC_DIR/errors" | sed 's/^/E /'; } | awk '
+    $1 == "S" && / User [^ ]+ \[[0-9a-fA-F:.]+\]; Message / {
+      u=$0; sub(/.* User /, "", u); ip=u; sub(/ .*/, "", u); sub(/^[^[]*\[/, "", ip); sub(/\].*/, "", ip)
+      r=$0; sub(/.*; Message [^ ]+ for /, "", r); sub(/; [0-9][0-9][0-9]:.*/, "", r); nr=split(r, x, ",")
+      ms[u]++; rcp[u]+=nr; mip[u SUBSEP ip]++
+    }
+    $1 == "E" && /Login failed for .* from / {
+      u=$0; sub(/.*Login failed for /, "", u); sub(/ against .*/, "", u)
+      ip=$0; sub(/.* from /, "", ip); sub(/ .*/, "", ip); sub(/\.$/, "", ip)
+      fl++; fip[ip]++; fu[u]++; fui[u SUBSEP ip]++
+    }
+    END {
+      printf "WTOT\t%d\n", fl
+      for (u in ms) printf "WSND\t%d\t%d\t%s\n", ms[u], rcp[u], u
+      for (k in mip) { split(k, kk, SUBSEP); printf "WSIP\t%d\t%s\t%s\t%d\n", mip[k], kk[1], kk[2], fui[k] + 0 }
+      for (i in fip) printf "WFIP\t%d\t%s\n", fip[i], i
+      for (u in fu)  printf "WFUS\t%d\t%s\n", fu[u], u
+    }')
+  WSIP=$(grep '^WSIP' <<<"$WEBMAIL" | sort -t$'\t' -k2,2nr)
+  while IFS=$'\t' read -r _ n nr who; do
+    nip=$(awk -F'\t' -v u="$who" '$3 == u' <<<"$WSIP" | grep -c .)
+    printf '  %6d  %5d rcpt  %2d IPs  %s\n' "$n" "$nr" "$nip" "$who" >>"$BODY"
+    line=""; k=0
+    while IFS=$'\t' read -r _ c _ ip _; do
+      k=$((k + 1)); (( k > 5 )) && { line+=", …"; break; }
+      geo "$ip"; line+="${line:+, }$ip${GEO_LABEL:+ ($GEO_LABEL)} ×$c"
+    done < <(awk -F'\t' -v u="$who" '$3 == u' <<<"$WSIP")
+    [[ -n $line ]] && printf '          %s\n' "$line" >>"$BODY"
+    (( n > WARN_MAILS_PER_SASL )) && alert "Mail: webmail user $who sent $n mails"
+    (( nr > WARN_MAILS_PER_SENDER )) && alert "Mail: webmail user $who sent to $nr recipients"
+    (( nip > WARN_IPS_PER_MAILBOX )) && alert "Mail: webmail user $who used from $nip different IPs – password compromised?"
+  done < <(grep '^WSND' <<<"$WEBMAIL" | sort -t$'\t' -k2,2nr | head -10)
+  declare -A WFOREIGN=()
+  while IFS=$'\t' read -r _ c who ip fails; do
+    [[ -n $ip ]] || continue
+    geo "$ip"
+    geo_foreign && WFOREIGN[$who]+="$ip ($GEO_LABEL) "
+    (( fails >= WARN_LOGIN_BRUTE_FAILS )) &&
+      alert "Mail: webmail user $who sent $c mails from $ip${GEO_LABEL:+ ($GEO_LABEL)} after $fails failed logins from that IP – password guessed?"
+  done <<<"$WSIP"
+  for who in "${!WFOREIGN[@]}"; do
+    alert "Mail: webmail user $who sent mails from outside $ALLOWED_COUNTRIES: ${WFOREIGN[$who]% } – password compromised?"
+  done
+  WFL=$(grep '^WTOT' <<<"$WEBMAIL" | cut -f2)
+  out "Failed webmail logins: ${WFL:-0} – top IPs:"
+  (( ${WFL:-0} > WARN_AUTH_FAIL )) && alert "Mail: ${WFL} failed webmail logins (brute force?)"
+  while IFS=$'\t' read -r _ c ip; do
+    geo "$ip"; printf '  %6d  %s%s\n' "$c" "$ip" "${GEO_LABEL:+ ($GEO_LABEL)}" >>"$BODY"
+  done < <(grep '^WFIP' <<<"$WEBMAIL" | sort -t$'\t' -k2,2nr | head -5)
+  out "Most attacked mailboxes (failed webmail logins):"
+  grep '^WFUS' <<<"$WEBMAIL" | sort -t$'\t' -k2,2nr | head -5 | awk -F'\t' '{printf "  %6d  %s\n", $2, $3}' >>"$BODY"
+else
+  out "  (no Roundcube log directory found)"
+fi
 
 # =============================================================== CPU / RAM / DISK
 section "SYSTEM"
