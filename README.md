@@ -6,7 +6,7 @@ It is built around the most common way a shared Plesk server gets into trouble: 
 
 The script only **reads** logs and system state. It never changes the server configuration, mail queue or websites.
 
-> **Built with Claude.** This script was written together with [Claude](https://claude.ai) (Anthropic) and tested against a production Plesk server. On that server, Claude also reads the uploaded reports every morning as a scheduled task, through a Google Drive connector linked to a dedicated account, and sends a push notification when something needs attention. See [Reading the reports](#reading-the-reports).
+> **Built with Claude.** This script was written together with [Claude](https://claude.ai) (Anthropic) and tested against a production Plesk server. On that server, Claude also reads the uploaded reports every morning as a scheduled task, through a Google Drive connector linked to a dedicated account, and sends a push notification when something needs attention. See [Reading the reports](#reading-the-reports). Findings from these daily reviews flow back into the script, see [Updates](#updates).
 
 ---
 
@@ -347,6 +347,30 @@ All thresholds apply **per run**. With the hourly cron job that means per hour. 
 - Runs as root because it needs to read all logs. It writes only to `/var/lib/plesk-server-report` (mode 700) and to the configured rclone remote.
 - No external calls apart from DNS blocklist lookups and the rclone upload.
 - The rclone config (`/root/.config/rclone/rclone.conf`) contains the token for the storage account. That is another reason to use a dedicated account with the narrowest possible scope (`drive.file`, bucket-limited keys, chrooted SFTP user).
+
+---
+
+## Updates
+
+The script runs on a production Plesk server with about 40 domains and is **actively maintained**. Every morning the reports are reviewed (see [Reading the reports](#reading-the-reports)). When a review shows a blind spot, a false alarm or a recommendation the script could have handled itself, the script is updated. New findings about attacks, log formats or Plesk behaviour go in as well. Real-world examples so far:
+
+- a distributed WordPress brute-force attack led to the *WordPress login attacks* section (distinct IPs, wp-login vs. xmlrpc, detection of successful logins after failures),
+- a daily check that silently missed data under cron led to the fixed `PATH`,
+- Postfix logging `sasl_username` on failed logins initially caused false "compromised mailbox" alarms, which has been fixed.
+
+To update, download the script again (your settings in `/etc/plesk-server-report.conf` and the state in `/var/lib/plesk-server-report` are kept):
+
+```bash
+curl -fsSL -o /usr/local/sbin/plesk-server-report.sh \
+  https://raw.githubusercontent.com/cmelius/plesk-monitoring-server-Report/main/plesk-server-report.sh
+```
+
+Watch the repository (*Watch → Custom → Releases* or *All activity*) to get notified about changes. Issues and pull requests with your own findings are welcome.
+
+### Changelog
+
+- **2026-10-29**: WordPress login-attack analysis with brute-force success detection; full `PATH` for cron runs (Plesk domain list for the TLS check and the mail queue size were missing under cron)
+- **2026-10-26**: first public version
 
 ---
 
