@@ -19,9 +19,9 @@ The script only **reads** logs and system state. It never changes the server con
 | **Outgoing mail / spam** | recipients per sender, mails per authenticated mailbox, distinct client IPs per mailbox, **login ≠ sender domain**, mails injected by scripts (PHP `mail()`, per Plesk subscription), deferred/bounced, queue size | a mailbox suddenly sends a lot, is used from many IPs, sends with foreign `From` domains, or a website's scripts send mass mail |
 | **Reputation** | server IP against Spamhaus, SpamCop, Barracuda, PSBL; remote rejections mentioning blocklists | the server IP is listed or recipients reject because of reputation |
 | **Brute force** | failed SMTP/IMAP/POP3 logins, most attacked mailboxes, fail2ban jails | failures spike |
-| **Intrusion** | successful SSH and Plesk panel logins, **new PHP files in `wp-content/uploads`** | a login comes from a never-seen IP, or a PHP file appears in an upload folder |
+| **Intrusion** | successful SSH and Plesk panel logins, **new PHP files in `wp-content/uploads`**, **successful WordPress logins during a brute-force attack** | a login comes from a never-seen IP, a PHP file appears in an upload folder, or an IP logs in to WordPress after repeated failures |
 | **System** | load, CPU per system user (= subscription), RAM, disks, failed systemd units, OOM killer | thresholds are exceeded |
-| **Web** | requests, 5xx errors, WordPress login POSTs and busiest IP per domain, PHP fatal errors with the first message | a domain throws many 5xx/fatal errors or gets hammered |
+| **Web** | requests, 5xx errors, WordPress login POSTs and busiest IP per domain, login-attack details (distinct IPs, wp-login vs. xmlrpc, successful logins, whether xmlrpc.php is blocked), PHP fatal errors with the first message | a domain throws many 5xx/fatal errors or gets hammered |
 
 **Once a day (first run after midnight):** pending (security) updates and reboot-required, TLS certificates of all Plesk domains and the panel (expiry < 14 days), age and status of the latest **Plesk backup**, Acronis agent (if installed).
 
@@ -105,6 +105,11 @@ requests | 5xx | login POSTs | domain | busiest IP
       310    51      0  blog.example  192.0.2.80 (40)
       188     0    122  agency.example  203.0.113.150 (160)
        95     0      0  lawfirm.example  198.51.100.12 (23)
+
+WordPress login attacks (domains with at least 20 login POSTs):
+  agency.example: 122 POSTs from 54 IPs (busiest 203.0.113.150 (20))
+    wp-login.php: 80, successful (302): 1 | xmlrpc.php: 42, blocked (4xx): 0 – xmlrpc.php is NOT blocked
+    successful wp-login from: 198.51.100.200 (0 failures)
 
 PHP fatal errors (count, domain, first message):
      48  blog.example – Uncaught Error: Call to undefined function create_function() in /var/www/vhosts/blog.example/httpdocs/wp-content/plugins/old-slider/slider.php:12
@@ -307,6 +312,8 @@ All thresholds apply **per run**. With the hourly cron job that means per hour. 
 | `WARN_MAILS_PER_SCRIPT` | 100 | mails via PHP `mail()`/sendmail per subscription |
 | `WARN_CPU_USER_PCT` | 80 | CPU of one system user in the snapshot |
 | `WARN_5XX_PER_DOMAIN` / `WARN_PHP_FATAL` | 100 / 20 | web errors per domain |
+| `WARN_LOGIN_DETAIL` | 20 | show login-attack details for domains with at least this many login POSTs |
+| `WARN_LOGIN_BRUTE_FAILS` | 5 | alert when an IP logs in to WordPress successfully after at least this many failures |
 | `WARN_CERT_DAYS` | 14 | certificate expiry warning |
 | `WARN_BACKUP_HOURS` | 26 | maximum age of the last Plesk backup |
 
@@ -329,6 +336,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour. 
 - **Plesk panel logins** are matched best-effort in `/var/log/plesk/panel.log`, whose format differs between versions. SSH logins are reliable.
 - **TLS check** connects to the server's public IPv4. Domains that are mail-only, redirected elsewhere or without SSL are listed as "no matching certificate". That line is informational, not an alert.
 - **Backup check** covers Plesk's own backup manager (status from `backup.log` in the PMM log directory). Provider-side snapshots are not visible to the script, except whether an Acronis agent is running.
+- **WordPress login success** is derived from the HTTP status: a successful `wp-login.php` POST returns `302`, a failed one `200`. Security plugins that change the login flow (custom login URLs, 2FA, CAPTCHAs) may change these codes. Logins via `xmlrpc.php` always return `200`, so their success cannot be told from the access log. Block `xmlrpc.php` if you don't need it (Plesk: *WordPress Toolkit → Security*).
 - The CPU section is a 3-second snapshot, not an average.
 - Report timestamps use the server's time zone (`timedatectl` shows it).
 
