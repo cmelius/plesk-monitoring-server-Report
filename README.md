@@ -374,6 +374,26 @@ All thresholds apply **per run**. With the hourly cron job that means per hour. 
 
 ---
 
+## Using another CMS? Help wanted
+
+Everything except two checks works with any software: mail, blocklists, system, services, fail2ban, 5xx and PHP errors, certificates, backups and geolocation. The two checks below currently understand **WordPress only**, because that is what runs on the author's server:
+
+- **login-attack analysis** (`wp-login.php` / `xmlrpc.php`, detection of successful logins by HTTP status code)
+- **PHP files in upload folders** (`wp-content/uploads`)
+
+Other applications popular on Plesk (Joomla, Drupal, TYPO3, PrestaShop, Shopware, Magento, Nextcloud, …) use different login URLs, status codes and upload folders. Guessing them would produce false alarms. Joomla answers a successful login with `303` instead of `302`, for example, and Nextcloud redirects on failed logins too.
+
+**If you run one of them, you can help:** open an issue with the template [*Support for another CMS / application*](../../issues/new?template=cms-support.yml). It asks for exactly what is needed:
+
+- software and version, Plesk version, OS
+- the login URL of the admin area
+- a few **anonymized** access-log lines of a successful login, a failed login and (if available) an attack
+- the upload folders and any legitimate PHP files inside them
+
+The template includes a one-line command that anonymizes the log lines (IPs → `203.0.113.x`, domain → `example.com`). **Please never post real IPs, domains or user names. Issues are public.**
+
+---
+
 ## Updates
 
 The script runs on a production Plesk server with about 40 domains and is **actively maintained**. Every morning the reports are reviewed (see [Reading the reports](#reading-the-reports)). When a review shows a blind spot, a false alarm or a recommendation the script could have handled itself, the script is updated. New findings about attacks, log formats or Plesk behaviour go in as well. Real-world examples so far:
