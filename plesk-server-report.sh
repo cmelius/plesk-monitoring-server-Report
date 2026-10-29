@@ -27,6 +27,8 @@
 
 set -uo pipefail
 export LC_ALL=C
+# cron runs with PATH=/usr/bin:/bin – plesk, postqueue, ip etc. live in /usr/sbin
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # ---------------------------------------------------------------- defaults
 HOST=$(hostname -f 2>/dev/null || hostname)
