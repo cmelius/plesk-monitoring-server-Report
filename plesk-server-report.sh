@@ -53,6 +53,8 @@ WARN_MEM_AVAIL_PCT=10         # available RAM below x %
 WARN_DISK_PCT=85              # filesystem usage above x %
 WARN_5XX_PER_DOMAIN=100       # HTTP 5xx responses per domain
 WARN_LOGIN_POSTS=300          # POSTs to wp-login.php/xmlrpc.php per domain
+WARN_LOGIN_DETAIL=20          # show login-attack details for domains with at least x POSTs
+WARN_LOGIN_BRUTE_FAILS=5      # successful wp-login after at least x failures from the same IP
 WARN_PHP_FATAL=20             # PHP fatal errors per domain
 WARN_CERT_DAYS=14             # certificate expires in less than x days
 WARN_BACKUP_HOURS=26          # latest Plesk backup older than x hours
@@ -304,9 +306,22 @@ for dir in "$VHOST_LOGS"/*/logs; do
   done | awk -v d="$dom" '
     { n++; ip[$1]++ }
     $9 ~ /^5[0-9][0-9]$/ { e5++ }
-    $6 == "\"POST" && $7 ~ /wp-login\.php|xmlrpc\.php/ { lp++ }
+    # WordPress logins: a successful wp-login.php POST answers 302 (redirect to
+    # wp-admin), a failed one 200. Requests with ?action= (lost password, ...) are ignored.
+    $6 == "\"POST" && $7 ~ /wp-login\.php/ {
+      lp++; wl++; lip[$1]++
+      if ($7 !~ /action=/) { if ($9 == 302) ws[$1]++; else if ($9 == 200) wf[$1]++ }
+    }
+    $6 == "\"POST" && $7 ~ /xmlrpc\.php/ { lp++; xr++; lip[$1]++; if ($9 ~ /^40[0-9]$/) xb++ }
     END { if (n) { top=""; m=0; for (i in ip) if (ip[i]>m) { m=ip[i]; top=i }
-                   printf "%d\t%d\t%d\t%s\t%s (%d)\n", n, e5+0, lp+0, d, top, m } }' >>"$TMP"
+                   nl=0; lt="-"; lm=0; for (i in lip) { nl++; if (lip[i]>lm) { lm=lip[i]; lt=i } }
+                   succ=""; nsucc=0; brute=""
+                   for (i in ws) { nsucc+=ws[i]; succ=succ " " i " (" (wf[i]+0) " failures)"
+                                   if (wf[i] >= bf) brute=brute " " i }
+                   if (succ == "") succ="-"; if (brute == "") brute="-"
+                   printf "%d\t%d\t%d\t%s\t%s (%d)\t%d\t%d\t%d\t%d\t%d\t%s (%d)\t%s\t%s\n",
+                          n, e5+0, lp+0, d, top, m, wl+0, nsucc, xr+0, xb+0, nl, lt, lm, succ, brute } }' \
+    bf="$WARN_LOGIN_BRUTE_FAILS" >>"$TMP"
   new_lines "$dir/error_log" | awk -v d="$dom" '
     /PHP Fatal error/ { n++; if (ex == "") { ex=$0; sub(/.*PHP Fatal error: */, "", ex); ex=substr(ex, 1, 160) } }
     END { if (n) printf "%d\t%s\t%s\n", n, d, ex }' >>"$TMP.php"
@@ -318,6 +333,18 @@ while IFS=$'\t' read -r n e5 lp dom _; do
   (( e5 > WARN_5XX_PER_DOMAIN )) && alert "Web: $dom returned $e5 server errors (5xx)"
   (( lp > WARN_LOGIN_POSTS )) && alert "Web: $dom received $lp login attempts (wp-login/xmlrpc)"
 done <"$TMP"
+
+out ""; out "WordPress login attacks (domains with at least $WARN_LOGIN_DETAIL login POSTs):"
+while IFS=$'\t' read -r n e5 lp dom top wl ws xr xb nl lt succ brute; do
+  if [[ $brute != - ]] && ! ignored_domain "$dom"; then
+    alert "Web: $dom – successful WordPress login from$brute after repeated failures – brute force succeeded? Check the users of this site"
+  fi
+  (( lp >= WARN_LOGIN_DETAIL )) || continue
+  xnote=""; (( xr > 0 && xb == 0 )) && xnote=" – xmlrpc.php is NOT blocked"
+  printf '  %s: %d POSTs from %d IPs (busiest %s)\n    wp-login.php: %d, successful (302): %d | xmlrpc.php: %d, blocked (4xx): %d%s\n' \
+    "$dom" "$lp" "$nl" "$lt" "$wl" "$ws" "$xr" "$xb" "$xnote" >>"$BODY"
+  [[ $succ != - ]] && printf '    successful wp-login from:%s\n' "$succ" >>"$BODY"
+done < <(sort -t$'\t' -k3,3nr "$TMP")
 out ""; out "PHP fatal errors (count, domain, first message):"
 sort -t$'\t' -k1,1nr "$TMP.php" | head -8 | while IFS=$'\t' read -r n dom ex; do
   printf '  %5d  %s – %s\n' "$n" "$dom" "$ex" >>"$BODY"
