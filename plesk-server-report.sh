@@ -66,6 +66,14 @@ WARN_PHP_FATAL=20             # PHP fatal errors per domain
 WARN_CERT_DAYS=14             # certificate expires in less than x days
 WARN_BACKUP_HOURS=26          # latest Plesk backup older than x hours
 
+# Daily SPF/DKIM/DMARC check of all domains with mail service (needs dig)
+MAILAUTH_CHECK=1              # 0 = off
+MAILAUTH_IGNORE_DOMAINS=""    # space-separated domains to skip
+MAILAUTH_SHOW_ALL=0           # 1 = list every domain, 0 = only domains with findings
+DKIM_KEY_DIR=/etc/domainkeys  # Plesk DKIM private keys: <dir>/<domain>/<selector>
+DKIM_SELECTOR=default         # Plesk signs with selector "default"
+MAILNAMES_DIR=/var/qmail/mailnames   # Plesk mailboxes: <dir>/<domain>/<mailbox>
+
 DNSBL_LISTS="zen.spamhaus.org bl.spamcop.net b.barracudacentral.org psbl.surriel.com"
 WEB_IGNORE_DOMAINS=""         # space-separated domains without web alerts (still listed)
 # Known legitimate PHP files inside wp-content/uploads (regex on the full path)
@@ -596,6 +604,93 @@ fi
 
 # =============================================================== DAILY CHECKS
 DAILY="$STATE_DIR/daily.txt"; DALERTS="$STATE_DIR/daily_alerts.txt"
+
+# ---------------------------------------------------------------- SPF / DKIM / DMARC helpers
+DIGQ() { dig +short +time=3 +tries=2 "$@" 2>/dev/null; }
+txt_records() { DIGQ TXT "$1" | sed 's/" "//g; s/"//g'; }          # one TXT record per line
+ip2int() { local IFS=. a b c d; read -r a b c d <<<"$1"; echo $(( (a << 24) + (b << 16) + (c << 8) + d )); }
+in_cidr() {   # in_cidr IP NET[/BITS]
+  local net=${2%/*} bits=32 mask
+  [[ $2 == */* ]] && bits=${2#*/}
+  [[ $net =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && $bits =~ ^[0-9]+$ ]] || return 1
+  mask=$(( bits == 0 ? 0 : (0xFFFFFFFF << (32 - bits)) & 0xFFFFFFFF ))
+  (( ($(ip2int "$1") & mask) == ($(ip2int "$net") & mask) ))
+}
+host_has_ip() {   # host_has_ip HOST IP [BITS]
+  local a
+  for a in $(DIGQ A "$1" | grep -E '^[0-9.]+$'); do in_cidr "$2" "$a/${3:-32}" && return 0; done
+  return 1
+}
+# spf_eval DOMAIN IP DEPTH → prints pass | fail | none | loop (simplified SPF evaluation, IPv4 only)
+spf_eval() {
+  local d=$1 ip=$2 depth=${3:-0} rec t q m arg bits red=""
+  (( depth > 10 )) && { echo loop; return; }
+  rec=$(txt_records "$d" | grep -i '^v=spf1' | head -1)
+  [[ -z $rec ]] && { echo none; return; }
+  for t in $rec; do
+    q=+; [[ $t == [-~?+]* ]] && { q=${t:0:1}; t=${t:1}; }
+    m=${t%%[:=/]*}; m=${m,,}; arg=""; bits=32
+    [[ $t == *:* ]] && arg=${t#*:}
+    [[ $t == */* && $m =~ ^(a|mx)$ ]] && { bits=${t##*/}; arg=${arg%/*}; }
+    case $m in
+      ip4) [[ $q == + ]] && in_cidr "$ip" "$arg" && { echo pass; return; } ;;
+      a)   [[ $q == + ]] && host_has_ip "${arg:-$d}" "$ip" "$bits" && { echo pass; return; } ;;
+      mx)  if [[ $q == + ]]; then
+             local mxh
+             for mxh in $(DIGQ MX "${arg:-$d}" | awk '{print $2}'); do
+               host_has_ip "${mxh%.}" "$ip" "$bits" && { echo pass; return; }
+             done
+           fi ;;
+      include) [[ $q == + && $(spf_eval "$arg" "$ip" $((depth + 1))) == pass ]] && { echo pass; return; } ;;
+      redirect) red=${t#*=} ;;
+      all) [[ $q == + ]] && { echo pass; return; } ;;
+    esac
+  done
+  [[ -n $red ]] && { spf_eval "$red" "$ip" $((depth + 1)); return; }
+  echo fail
+}
+mailauth_check() {
+  local d doms ok=0 bad=0 spf dkim dmarc mxinfo mxhere ns line key dnskey m nmb probs
+  doms=$( { ls "$MAILNAMES_DIR" 2>/dev/null; ls "$DKIM_KEY_DIR" 2>/dev/null; } | sort -u)
+  for d in $doms; do
+    [[ $d == *.* && " $MAILAUTH_IGNORE_DOMAINS " != *" $d "* ]] || continue
+    nmb=$(find "$MAILNAMES_DIR/$d" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | grep -vc '/@')
+    # MX: is mail for this domain hosted here?
+    mxhere=0; mxinfo=""
+    for m in $(DIGQ MX "$d" | awk '{print $2}'); do
+      if host_has_ip "${m%.}" "$PUBIP"; then mxhere=1; else mxinfo+="${mxinfo:+,}${m%.}"; fi
+    done
+    (( nmb == 0 && mxhere == 0 )) && [[ -z $mxinfo ]] && continue     # no MX, no mailboxes → no mail
+    # SPF
+    spf=$(spf_eval "$d" "$PUBIP")
+    # DKIM: compare the public key in DNS with the private key on this server
+    dkim="off"
+    if [[ -r $DKIM_KEY_DIR/$d/$DKIM_SELECTOR ]]; then
+      key=$(openssl rsa -in "$DKIM_KEY_DIR/$d/$DKIM_SELECTOR" -pubout -outform DER 2>/dev/null | base64 -w0)
+      dnskey=$(txt_records "$DKIM_SELECTOR._domainkey.$d" | grep -i 'p=' | head -1 | tr -d ' ' | sed -n 's/.*p=\([^;]*\).*/\1/p')
+      if [[ -z $dnskey ]]; then dkim="MISSING"
+      elif [[ $dnskey == "$key" ]]; then dkim="ok"
+      else dkim="MISMATCH"; fi
+    fi
+    dmarc=$(txt_records "_dmarc.$d" | grep -i '^v=DMARC1' | head -1 | grep -oiE 'p=[a-z]+' | head -1)
+    ns=$(DIGQ NS "$d" | head -1); ns=${ns%.}
+    probs=""
+    [[ $spf != pass ]] && probs+=" SPF:${spf}"
+    [[ $dkim == MISSING || $dkim == MISMATCH ]] && probs+=" DKIM:${dkim,,}"
+    line=$(printf '  %-28s SPF %-4s | DKIM %-8s | DMARC %-12s | MX %s | DNS %s' "$d" \
+      "$spf" "$dkim" "${dmarc:-missing}" "$( ((mxhere)) && echo here || echo "${mxinfo:-none}")" "${ns:-?}")
+    if [[ -n $probs ]]; then
+      bad=$((bad + 1)); echo "$line"
+      # alert only if mail for the domain is hosted here (users send through this server)
+      if (( mxhere )); then
+        dalert "Mail auth: $d –${probs} (DNS at ${ns:-?}) – mails from this domain may be rejected or land in spam"
+      fi
+    else
+      ok=$((ok + 1)); (( MAILAUTH_SHOW_ALL )) && echo "$line"
+    fi
+  done
+  echo "  $ok domain(s) OK, $bad with findings (alerts only for domains whose MX points to this server)"
+}
 run_daily() {
   : >"$DALERTS"
   dalert() { echo "$*" >>"$DALERTS"; }
@@ -642,6 +737,18 @@ run_daily() {
   done
   (( soon == 0 )) && echo "  all valid certificates are good for at least $WARN_CERT_DAYS more days"
   [[ -n $nossl ]] && echo "  no matching certificate (e.g. no SSL, mail-only, redirect):$nossl"
+
+  # --- mail authentication: SPF / DKIM / DMARC
+  if (( MAILAUTH_CHECK )); then
+    echo ""; echo "Mail authentication (SPF / DKIM / DMARC):"
+    if ! command -v dig >/dev/null; then
+      echo "  skipped – dig not installed (Debian/Ubuntu: apt install bind9-dnsutils)"
+    elif [[ -z ${PUBIP:-} ]]; then
+      echo "  skipped – public IPv4 of this server unknown"
+    else
+      mailauth_check
+    fi
+  fi
 
   # --- backups
   echo ""; echo "Backups:"

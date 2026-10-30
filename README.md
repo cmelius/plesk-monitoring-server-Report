@@ -24,7 +24,7 @@ The script only **reads** logs and system state. It never changes the server con
 | **System** | load, CPU per system user (= subscription), RAM, disks, failed systemd units, OOM killer | thresholds are exceeded |
 | **Web** | requests, 5xx errors, WordPress login POSTs and busiest IP per domain, login-attack details (distinct IPs, wp-login vs. xmlrpc, successful logins, whether xmlrpc.php is blocked), PHP fatal errors with the first message | a domain throws many 5xx/fatal errors or gets hammered |
 
-**Once a day (first run after midnight):** pending (security) updates and reboot-required, TLS certificates of all Plesk domains and the panel (expiry < 14 days), age and status of the latest **Plesk backup**, Acronis agent (if installed).
+**Once a day (first run after midnight):** pending (security) updates and reboot-required, TLS certificates of all Plesk domains and the panel (expiry < 14 days), age and status of the latest **Plesk backup**, Acronis agent (if installed), and **SPF, DKIM and DMARC of every domain with mail service**: does SPF allow this server (including `include:`, `a`, `mx`), does the DKIM key in DNS match the key Plesk signs with, is there a DMARC policy, and where are MX and DNS hosted. That last part is especially useful for domains whose DNS you don't manage yourself.
 
 ### Example report (fictional data)
 
@@ -152,6 +152,10 @@ Updates available: 11, security updates: 3
 TLS certificates:
   all valid certificates are good for at least 14 more days
   no matching certificate (e.g. no SSL, mail-only, redirect): mail-only.example parked.example
+
+Mail authentication (SPF / DKIM / DMARC):
+  nails.example                SPF fail | DKIM MISSING  | DMARC missing      | MX here | DNS ns1.other-provider.example
+  38 domain(s) OK, 1 with findings (alerts only for domains whose MX points to this server)
 
 Backups:
   Plesk backup: last run 7 h ago (backup-2026-10-26-03-15-02-123), status: OK (exit code 0)
@@ -346,6 +350,11 @@ All thresholds apply **per run**. With the hourly cron job that means per hour. 
 | `ALLOWED_COUNTRIES` | empty | ISO country codes, e.g. `"DE AT CH"`. Successful logins from other countries raise an alert. Empty = annotate only, no alerts |
 | `GEO_TRUSTED_ORGS` | empty | regex of network operators exempt from country alerts, e.g. `"Microsoft\|Google"` |
 | `GEO_DATACENTER_RE` | list of cloud/hosting providers | operators marked as `[datacenter]` |
+| `MAILAUTH_CHECK` | 1 | daily SPF/DKIM/DMARC check, 0 = off (needs `dig`, package `bind9-dnsutils`) |
+| `MAILAUTH_SHOW_ALL` | 0 | 1 = list every domain, 0 = only domains with findings |
+| `MAILAUTH_IGNORE_DOMAINS` | empty | space-separated domains to skip |
+| `DKIM_KEY_DIR` / `DKIM_SELECTOR` | `/etc/domainkeys` / `default` | where Plesk keeps the DKIM private keys (`<dir>/<domain>/<selector>`) and the selector it signs with |
+| `MAILNAMES_DIR` | `/var/qmail/mailnames` | Plesk mailbox directory (`<dir>/<domain>/<mailbox>`) |
 | `WARN_CERT_DAYS` | 14 | certificate expiry warning |
 | `WARN_BACKUP_HOURS` | 26 | maximum age of the last Plesk backup |
 
@@ -371,6 +380,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour. 
 - **Backup check** covers Plesk's own backup manager (status from `backup.log` in the PMM log directory). Provider-side snapshots are not visible to the script, except whether an Acronis agent is running.
 - **WordPress login success** is derived from the HTTP status: a successful `wp-login.php` POST returns `302`, a failed one `200`. Security plugins that change the login flow (custom login URLs, 2FA, CAPTCHAs) may change these codes. Logins via `xmlrpc.php` always return `200`, so their success cannot be told from the access log. Block `xmlrpc.php` if you don't need it (Plesk: *WordPress Toolkit → Security*).
 - **Country alerts and mail apps:** some apps connect to your mail server **from their provider's cloud**, not from the user's device. The Outlook app (iOS/Android) for IMAP accounts uses Microsoft servers, Gmail's "send mail as" uses Google servers, both often outside your country. Those logins show up as `[datacenter]` in another country. If your customers use such apps, add the operator to `GEO_TRUSTED_ORGS`, accepting that attackers on that cloud are then not flagged by country (the IP count and login ≠ from checks still apply). Geolocation is an additional signal, not proof: attackers can use VPNs in your country.
+- **SPF/DKIM check** covers every domain with a Plesk mail directory or DKIM key. An **alert** is raised only when the domain's MX points to this server, because then its users send through this server. Domains whose mail is hosted elsewhere are listed for information only. SPF evaluation is simplified: `ip4`, `a`, `mx`, `include` and `redirect` are followed (up to 10 levels), `ptr`/`exists`/macros and IPv6 are not. A `fail` therefore means "this server's IPv4 is not covered"; verify with an online SPF checker before contacting the domain owner. DKIM is compared byte for byte: `MISMATCH` usually means the key was regenerated in Plesk but the DNS record (often at an external DNS provider) was not updated.
 - **DB-IP Lite** data is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The attribution line at the end of every report satisfies this. Country accuracy is high, city data is not used.
 - The CPU section is a 3-second snapshot, not an average.
 - Report timestamps use the server's time zone (`timedatectl` shows it).
@@ -424,6 +434,7 @@ Watch the repository (*Watch → Custom → Releases* or *All activity*) to get 
 
 ### Changelog
 
+- **2026-10-30**: daily SPF/DKIM/DMARC check for all mail domains (DKIM key in DNS compared with the Plesk key, SPF evaluated against this server's IP, MX and DNS hoster shown), paths configurable
 - **2026-10-29**: Roundcube webmail analysis (mails sent per mailbox with real client IP, recipients and geolocation, failed webmail logins, alerts for mass sending, foreign countries and sending after repeated failed logins); issue template for other CMS; optional geolocation (country + network operator, local DB-IP Lite database, monthly refresh) for successful logins and top failed-login IPs, alerts via `ALLOWED_COUNTRIES` for mailboxes, SSH, Plesk panel and WordPress logins from unexpected countries; WordPress login-attack analysis with brute-force success detection; full `PATH` for cron runs (Plesk domain list for the TLS check and the mail queue size were missing under cron)
 - **2026-10-26**: first public version
 
