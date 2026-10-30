@@ -69,6 +69,10 @@ WARN_BACKUP_HOURS=26          # latest Plesk backup older than x hours
 # Daily SPF/DKIM/DMARC check of all domains with mail service (needs dig)
 MAILAUTH_CHECK=1              # 0 = off
 MAILAUTH_IGNORE_DOMAINS=""    # space-separated domains to skip
+# DNS resolver for these checks. A public resolver shows what the world sees; the local
+# one (systemd-resolved, Plesk BIND) may answer from local data, e.g. for the server's
+# own hostname or for zones that exist in Plesk but are hosted elsewhere. "" = system resolver
+MAILAUTH_RESOLVER="1.1.1.1"
 MAILAUTH_SHOW_ALL=0           # 1 = list every domain, 0 = only domains with findings
 DKIM_KEY_DIR=/etc/domainkeys  # Plesk DKIM private keys: <dir>/<domain>/<selector>
 DKIM_SELECTOR=default         # Plesk signs with selector "default"
@@ -606,7 +610,7 @@ fi
 DAILY="$STATE_DIR/daily.txt"; DALERTS="$STATE_DIR/daily_alerts.txt"
 
 # ---------------------------------------------------------------- SPF / DKIM / DMARC helpers
-DIGQ() { dig +short +time=3 +tries=2 "$@" 2>/dev/null; }
+DIGQ() { dig +short +time=3 +tries=2 ${MAILAUTH_RESOLVER:+"@$MAILAUTH_RESOLVER"} "$@" 2>/dev/null; }
 txt_records() { DIGQ TXT "$1" | sed 's/" "//g; s/"//g'; }          # one TXT record per line
 ip2int() { local IFS=. a b c d; read -r a b c d <<<"$1"; echo $(( (a << 24) + (b << 16) + (c << 8) + d )); }
 in_cidr() {   # in_cidr IP NET[/BITS]
@@ -677,19 +681,25 @@ mailauth_check() {
     probs=""
     [[ $spf != pass ]] && probs+=" SPF:${spf}"
     [[ $dkim == MISSING || $dkim == MISMATCH ]] && probs+=" DKIM:${dkim,,}"
+    # DMARC passes if SPF *or* DKIM passes – only both failing breaks delivery
+    local broken=0
+    [[ $spf != pass && $dkim != ok ]] && broken=1
     line=$(printf '  %-28s SPF %-4s | DKIM %-8s | DMARC %-12s | MX %s | DNS %s' "$d" \
       "$spf" "$dkim" "${dmarc:-missing}" "$( ((mxhere)) && echo here || echo "${mxinfo:-none}")" "${ns:-?}")
     if [[ -n $probs ]]; then
       bad=$((bad + 1)); echo "$line"
       # alert only if mail for the domain is hosted here (users send through this server)
-      if (( mxhere )); then
-        dalert "Mail auth: $d –${probs} (DNS at ${ns:-?}) – mails from this domain may be rejected or land in spam"
+      # and neither SPF nor DKIM passes; a single failing one is listed as a recommendation
+      if (( mxhere && broken )); then
+        dalert "Mail auth: $d – neither SPF nor DKIM passes (${probs# }, DNS at ${ns:-?}) – mails from this domain are likely rejected or marked as spam"
       fi
     else
       ok=$((ok + 1)); (( MAILAUTH_SHOW_ALL )) && echo "$line"
     fi
   done
-  echo "  $ok domain(s) OK, $bad with findings (alerts only for domains whose MX points to this server)"
+  echo "  $ok domain(s) OK, $bad with findings. Alert only if SPF and DKIM both fail and the MX points here;"
+  echo "  a single missing/outdated record is a recommendation (DMARC passes if SPF or DKIM passes)."
+  echo "  DNS queried via ${MAILAUTH_RESOLVER:-system resolver}"
 }
 run_daily() {
   : >"$DALERTS"
