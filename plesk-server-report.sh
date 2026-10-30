@@ -721,6 +721,12 @@ server_dns_check() {
   PUBIP6=""
   if [[ $CHECK_IPV6 != 0 ]]; then
     PUBIP6=$(ip -6 route get 2001:4860:4860::8888 2>/dev/null | awk '{for (i=1;i<NF;i++) if ($i=="src") print $(i+1)}')
+    # only a real public address counts: not link-local (fe80::/10), ULA (fc00::/7) or loopback,
+    # and it must be configured with global scope on an interface
+    if [[ -n $PUBIP6 ]]; then
+      if [[ ${PUBIP6,,} =~ ^(fe[89ab]|f[cd]|::1$|::$) ]] ||
+         ! ip -6 -o addr show scope global 2>/dev/null | grep -qiF -- " ${PUBIP6}/"; then PUBIP6=""; fi
+    fi
     v6proto=$(postconf -h inet_protocols 2>/dev/null)
     if [[ $CHECK_IPV6 == auto && ( -z $PUBIP6 || ! $v6proto =~ all|ipv6 ) ]]; then PUBIP6=""; fi
   fi
@@ -809,7 +815,7 @@ domain_dns_check() {
   return 0
 }
 mailauth_check() {
-  local d doms ok=0 bad=0 spf dkim dmarc mxinfo mxhere ns line key dnskey m nmb probs
+  local d doms ok=0 bad=0 spf spf_ok dkim dmarc mxinfo mxhere ns line key dnskey m nmb probs
   doms=$( { ls "$MAILNAMES_DIR" 2>/dev/null; ls "$DKIM_KEY_DIR" 2>/dev/null; } | sort -u)
   for d in $doms; do
     [[ $d == *.* && " $MAILAUTH_IGNORE_DOMAINS " != *" $d "* ]] || continue
@@ -821,9 +827,13 @@ mailauth_check() {
     done
     (( nmb == 0 && mxhere == 0 )) && [[ -z $mxinfo ]] && continue     # no MX, no mailboxes → no mail
     # SPF
-    spf_eval "$d" "$PUBIP"; spf=$SPF_RES
+    spf_eval "$d" "$PUBIP"; spf=$SPF_RES; spf_ok=0
+    [[ $spf == pass ]] && spf_ok=1
     (( SPF_PLUSALL )) && spf="+all"
-    if [[ -n ${PUBIP6:-} ]]; then spf_eval "$d" "$PUBIP6"; [[ $SPF_RES != pass ]] && spf+="/v6:${SPF_RES%%:*}"; fi
+    if [[ -n ${PUBIP6:-} ]]; then   # server sends via IPv6 too: SPF must cover both addresses
+      spf_eval "$d" "$PUBIP6"
+      if [[ $SPF_RES != pass ]]; then spf+="/v6:${SPF_RES%%:*}"; spf_ok=0; fi
+    fi
     # DKIM: compare the public key in DNS with the private key on this server
     dkim="off"
     if [[ -r $DKIM_KEY_DIR/$d/$DKIM_SELECTOR ]]; then
@@ -836,7 +846,7 @@ mailauth_check() {
     dmarc=$(txt_records "_dmarc.$d" | grep -i '^v=DMARC1' | head -1 | grep -oiE 'p=[a-z]+' | head -1)
     ns=$(DIGQ NS "$d" | head -1); ns=${ns%.}
     probs=""
-    [[ $spf != pass ]] && probs+=" SPF:${spf}"
+    (( spf_ok )) || [[ $spf == "+all" ]] || probs+=" SPF:${spf}"
     if [[ $spf == "+all" ]] && (( mxhere )); then
       dalert "Mail auth: $d – SPF ends in +all: anyone may send mail as this domain (DNS at ${ns:-?})"
     fi
@@ -846,7 +856,7 @@ mailauth_check() {
     [[ $dkim == MISSING || $dkim == MISMATCH ]] && probs+=" DKIM:${dkim,,}"
     # DMARC passes if SPF *or* DKIM passes – only both failing breaks delivery
     local broken=0
-    [[ $spf != pass && $spf != "+all" && $dkim != ok ]] && broken=1
+    (( ! spf_ok )) && [[ $spf != "+all" && $dkim != ok ]] && broken=1
     line=$(printf '  %-28s SPF %-9s | DKIM %-8s | DMARC %-12s | MX %s | DNS %s' "$d" \
       "$spf" "$dkim" "${dmarc:-missing}" "$( ((mxhere)) && echo here || echo "${mxinfo:-none}")" "${ns:-?}")
     if [[ -n $probs ]]; then

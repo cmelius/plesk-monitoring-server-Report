@@ -468,6 +468,7 @@ Watch the repository (*Watch → Custom → Releases* or *All activity*) to get 
 
 ### Changelog
 
+- **2026-10-30**: fix: link-local IPv6 (`fe80::`) was taken as the server's public IPv6, so every domain got `v6:fail`. Now only a global, non-ULA address counts, and the IPv4 and IPv6 SPF results are evaluated separately
 - **2026-10-30**: server DNS (PTR, forward-confirmed, HELO name, optional IPv6), mail server certificates on all mail ports for the client host name, per-domain DNS (still pointing here, CAA vs. Let's Encrypt, broken DNSSEC/SERVFAIL, Spamhaus DBL/SURBL), SPF hard errors (multiple records, >10 lookups, `+all`), SPF for IPv6
 - **2026-10-30**: SPF/DKIM check queries a public resolver (systemd-resolved returned empty answers for the server's own hostname); alert only when SPF *and* DKIM fail (DMARC logic), single failures listed as recommendations
 - **2026-10-30**: daily SPF/DKIM/DMARC check for all mail domains (DKIM key in DNS compared with the Plesk key, SPF evaluated against this server's IP, MX and DNS hoster shown), paths configurable
