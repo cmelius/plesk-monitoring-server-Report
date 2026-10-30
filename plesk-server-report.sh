@@ -10,6 +10,9 @@
 # pending updates, expiring certificates and Plesk backup status.
 # Mail sent through Roundcube webmail is analysed separately (its SMTP
 # connections come from localhost and are invisible in the mail log).
+# Web logs are also scanned for attack patterns, probes for sensitive files, traffic
+# peaks and ModSecurity hits; once a day the document roots are searched for exposed
+# files (.env, .git, dumps, backups) and recently changed PHP files for webshell code.
 # Successful logins are annotated with country and network operator (local
 # GeoIP database, optional alerts for logins from unexpected countries).
 #
@@ -63,6 +66,8 @@ WARN_LOGIN_POSTS=300          # POSTs to wp-login.php/xmlrpc.php per domain
 WARN_LOGIN_DETAIL=20          # show login-attack details for domains with at least x POSTs
 WARN_LOGIN_BRUTE_FAILS=5      # successful wp-login after at least x failures from the same IP
 WARN_PHP_FATAL=20             # PHP fatal errors per domain
+WARN_REQ_PER_MIN=600          # peak requests per minute for one domain (load spike / L7 flood)
+WARN_DISTRIBUTED_IPS=100      # one URL requested by at least this many different IPs (botnet pattern)
 WARN_CERT_DAYS=14             # certificate expires in less than x days
 WARN_BACKUP_HOURS=26          # latest Plesk backup older than x hours
 
@@ -86,6 +91,13 @@ MAIL_TLS_PORTS="25 465 587 993 995"   # ports whose certificate is checked (25/5
 # Daily per-domain DNS checks (all Plesk domains)
 DOMAIN_DNS_CHECK=1            # A/AAAA still pointing here, CAA vs. Let's Encrypt, broken DNSSEC, domain blocklists
 DOMAIN_BLOCKLISTS="dbl.spamhaus.org multi.surbl.org"   # queried via the local resolver (public ones are refused)
+# Web attack statistics (hourly) and document-root scans (daily)
+ATTACK_STATS=1                # SQLi/traversal/RCE/XSS patterns, sensitive-file probes, peaks, ModSecurity
+EXPOSED_FILES_CHECK=1         # daily: .env, .git, SQL dumps, backup archives, config copies in document roots
+EXPOSED_FILES_IGNORE=""       # regex on the full path of findings to ignore
+WEBSHELL_CHECK=1              # daily: recently changed PHP files containing typical backdoor code
+WEBSHELL_IGNORE=""            # regex on the full path of findings to ignore
+WEBSHELL_FIRST_DAYS=7         # first run: scan PHP files changed within this many days
 
 DNSBL_LISTS="zen.spamhaus.org bl.spamcop.net b.barracudacentral.org psbl.surriel.com"
 WEB_IGNORE_DOMAINS=""         # space-separated domains without web alerts (still listed)
@@ -183,6 +195,21 @@ alert() { ALERTS+=("$*"); }
 section() { printf '\n== %s ==\n' "$1" >>"$BODY"; }
 out() { printf '%s\n' "$*" >>"$BODY"; }
 ignored_domain() { [[ " $WEB_IGNORE_DOMAINS " == *" $1 "* ]]; }
+
+# Document roots of all domains: "domain<TAB>path" (Plesk DB, fallback /var/www/vhosts/<domain>/httpdocs)
+docroots() {
+  if [[ -z ${DOCROOTS_CACHE:-} ]]; then
+    DOCROOTS_CACHE=$(plesk db -Ne "SELECT d.name, h.www_root FROM domains d JOIN hosting h ON h.dom_id = d.id" 2>/dev/null)
+    if [[ -z $DOCROOTS_CACHE ]]; then
+      local d
+      for d in "$(dirname "$VHOST_LOGS")"/*/httpdocs; do
+        [[ -d $d ]] && DOCROOTS_CACHE+="$(basename "$(dirname "$d")")"$'\t'"$d"$'\n'
+      done
+    fi
+  fi
+  printf '%s\n' "$DOCROOTS_CACHE" | grep -v '^$'
+}
+docroot_of() { docroots | awk -F'\t' -v d="$1" '$1 == d {print $2; exit}'; }
 
 # Print only the lines appended to a log file since the previous run.
 # Handles logrotate (the remainder of the rotated file .1 is read as well).
@@ -480,7 +507,7 @@ fi
 
 # =============================================================== WEB
 section "WEB (since last run)"
-: >"$TMP"; : >"$TMP.php"
+: >"$TMP"; : >"$TMP.php"; : >"$TMP.att"; : >"$TMP.modsec"
 for dir in "$VHOST_LOGS"/*/logs; do
   [[ -d $dir ]] || continue
   dom=$(basename "$(dirname "$dir")")
@@ -496,7 +523,27 @@ for dir in "$VHOST_LOGS"/*/logs; do
       if ($7 !~ /action=/) { if ($9 == 302) ws[$1]++; else if ($9 == 200) wf[$1]++ }
     }
     $6 == "\"POST" && $7 ~ /xmlrpc\.php/ { lp++; xr++; lip[$1]++; if ($9 ~ /^40[0-9]$/) xb++ }
-    END { if (n) { top=""; m=0; for (i in ip) if (ip[i]>m) { m=ip[i]; top=i }
+    # ---- attack patterns, sensitive-file probes, traffic peaks, distributed requests
+    as {
+      u=tolower($7); ok=($9 == 200)
+      pm[substr($4, 2, 17)]++                                   # requests per minute
+      path=$7; sub(/\?.*/, "", path)
+      if (path !~ /\.(css|js|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|map)$/ && !((path SUBSEP $1) in pseen)) { pseen[path SUBSEP $1]=1; pn[path]++ }
+      if (u ~ /union(\+|%20| |\/\*\*\/)+(all(\+|%20| )+)?select|information_schema|(sleep|benchmark)(\(|%28)|%27(\+|%20)*(or|and)(\+|%20)|select(\+|%20)+.*(\+|%20)from(\+|%20)/) { sq++; if (ok) sq2++ }
+      else if (u ~ /\.\.\/|\.\.%2f|%2e%2e|\/etc\/passwd|php:\/\/|file:\/\/|\/proc\/self/) { tr++; if (ok) tr2++ }
+      else if (u ~ /\$\{jndi|\/bin\/(ba)?sh|(cmd|exec|command)=|system(\(|%28)|shell_exec|passthru|eval(\(|%28)|wget(\+|%20)|curl(\+|%20)|;id;|%3bid%3b/) { rc++; if (ok) rc2++ }
+      else if (u ~ /<script|%3cscript|javascript:|onerror(=|%3d)|onload(=|%3d)|alert(\(|%28)/) { xs++; if (ok) xs2++ }
+      lp_=tolower(path)
+      if (lp_ ~ /\/\.env(\.|$)|\/\.git\/|\/\.svn\/|\/\.hg\/|\.sql(\.gz|\.zip|\.bz2)?$|\/(backup|backups|dump|db|database|site|www|httpdocs|wordpress)[^\/]*\.(zip|tar|tgz|tar\.gz|gz|7z|rar)$|wp-config\.php[._~-]|\.(bak|old|orig|save|swp)$|\/\.htpasswd$|\/\.aws\/|\/\.ssh\/|id_rsa|\/\.ds_store$|\/phpinfo\.php$|\/info\.php$|\/adminer[^\/]*\.php$|\/\.vscode\/|\/\.idea\//) {
+        sf++; if (ok && $10 + 0 > 0) { sf2++; if (!(path in sfp) && sfn < 5) { sfp[path]=1; sfn++; sfl=sfl " " path } } }
+    }
+    END { if (as && n) {
+            pk=0; pkm="-"; for (m in pm) if (pm[m] > pk) { pk=pm[m]; pkm=m }
+            dp="-"; dn=0; for (x in pn) if (pn[x] > dn) { dn=pn[x]; dp=x }
+            if (sfl == "") sfl="-"
+            printf "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\t%d\t%s\t%s\t%d\n", d, sq, sq2, tr, tr2, rc, rc2, xs, xs2, sf, sf2, sfl, pk, pkm, dp, dn >> attf
+          }
+          if (n) { top=""; m=0; for (i in ip) if (ip[i]>m) { m=ip[i]; top=i }
                    nl=0; lt="-"; lm=0; for (i in lip) { nl++; if (lip[i]>lm) { lm=lip[i]; lt=i } }
                    succ=""; nsucc=0; brute=""
                    for (i in ws) { nsucc+=ws[i]; succ=succ " " i "=" (wf[i]+0)
@@ -504,10 +551,19 @@ for dir in "$VHOST_LOGS"/*/logs; do
                    if (succ == "") succ="-"; if (brute == "") brute="-"
                    printf "%d\t%d\t%d\t%s\t%s (%d)\t%d\t%d\t%d\t%d\t%d\t%s (%d)\t%s\t%s\n",
                           n, e5+0, lp+0, d, top, m, wl+0, nsucc, xr+0, xb+0, nl, lt, lm, succ, brute } }' \
-    bf="$WARN_LOGIN_BRUTE_FAILS" >>"$TMP"
-  new_lines "$dir/error_log" | awk -v d="$dom" '
+    bf="$WARN_LOGIN_BRUTE_FAILS" as="$ATTACK_STATS" attf="$TMP.att" >>"$TMP"
+  new_lines "$dir/error_log" | awk -v d="$dom" -v msf="$TMP.modsec" '
     /PHP Fatal error/ { n++; if (ex == "") { ex=$0; sub(/.*PHP Fatal error: */, "", ex); ex=substr(ex, 1, 160) } }
-    END { if (n) printf "%d\t%s\t%s\n", n, d, ex }' >>"$TMP.php"
+    /ModSecurity: / {
+      if (/Access denied/) mb++; else mw++
+      id="?"; if (match($0, /\[id "[0-9]+"\]/)) id=substr($0, RSTART+5, RLENGTH-7)
+      msg="";  if (match($0, /\[msg "[^"]*"\]/)) msg=substr($0, RSTART+6, RLENGTH-8)
+      r[id]++; rm[id]=substr(msg, 1, 70)
+    }
+    END { if (n) printf "%d\t%s\t%s\n", n, d, ex
+          if (mb + mw) { top=""; for (k=0; k<3; k++) { b=""; c=0; for (i in r) if (r[i] > c) { c=r[i]; b=i }
+                                                     if (b == "") break; top=top (top==""?"":"; ") b " " rm[b] " ×" c; delete r[b] }
+                         printf "%d\t%d\t%s\t%s\n", mb+mw, mb, d, top >> msf } }' >>"$TMP.php"
 done
 out "requests | 5xx | login POSTs | domain | busiest IP"
 sort -t$'\t' -k1,1nr "$TMP" | head -10 | awk -F'\t' '{printf "  %7d %5d %6d  %s  %s\n", $1, $2, $3, $4, $5}' >>"$BODY"
@@ -546,6 +602,43 @@ while IFS=$'\t' read -r n dom _; do
   ignored_domain "$dom" && continue
   (( n > WARN_PHP_FATAL )) && alert "Web: $dom logged $n PHP fatal errors"
 done <"$TMP.php"
+
+if (( ATTACK_STATS )); then
+  out ""; out "Attack patterns & sensitive-file probes (count, of which answered 200):"
+  while IFS=$'\t' read -r dom sq sq2 tr tr2 rc rc2 xs xs2 sf sf2 sfl pk pkm dp dn; do
+    (( sq + tr + rc + xs + sf > 0 )) || continue
+    printf '  %-26s SQLi %d/%d | traversal %d/%d | code exec %d/%d | XSS %d/%d | sensitive files %d/%d\n' \
+      "$dom" "$sq" "$sq2" "$tr" "$tr2" "$rc" "$rc2" "$xs" "$xs2" "$sf" "$sf2" >>"$BODY"
+    if [[ $sfl != - ]]; then
+      root=$(docroot_of "$dom")
+      for f in $sfl; do
+        if [[ -n $root && -e $root$f ]]; then
+          printf '      served with 200 AND present on disk: %s\n' "$f" >>"$BODY"
+          ignored_domain "$dom" || alert "Web: $dom served the sensitive file $f (HTTP 200, file exists) – remove it or block access; assume it was downloaded"
+        else
+          printf '      200 without such file (catch-all route?): %s\n' "$f" >>"$BODY"
+        fi
+      done
+    fi
+  done < <(sort -t$'\t' -k10,10nr "$TMP.att" | awk -F'\t' '($2+$4+$6+$8+$10) > 0' | head -12)
+  out ""; out "Traffic peaks & distributed requests (busiest minute; URL requested by most different IPs):"
+  while IFS=$'\t' read -r dom sq sq2 tr tr2 rc rc2 xs xs2 sf sf2 sfl pk pkm dp dn; do
+    (( pk >= WARN_REQ_PER_MIN / 4 || dn >= WARN_DISTRIBUTED_IPS / 2 )) || continue
+    printf '  %-26s peak %d req/min at %s | %s from %d IPs\n' "$dom" "$pk" "${pkm#*:}" "$dp" "$dn" >>"$BODY"
+    ignored_domain "$dom" && continue
+    (( pk > WARN_REQ_PER_MIN )) && alert "Web: $dom peaked at $pk requests/minute (${pkm#*:} UTC) – load spike or application-layer flood?"
+    (( dn >= WARN_DISTRIBUTED_IPS )) && alert "Web: $dom – $dp requested by $dn different IPs within one run – distributed (botnet) traffic?"
+  done < <(sort -t$'\t' -k13,13nr "$TMP.att" | head -10)
+  out ""; out "ModSecurity (hits, of which blocked; top rules):"
+  if [[ -s $TMP.modsec ]]; then
+    sort -t$'\t' -k1,1nr "$TMP.modsec" | head -8 | while IFS=$'\t' read -r h b dom top; do
+      printf '  %6d %6d  %s – %s\n' "$h" "$b" "$dom" "$top" >>"$BODY"
+    done
+  else
+    out "  none (or ModSecurity not active)"
+  fi
+fi
+rm -f "$TMP.att" "$TMP.modsec"
 
 # =============================================================== NEW PHP FILES IN UPLOAD FOLDERS
 section "WEBROOTS: PHP files in upload folders"
@@ -695,6 +788,58 @@ dig_status() {   # dig_status NAME TYPE → NOERROR | NXDOMAIN | SERVFAIL | … 
   dig +time=3 +tries=2 ${MAILAUTH_RESOLVER:+"@$MAILAUTH_RESOLVER"} "$2" "$1" 2>/dev/null |
     sed -n 's/.*status: \([A-Z]*\).*/\1/p' | head -1
 }
+# ---------------------------------------------------------------- document-root scans
+exposed_files_check() {
+  local dom root f rel code out="" n=0 found=0
+  echo ""; echo "Exposed files in document roots (.env, .git, dumps, backups, config copies, info/admin tools):"
+  while IFS=$'\t' read -r dom root; do
+    [[ -d $root ]] || continue
+    n=$((n + 1))
+    while IFS= read -r f; do
+      [[ -n $EXPOSED_FILES_IGNORE && $f =~ $EXPOSED_FILES_IGNORE ]] && continue
+      rel=${f#"$root"}; [[ -d $f ]] && rel+="/"
+      # is it really reachable from the internet?
+      code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 6 --resolve "$dom:443:${PUBIP:-127.0.0.1}" "https://$dom$rel$([[ -d $f ]] && echo HEAD)" 2>/dev/null)
+      found=$((found + 1))
+      if [[ $code == 200 ]]; then
+        out+="  $dom$rel – PUBLICLY REACHABLE (HTTP 200)"$'\n'
+        dalert "Web: $dom exposes $rel publicly (HTTP 200) – remove it from the document root or block access"
+      else
+        out+="  $dom$rel – present, not served (HTTP ${code:-?})"$'\n'
+      fi
+    done < <(find "$root" -maxdepth 6 \( -path '*/node_modules' -o -path '*/wp-content/cache' -o -path '*/vendor/*/tests' \) -prune -o \
+               \( \( -type d -name .git \) -o \( -type d -name .svn \) \
+                  -o \( -type f \( -name '.env' -o -name '.env.*' -o -iname '*.sql' -o -iname '*.sql.gz' -o -iname '*.sql.zip' \
+                       -o -name 'wp-config.php.*' -o -name 'wp-config.php~' -o -name '.htpasswd' -o -name 'id_rsa' -o -name 'phpinfo.php' \
+                       -o -iname 'adminer*.php' \
+                       -o -iregex '.*/\(backup\|backups\|dump\|db\|database\|site\|www\|httpdocs\|wordpress\)[^/]*\.\(zip\|tar\|tgz\|tar\.gz\|gz\|7z\|rar\)' \) \) \) \
+               -print -prune 2>/dev/null | head -50)
+  done < <(docroots)
+  [[ -n $out ]] && printf '%s' "$out"
+  echo "  $n document root(s) scanned, $found finding(s)"
+}
+webshell_check() {
+  local stamp="$STATE_DIR/webshell_scan" new="$STATE_DIR/webshell_scan.new" dom root out="" n=0 hits=0 f
+  local re='eval[[:space:]]*\([[:space:]]*(base64_decode|gzinflate|gzuncompress|str_rot13|gzdecode)[[:space:]]*\(|assert[[:space:]]*\([[:space:]]*\$_(POST|GET|REQUEST|COOKIE)|\$_(POST|GET|REQUEST|COOKIE)[[:space:]]*\[[^]]*\][[:space:]]*\(|preg_replace[[:space:]]*\([[:space:]]*["'"'"'][^"'"'"']*/e["'"'"']|create_function[[:space:]]*\([^)]*\$_(POST|GET|REQUEST)|(system|shell_exec|passthru|exec|popen|proc_open)[[:space:]]*\([[:space:]]*\$_(POST|GET|REQUEST|COOKIE)'
+  touch "$new"
+  echo ""; echo "Suspicious code in recently changed PHP files (typical webshell/backdoor patterns):"
+  while IFS=$'\t' read -r dom root; do
+    [[ -d $root ]] || continue
+    n=$((n + 1))
+    while IFS= read -r f; do
+      [[ -n $WEBSHELL_IGNORE && $f =~ $WEBSHELL_IGNORE ]] && continue
+      hits=$((hits + 1))
+      out+="  $f ($(date -r "$f" '+%Y-%m-%d %H:%M'))"$'\n'
+      dalert "Web: suspicious code in recently changed file $f – check it (webshell/backdoor?)"
+    done < <(if [[ -f $stamp ]]; then find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) -newer "$stamp" 2>/dev/null
+             else find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) -mtime -"$WEBSHELL_FIRST_DAYS" 2>/dev/null; fi |
+             xargs -r -d '\n' grep -lE "$re" 2>/dev/null | head -30)
+  done < <(docroots)
+  mv "$new" "$stamp"
+  [[ -n $out ]] && printf '%s' "$out"
+  echo "  $n document root(s) scanned, $hits suspicious file(s)"
+}
+
 # ---------------------------------------------------------------- server DNS, mail TLS, domain DNS
 server_dns_check() {
   local ptr fwd helo hname v6proto
@@ -929,6 +1074,10 @@ run_daily() {
 
   # --- per-domain DNS: A/AAAA here?, CAA, DNSSEC, domain blocklists
   (( DOMAIN_DNS_CHECK )) && command -v dig >/dev/null && domain_dns_check $doms
+
+  # --- document roots: exposed files and webshell code
+  (( EXPOSED_FILES_CHECK )) && exposed_files_check
+  (( WEBSHELL_CHECK )) && webshell_check
 
   # --- mail authentication: SPF / DKIM / DMARC
   if (( MAILAUTH_CHECK )); then

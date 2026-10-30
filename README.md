@@ -22,7 +22,7 @@ The script only **reads** logs and system state. It never changes the server con
 | **Intrusion** | successful SSH and Plesk panel logins, **new PHP files in `wp-content/uploads`**, **successful WordPress logins during a brute-force attack** | a login comes from a never-seen IP, a PHP file appears in an upload folder, or an IP logs in to WordPress after repeated failures |
 | **Geolocation** (optional) | country and network operator of every IP with a successful login (mailboxes, SSH, Plesk panel, WordPress) and of the top failed-login IPs, datacenter networks marked, from a **local** database, so no IP leaves the server | a mailbox sends mail, or someone logs in, from a country outside `ALLOWED_COUNTRIES` |
 | **System** | load, CPU per system user (= subscription), RAM, disks, failed systemd units, OOM killer | thresholds are exceeded |
-| **Web** | requests, 5xx errors, WordPress login POSTs and busiest IP per domain, login-attack details (distinct IPs, wp-login vs. xmlrpc, successful logins, whether xmlrpc.php is blocked), PHP fatal errors with the first message | a domain throws many 5xx/fatal errors or gets hammered |
+| **Web** | requests, 5xx errors, WordPress login POSTs and busiest IP per domain, login-attack details (distinct IPs, wp-login vs. xmlrpc, successful logins, whether xmlrpc.php is blocked), PHP fatal errors with the first message, **attack patterns** per domain (SQL injection, path traversal, code execution, XSS) and how many were answered with 200, **probes for sensitive files** (`.env`, `.git`, dumps, backups, config copies), **traffic peaks** (busiest minute) and URLs requested by unusually many IPs, **ModSecurity** hits and top rules | a domain throws many 5xx/fatal errors, a sensitive file was served with 200 *and* exists on disk, a traffic peak exceeds `WARN_REQ_PER_MIN`, or one URL is hit by a botnet-sized number of IPs |
 
 **Once a day (first run after midnight):** pending (security) updates and reboot-required, TLS certificates of all Plesk domains and the panel (expiry < 14 days), age and status of the latest **Plesk backup**, Acronis agent (if installed), and **SPF, DKIM and DMARC of every domain with mail service**: does SPF allow this server (including `include:`, `a`, `mx`), does the DKIM key in DNS match the key Plesk signs with, is there a DMARC policy, and where are MX and DNS hosted. That last part is especially useful for domains whose DNS you don't manage yourself. SPF errors that make receivers reject mail outright are flagged too: several SPF records, more than 10 DNS lookups, or `+all`.
 
@@ -135,6 +135,17 @@ WordPress login attacks (domains with at least 20 login POSTs):
 PHP fatal errors (count, domain, first message):
      48  blog.example – Uncaught Error: Call to undefined function create_function() in /var/www/vhosts/blog.example/httpdocs/wp-content/plugins/old-slider/slider.php:12
 
+Attack patterns & sensitive-file probes (count, of which answered 200):
+  shop.example               SQLi 14/0 | traversal 6/0 | code exec 3/0 | XSS 2/0 | sensitive files 41/1
+      served with 200 AND present on disk: /.env
+  blog.example               SQLi 0/0 | traversal 2/0 | code exec 0/0 | XSS 0/0 | sensitive files 17/0
+
+Traffic peaks & distributed requests (busiest minute; URL requested by most different IPs):
+  agency.example             peak 212 req/min at 04:07 | /wp-login.php from 54 IPs
+
+ModSecurity (hits, of which blocked; top rules):
+      31     29  shop.example – 942100 SQL Injection Attack Detected via libinjection ×18; 930120 OS File Access Attempt ×9
+
 == WEBROOTS: PHP files in upload folders ==
 New since last run: 2
   /var/www/vhosts/shop.example/httpdocs/wp-content/uploads/2026/10/cache.php
@@ -170,6 +181,14 @@ Mail server certificates for host.example.com:
   port 587: name ok, valid 61 more days
   port 993: name ok, valid 61 more days
   port 995: name ok, valid 61 more days
+
+Exposed files in document roots (.env, .git, dumps, backups, config copies, info/admin tools):
+  shop.example/.env – PUBLICLY REACHABLE (HTTP 200)
+  shop.example/.git/ – present, not served (HTTP 403)
+  42 document root(s) scanned, 2 finding(s)
+
+Suspicious code in recently changed PHP files (typical webshell/backdoor patterns):
+  42 document root(s) scanned, 0 suspicious file(s)
 
 Domain DNS (points here? CAA, DNSSEC, domain blocklists):
   moved.example: website points elsewhere (192.0.2.77, NL, Example Hosting B.V. [datacenter]) – moved? CDN?
@@ -386,6 +405,12 @@ All thresholds apply **per run**. With the hourly cron job that means per hour. 
 | `MAIL_TLS_PORTS` | `25 465 587 993 995` | ports whose certificate is checked (25/587 via STARTTLS, 143/110 also possible) |
 | `DOMAIN_DNS_CHECK` | 1 | per-domain A/AAAA, CAA, DNSSEC and domain-blocklist check, 0 = off |
 | `DOMAIN_BLOCKLISTS` | `dbl.spamhaus.org multi.surbl.org` | domain blocklists, queried via the local resolver |
+| `ATTACK_STATS` | 1 | hourly attack-pattern, sensitive-file, traffic-peak and ModSecurity statistics |
+| `WARN_REQ_PER_MIN` | 600 | alert when a domain's busiest minute exceeds this many requests |
+| `WARN_DISTRIBUTED_IPS` | 100 | alert when one URL (static files excluded) is requested by this many different IPs in one run |
+| `EXPOSED_FILES_CHECK` / `EXPOSED_FILES_IGNORE` | 1 / empty | daily scan of the document roots for exposed files, regex of paths to ignore |
+| `WEBSHELL_CHECK` / `WEBSHELL_IGNORE` | 1 / empty | daily scan of recently changed PHP files for backdoor code, regex of paths to ignore |
+| `WEBSHELL_FIRST_DAYS` | 7 | the first scan covers PHP files changed within this many days; later scans cover files changed since the previous scan |
 | `WARN_CERT_DAYS` | 14 | certificate expiry warning |
 | `WARN_BACKUP_HOURS` | 26 | maximum age of the last Plesk backup |
 
@@ -411,6 +436,9 @@ All thresholds apply **per run**. With the hourly cron job that means per hour. 
 - **Backup check** covers Plesk's own backup manager (status from `backup.log` in the PMM log directory). Provider-side snapshots are not visible to the script, except whether an Acronis agent is running.
 - **WordPress login success** is derived from the HTTP status: a successful `wp-login.php` POST returns `302`, a failed one `200`. Security plugins that change the login flow (custom login URLs, 2FA, CAPTCHAs) may change these codes. Logins via `xmlrpc.php` always return `200`, so their success cannot be told from the access log. Block `xmlrpc.php` if you don't need it (Plesk: *WordPress Toolkit → Security*).
 - **Country alerts and mail apps:** some apps connect to your mail server **from their provider's cloud**, not from the user's device. The Outlook app (iOS/Android) for IMAP accounts uses Microsoft servers, Gmail's "send mail as" uses Google servers, both often outside your country. Those logins show up as `[datacenter]` in another country. If your customers use such apps, add the operator to `GEO_TRUSTED_ORGS`, accepting that attackers on that cloud are then not flagged by country (the IP count and login ≠ from checks still apply). Geolocation is an additional signal, not proof: attackers can use VPNs in your country.
+- **Attack patterns** are counted from the request URL only (method, path, query string), not from POST bodies. A count answered with `200` doesn't mean the attack worked: many applications answer every URL with 200. Treat it as a pointer. The ModSecurity section (Plesk's web application firewall, read from each domain's `error_log`) shows what was actually blocked.
+- **Sensitive files:** a probe answered with 200 raises an alert only if the requested file **exists in the document root** (document roots are read from the Plesk database). Otherwise it is listed as "200 without such file", which is typical for catch-all routes. The daily document-root scan finds such files before anyone requests them, and asks the web server whether each one is actually reachable from outside (`HTTP 200`) or blocked.
+- **Webshell scan:** only PHP files changed since the previous scan are checked, so a full plugin update can produce a burst of findings. Legitimate plugins rarely use these constructs (`eval(base64_decode(`, `assert($_POST`, calling functions from request parameters, `preg_replace` with `/e`). Check each finding and exclude known-good files with `WEBSHELL_IGNORE`.
 - **Mail certificate name:** if your customers enter something other than the server's host name in their mail clients (e.g. `mail.example.com`), set `MAIL_TLS_NAME` to that name. A name mismatch shows up in clients as a certificate warning, and many users click it away.
 - **Domain DNS:** "website points elsewhere" is informational: a domain moved to another host, or sits behind a CDN such as Cloudflare. The CAA check only runs for domains whose current certificate comes from Let's Encrypt. Domain blocklists (Spamhaus DBL, SURBL) refuse queries from large public resolvers, just like the IP blocklists, so they are queried through the local resolver.
 - **Public resolver for the SPF/DKIM check:** on Plesk servers the system resolver often gives wrong answers for this check. systemd-resolved (`127.0.0.53`) returns no MX/TXT records for the server's own hostname, and a local Plesk BIND may answer from zones that exist in Plesk while the domain's real DNS is hosted elsewhere. The check therefore asks `1.1.1.1` by default (`MAILAUTH_RESOLVER`). If outbound DNS is blocked, set another resolver or `""`.
@@ -468,6 +496,7 @@ Watch the repository (*Watch → Custom → Releases* or *All activity*) to get 
 
 ### Changelog
 
+- **2026-10-30**: web attack statistics (SQLi, traversal, code execution, XSS, probes for sensitive files with "served and present on disk" detection), traffic peaks and distributed requests, ModSecurity summary per domain, daily scan of document roots for exposed files (with reachability test) and of recently changed PHP files for webshell code
 - **2026-10-30**: fix: link-local IPv6 (`fe80::`) was taken as the server's public IPv6, so every domain got `v6:fail`. Now only a global, non-ULA address counts, and the IPv4 and IPv6 SPF results are evaluated separately
 - **2026-10-30**: server DNS (PTR, forward-confirmed, HELO name, optional IPv6), mail server certificates on all mail ports for the client host name, per-domain DNS (still pointing here, CAA vs. Let's Encrypt, broken DNSSEC/SERVFAIL, Spamhaus DBL/SURBL), SPF hard errors (multiple records, >10 lookups, `+all`), SPF for IPv6
 - **2026-10-30**: SPF/DKIM check queries a public resolver (systemd-resolved returned empty answers for the server's own hostname); alert only when SPF *and* DKIM fail (DMARC logic), single failures listed as recommendations
