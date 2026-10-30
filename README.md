@@ -236,6 +236,8 @@ apt install mmdb-bin            # RHEL-based: dnf install libmaxminddb (EPEL)
 /usr/local/sbin/plesk-server-report.sh --no-upload
 ```
 
+Options: `--no-upload` (print instead of upload), `--only CHECK,…` (run single checks, see [First run](#first-run)), `--list` (check names), `--help`.
+
 **Geolocation:** with `mmdblookup` installed, the script downloads the free [DB-IP Lite](https://db-ip.com/db/lite.php) country and ASN databases (a few MB each) on the first run into `/var/lib/plesk-server-report/geoip` and refreshes them once a month. This needs outbound HTTPS to `download.db-ip.com`. Lookups are done locally, so no IP address is sent to any service. Without `mmdblookup` the script works as before and says so at the end of the report. To get **alerts**, set your customers' countries (see [Configuration](#configuration)):
 
 ```bash
@@ -421,6 +423,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour. 
 - **PHP files in `wp-content/uploads`:** the first run lists all existing ones. Some plugins legitimately store PHP files there (Borlabs Cookie and Mailchimp for WP are excluded by default). Add your own to `UPLOADS_PHP_IGNORE`. Anything else deserves a look: this is the classic place for web shells.
 - **Logins:** all IPs with a successful SSH/panel login in the current logs are stored as known (`/var/lib/plesk-server-report/known_login_ips`). Every later login from a new IP raises an alert once. Remove lines from that file to "forget" an IP.
 - **To repeat the daily checks today:** `rm /var/lib/plesk-server-report/daily_date`
+- **To run single checks right now**, e.g. after fixing a DNS record: `plesk-server-report.sh --only mailauth` (several: `--only mailauth,domaindns`; groups: `hourly`, `daily`, `all`; names: `--list`). The result is printed and nothing else happens: no upload, and log offsets, scan stamps and known login IPs stay as they are, so the next hourly run still sees everything. The on/off switches from the configuration (`MAILAUTH_CHECK` etc.) don't apply to checks named explicitly.
 - **For a complete reset:** `rm -rf /var/lib/plesk-server-report`
 
 ---
@@ -496,6 +499,7 @@ Watch the repository (*Watch → Custom → Releases* or *All activity*) to get 
 
 ### Changelog
 
+- **2026-10-30**: script restructured: one function per check (`check_mail`, `check_web`, `check_mailauth`, …) and a short `main()` that defines the order; local variables instead of globals shared between sections. Report output unchanged. New option `--only CHECK,…` runs single checks immediately without changing any state, `--list` shows the names
 - **2026-10-30**: exposed-file scan: clearer wording – files answered with 403 are reported as "blocked by the web server", files that return a server error are listed separately
 - **2026-10-30**: exposed-file scan: blocked findings summarized per domain, SQL files shipped with software (plugin schemas, osTicket/phpBB upgrade scripts) ignored by default; first real run found a public backup archive and leftover installer directories
 - **2026-10-30**: web attack statistics (SQLi, traversal, code execution, XSS, probes for sensitive files with "served and present on disk" detection), traffic peaks and distributed requests, ModSecurity summary per domain, daily scan of document roots for exposed files (with reachability test) and of recently changed PHP files for webshell code
