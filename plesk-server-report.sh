@@ -791,11 +791,11 @@ dig_status() {   # dig_status NAME TYPE → NOERROR | NXDOMAIN | SERVFAIL | … 
 }
 # ---------------------------------------------------------------- document-root scans
 exposed_files_check() {
-  local dom root f rel code out="" n=0 found=0 nblk ex
+  local dom root f rel code out="" n=0 found=0 nblk ex nerr exerr
   echo ""; echo "Exposed files in document roots (.env, .git, dumps, backups, config copies, info/admin tools):"
   while IFS=$'\t' read -r dom root; do
     [[ -d $root ]] || continue
-    n=$((n + 1)); nblk=0; ex=""
+    n=$((n + 1)); nblk=0; ex=""; nerr=0; exerr=""
     while IFS= read -r f; do
       [[ -n $EXPOSED_FILES_IGNORE && $f =~ $EXPOSED_FILES_IGNORE ]] && continue
       rel=${f#"$root"}; [[ -d $f ]] && rel+="/"
@@ -805,8 +805,10 @@ exposed_files_check() {
       if [[ $code == 200 ]]; then
         out+="  $dom$rel – PUBLICLY REACHABLE (HTTP 200)"$'\n'
         dalert "Web: $dom exposes $rel publicly (HTTP 200) – remove it from the document root or block access"
+      elif [[ $code == 403 || $code == 401 ]]; then
+        nblk=$((nblk + 1)); [[ -z $ex ]] && ex="$rel"
       else
-        nblk=$((nblk + 1)); [[ -z $ex ]] && ex="$rel (HTTP ${code:-?})"
+        nerr=$((nerr + 1)); [[ -z $exerr ]] && exerr="$rel (HTTP ${code:-no answer})"
       fi
     done < <(find "$root" -maxdepth 6 \( -path '*/node_modules' -o -path '*/wp-content/cache' -o -path '*/vendor/*/tests' \) -prune -o \
                \( \( -type d -name .git \) -o \( -type d -name .svn \) \
@@ -815,7 +817,8 @@ exposed_files_check() {
                        -o -iname 'adminer*.php' \
                        -o -iregex '.*/\(backup\|backups\|dump\|db\|database\|site\|www\|httpdocs\|wordpress\)[^/]*\.\(zip\|tar\|tgz\|tar\.gz\|gz\|7z\|rar\)' \) \) \) \
                -print -prune 2>/dev/null | head -200)
-    (( nblk )) && out+="  $dom: $nblk file(s) present but not served, e.g. $ex"$'\n'
+    (( nblk )) && out+="  $dom: $nblk file(s) found but blocked by the web server (HTTP 403), e.g. $ex"$'\n'
+    (( nerr )) && out+="  $dom: $nerr file(s) found, not served (server error/no answer), e.g. $exerr"$'\n'
   done < <(docroots)
   [[ -n $out ]] && printf '%s' "$out"
   echo "  $n document root(s) scanned, $found finding(s); only publicly reachable ones raise an alert"

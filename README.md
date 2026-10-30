@@ -184,7 +184,7 @@ Mail server certificates for host.example.com:
 
 Exposed files in document roots (.env, .git, dumps, backups, config copies, info/admin tools):
   shop.example/.env – PUBLICLY REACHABLE (HTTP 200)
-  shop.example: 1 file(s) present but not served, e.g. /.git/ (HTTP 403)
+  shop.example: 1 file(s) found but blocked by the web server (HTTP 403), e.g. /.git/
   42 document root(s) scanned, 2 finding(s); only publicly reachable ones raise an alert
 
 Suspicious code in recently changed PHP files (typical webshell/backdoor patterns):
@@ -496,6 +496,7 @@ Watch the repository (*Watch → Custom → Releases* or *All activity*) to get 
 
 ### Changelog
 
+- **2026-10-30**: exposed-file scan: clearer wording – files answered with 403 are reported as "blocked by the web server", files that return a server error are listed separately
 - **2026-10-30**: exposed-file scan: blocked findings summarized per domain, SQL files shipped with software (plugin schemas, osTicket/phpBB upgrade scripts) ignored by default; first real run found a public backup archive and leftover installer directories
 - **2026-10-30**: web attack statistics (SQLi, traversal, code execution, XSS, probes for sensitive files with "served and present on disk" detection), traffic peaks and distributed requests, ModSecurity summary per domain, daily scan of document roots for exposed files (with reachability test) and of recently changed PHP files for webshell code
 - **2026-10-30**: fix: link-local IPv6 (`fe80::`) was taken as the server's public IPv6, so every domain got `v6:fail`. Now only a global, non-ULA address counts, and the IPv4 and IPv6 SPF results are evaluated separately
