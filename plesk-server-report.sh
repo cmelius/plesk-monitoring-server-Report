@@ -94,7 +94,8 @@ DOMAIN_BLOCKLISTS="dbl.spamhaus.org multi.surbl.org"   # queried via the local r
 # Web attack statistics (hourly) and document-root scans (daily)
 ATTACK_STATS=1                # SQLi/traversal/RCE/XSS patterns, sensitive-file probes, peaks, ModSecurity
 EXPOSED_FILES_CHECK=1         # daily: .env, .git, SQL dumps, backup archives, config copies in document roots
-EXPOSED_FILES_IGNORE=""       # regex on the full path of findings to ignore
+# regex on the full path of findings to ignore; default: SQL schema/upgrade files shipped with software
+EXPOSED_FILES_IGNORE='/wp-content/plugins/[^/]+/(sql|schema|install)/|/include/upgrader/streams/|/install(ation)?/schemas/|/doc/[^/]+\.sql$' 
 WEBSHELL_CHECK=1              # daily: recently changed PHP files containing typical backdoor code
 WEBSHELL_IGNORE=""            # regex on the full path of findings to ignore
 WEBSHELL_FIRST_DAYS=7         # first run: scan PHP files changed within this many days
@@ -790,11 +791,11 @@ dig_status() {   # dig_status NAME TYPE → NOERROR | NXDOMAIN | SERVFAIL | … 
 }
 # ---------------------------------------------------------------- document-root scans
 exposed_files_check() {
-  local dom root f rel code out="" n=0 found=0
+  local dom root f rel code out="" n=0 found=0 nblk ex
   echo ""; echo "Exposed files in document roots (.env, .git, dumps, backups, config copies, info/admin tools):"
   while IFS=$'\t' read -r dom root; do
     [[ -d $root ]] || continue
-    n=$((n + 1))
+    n=$((n + 1)); nblk=0; ex=""
     while IFS= read -r f; do
       [[ -n $EXPOSED_FILES_IGNORE && $f =~ $EXPOSED_FILES_IGNORE ]] && continue
       rel=${f#"$root"}; [[ -d $f ]] && rel+="/"
@@ -805,7 +806,7 @@ exposed_files_check() {
         out+="  $dom$rel – PUBLICLY REACHABLE (HTTP 200)"$'\n'
         dalert "Web: $dom exposes $rel publicly (HTTP 200) – remove it from the document root or block access"
       else
-        out+="  $dom$rel – present, not served (HTTP ${code:-?})"$'\n'
+        nblk=$((nblk + 1)); [[ -z $ex ]] && ex="$rel (HTTP ${code:-?})"
       fi
     done < <(find "$root" -maxdepth 6 \( -path '*/node_modules' -o -path '*/wp-content/cache' -o -path '*/vendor/*/tests' \) -prune -o \
                \( \( -type d -name .git \) -o \( -type d -name .svn \) \
@@ -813,10 +814,11 @@ exposed_files_check() {
                        -o -name 'wp-config.php.*' -o -name 'wp-config.php~' -o -name '.htpasswd' -o -name 'id_rsa' -o -name 'phpinfo.php' \
                        -o -iname 'adminer*.php' \
                        -o -iregex '.*/\(backup\|backups\|dump\|db\|database\|site\|www\|httpdocs\|wordpress\)[^/]*\.\(zip\|tar\|tgz\|tar\.gz\|gz\|7z\|rar\)' \) \) \) \
-               -print -prune 2>/dev/null | head -50)
+               -print -prune 2>/dev/null | head -200)
+    (( nblk )) && out+="  $dom: $nblk file(s) present but not served, e.g. $ex"$'\n'
   done < <(docroots)
   [[ -n $out ]] && printf '%s' "$out"
-  echo "  $n document root(s) scanned, $found finding(s)"
+  echo "  $n document root(s) scanned, $found finding(s); only publicly reachable ones raise an alert"
 }
 webshell_check() {
   local stamp="$STATE_DIR/webshell_scan" new="$STATE_DIR/webshell_scan.new" dom root out="" n=0 hits=0 f

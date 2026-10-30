@@ -184,8 +184,8 @@ Mail server certificates for host.example.com:
 
 Exposed files in document roots (.env, .git, dumps, backups, config copies, info/admin tools):
   shop.example/.env – PUBLICLY REACHABLE (HTTP 200)
-  shop.example/.git/ – present, not served (HTTP 403)
-  42 document root(s) scanned, 2 finding(s)
+  shop.example: 1 file(s) present but not served, e.g. /.git/ (HTTP 403)
+  42 document root(s) scanned, 2 finding(s); only publicly reachable ones raise an alert
 
 Suspicious code in recently changed PHP files (typical webshell/backdoor patterns):
   42 document root(s) scanned, 0 suspicious file(s)
@@ -408,7 +408,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour. 
 | `ATTACK_STATS` | 1 | hourly attack-pattern, sensitive-file, traffic-peak and ModSecurity statistics |
 | `WARN_REQ_PER_MIN` | 600 | alert when a domain's busiest minute exceeds this many requests |
 | `WARN_DISTRIBUTED_IPS` | 100 | alert when one URL (static files excluded) is requested by this many different IPs in one run |
-| `EXPOSED_FILES_CHECK` / `EXPOSED_FILES_IGNORE` | 1 / empty | daily scan of the document roots for exposed files, regex of paths to ignore |
+| `EXPOSED_FILES_CHECK` / `EXPOSED_FILES_IGNORE` | 1 / SQL files shipped with software | daily scan of the document roots for exposed files. The ignore regex skips schema/upgrade `.sql` files bundled with WordPress plugins, osTicket and phpBB by default. Extend it, don't replace it, unless you want those back |
 | `WEBSHELL_CHECK` / `WEBSHELL_IGNORE` | 1 / empty | daily scan of recently changed PHP files for backdoor code, regex of paths to ignore |
 | `WEBSHELL_FIRST_DAYS` | 7 | the first scan covers PHP files changed within this many days; later scans cover files changed since the previous scan |
 | `WARN_CERT_DAYS` | 14 | certificate expiry warning |
@@ -437,7 +437,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour. 
 - **WordPress login success** is derived from the HTTP status: a successful `wp-login.php` POST returns `302`, a failed one `200`. Security plugins that change the login flow (custom login URLs, 2FA, CAPTCHAs) may change these codes. Logins via `xmlrpc.php` always return `200`, so their success cannot be told from the access log. Block `xmlrpc.php` if you don't need it (Plesk: *WordPress Toolkit → Security*).
 - **Country alerts and mail apps:** some apps connect to your mail server **from their provider's cloud**, not from the user's device. The Outlook app (iOS/Android) for IMAP accounts uses Microsoft servers, Gmail's "send mail as" uses Google servers, both often outside your country. Those logins show up as `[datacenter]` in another country. If your customers use such apps, add the operator to `GEO_TRUSTED_ORGS`, accepting that attackers on that cloud are then not flagged by country (the IP count and login ≠ from checks still apply). Geolocation is an additional signal, not proof: attackers can use VPNs in your country.
 - **Attack patterns** are counted from the request URL only (method, path, query string), not from POST bodies. A count answered with `200` doesn't mean the attack worked: many applications answer every URL with 200. Treat it as a pointer. The ModSecurity section (Plesk's web application firewall, read from each domain's `error_log`) shows what was actually blocked.
-- **Sensitive files:** a probe answered with 200 raises an alert only if the requested file **exists in the document root** (document roots are read from the Plesk database). Otherwise it is listed as "200 without such file", which is typical for catch-all routes. The daily document-root scan finds such files before anyone requests them, and asks the web server whether each one is actually reachable from outside (`HTTP 200`) or blocked.
+- **Sensitive files:** a probe answered with 200 raises an alert only if the requested file **exists in the document root** (document roots are read from the Plesk database). Otherwise it is listed as "200 without such file", which is typical for catch-all routes. The daily document-root scan finds such files before anyone requests them, and asks the web server whether each one is actually reachable from outside (`HTTP 200`) or blocked. Reachable files are listed one by one and raise an alert. Blocked ones are summarized per domain: they are no leak, but old backups in particular are worth cleaning up.
 - **Webshell scan:** only PHP files changed since the previous scan are checked, so a full plugin update can produce a burst of findings. Legitimate plugins rarely use these constructs (`eval(base64_decode(`, `assert($_POST`, calling functions from request parameters, `preg_replace` with `/e`). Check each finding and exclude known-good files with `WEBSHELL_IGNORE`.
 - **Mail certificate name:** if your customers enter something other than the server's host name in their mail clients (e.g. `mail.example.com`), set `MAIL_TLS_NAME` to that name. A name mismatch shows up in clients as a certificate warning, and many users click it away.
 - **Domain DNS:** "website points elsewhere" is informational: a domain moved to another host, or sits behind a CDN such as Cloudflare. The CAA check only runs for domains whose current certificate comes from Let's Encrypt. Domain blocklists (Spamhaus DBL, SURBL) refuse queries from large public resolvers, just like the IP blocklists, so they are queried through the local resolver.
@@ -496,6 +496,7 @@ Watch the repository (*Watch → Custom → Releases* or *All activity*) to get 
 
 ### Changelog
 
+- **2026-10-30**: exposed-file scan: blocked findings summarized per domain, SQL files shipped with software (plugin schemas, osTicket/phpBB upgrade scripts) ignored by default; first real run found a public backup archive and leftover installer directories
 - **2026-10-30**: web attack statistics (SQLi, traversal, code execution, XSS, probes for sensitive files with "served and present on disk" detection), traffic peaks and distributed requests, ModSecurity summary per domain, daily scan of document roots for exposed files (with reachability test) and of recently changed PHP files for webshell code
 - **2026-10-30**: fix: link-local IPv6 (`fe80::`) was taken as the server's public IPv6, so every domain got `v6:fail`. Now only a global, non-ULA address counts, and the IPv4 and IPv6 SPF results are evaluated separately
 - **2026-10-30**: server DNS (PTR, forward-confirmed, HELO name, optional IPv6), mail server certificates on all mail ports for the client host name, per-domain DNS (still pointing here, CAA vs. Let's Encrypt, broken DNSSEC/SERVFAIL, Spamhaus DBL/SURBL), SPF hard errors (multiple records, >10 lookups, `+all`), SPF for IPv6
