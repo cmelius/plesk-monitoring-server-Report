@@ -78,6 +78,15 @@ DKIM_KEY_DIR=/etc/domainkeys  # Plesk DKIM private keys: <dir>/<domain>/<selecto
 DKIM_SELECTOR=default         # Plesk signs with selector "default"
 MAILNAMES_DIR=/var/qmail/mailnames   # Plesk mailboxes: <dir>/<domain>/<mailbox>
 
+# Daily server DNS / mail TLS checks
+SERVER_DNS_CHECK=1            # PTR (reverse DNS) of the server IP, HELO name, IPv6
+CHECK_IPV6=auto               # auto = only if the server has a global IPv6 and Postfix uses it; 1 = always; 0 = never
+MAIL_TLS_NAME=""              # host name mail clients connect to (default: server host name)
+MAIL_TLS_PORTS="25 465 587 993 995"   # ports whose certificate is checked (25/587 via STARTTLS)
+# Daily per-domain DNS checks (all Plesk domains)
+DOMAIN_DNS_CHECK=1            # A/AAAA still pointing here, CAA vs. Let's Encrypt, broken DNSSEC, domain blocklists
+DOMAIN_BLOCKLISTS="dbl.spamhaus.org multi.surbl.org"   # queried via the local resolver (public ones are refused)
+
 DNSBL_LISTS="zen.spamhaus.org bl.spamcop.net b.barracudacentral.org psbl.surriel.com"
 WEB_IGNORE_DOMAINS=""         # space-separated domains without web alerts (still listed)
 # Known legitimate PHP files inside wp-content/uploads (regex on the full path)
@@ -613,45 +622,191 @@ DAILY="$STATE_DIR/daily.txt"; DALERTS="$STATE_DIR/daily_alerts.txt"
 DIGQ() { dig +short +time=3 +tries=2 ${MAILAUTH_RESOLVER:+"@$MAILAUTH_RESOLVER"} "$@" 2>/dev/null; }
 txt_records() { DIGQ TXT "$1" | sed 's/" "//g; s/"//g'; }          # one TXT record per line
 ip2int() { local IFS=. a b c d; read -r a b c d <<<"$1"; echo $(( (a << 24) + (b << 16) + (c << 8) + d )); }
-in_cidr() {   # in_cidr IP NET[/BITS]
+in_cidr() {   # in_cidr IP NET[/BITS] – IPv4 natively, IPv6 via python3
+  if [[ $1 == *:* || $2 == *:* ]]; then
+    [[ $1 == *:* && $2 == *:* ]] || return 1
+    command -v python3 >/dev/null || return 1
+    python3 -c 'import ipaddress,sys
+try: sys.exit(0 if ipaddress.ip_address(sys.argv[1]) in ipaddress.ip_network(sys.argv[2], strict=False) else 1)
+except ValueError: sys.exit(1)' "$1" "$2"
+    return
+  fi
   local net=${2%/*} bits=32 mask
   [[ $2 == */* ]] && bits=${2#*/}
   [[ $net =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && $bits =~ ^[0-9]+$ ]] || return 1
   mask=$(( bits == 0 ? 0 : (0xFFFFFFFF << (32 - bits)) & 0xFFFFFFFF ))
   (( ($(ip2int "$1") & mask) == ($(ip2int "$net") & mask) ))
 }
-host_has_ip() {   # host_has_ip HOST IP [BITS]
-  local a
-  for a in $(DIGQ A "$1" | grep -E '^[0-9.]+$'); do in_cidr "$2" "$a/${3:-32}" && return 0; done
+host_has_ip() {   # host_has_ip HOST IP [BITS] – A for IPv4, AAAA for IPv6
+  local a rr=A def=32
+  [[ $2 == *:* ]] && { rr=AAAA; def=128; }
+  for a in $(DIGQ "$rr" "$1" | grep -E '^[0-9a-fA-F.:]+$'); do in_cidr "$2" "$a/${3:-$def}" && return 0; done
   return 1
 }
-# spf_eval DOMAIN IP DEPTH → prints pass | fail | none | loop (simplified SPF evaluation, IPv4 only)
+# spf_eval DOMAIN IP – simplified SPF evaluation (RFC 7208 subset), result in SPF_RES:
+#   pass | fail | none | permerror:<reason>; SPF_PLUSALL=1 if the record ends in +all
 spf_eval() {
-  local d=$1 ip=$2 depth=${3:-0} rec t q m arg bits red=""
-  (( depth > 10 )) && { echo loop; return; }
-  rec=$(txt_records "$d" | grep -i '^v=spf1' | head -1)
-  [[ -z $rec ]] && { echo none; return; }
+  SPF_LOOKUPS=0; SPF_PLUSALL=0
+  _spf "$1" "$2" 0
+}
+_spf() {
+  local d=$1 ip=$2 depth=$3 recs n rec t q m arg bits red="" mxh v6=0
+  [[ $ip == *:* ]] && v6=1
+  if (( depth > 10 )); then SPF_RES="permerror:loop"; return; fi
+  recs=$(txt_records "$d" | grep -i '^v=spf1')
+  n=$(grep -c . <<<"$recs")
+  if [[ -z $recs ]]; then SPF_RES=none; (( depth > 0 )) && SPF_RES="permerror:include-without-spf"; return; fi
+  if (( n > 1 )); then SPF_RES="permerror:$n-records"; return; fi
+  rec=$recs
   for t in $rec; do
     q=+; [[ $t == [-~?+]* ]] && { q=${t:0:1}; t=${t:1}; }
-    m=${t%%[:=/]*}; m=${m,,}; arg=""; bits=32
-    [[ $t == *:* ]] && arg=${t#*:}
-    [[ $t == */* && $m =~ ^(a|mx)$ ]] && { bits=${t##*/}; arg=${arg%/*}; }
+    m=${t%%[:=/]*}; m=${m,,}; arg=""; bits=""
+    [[ $t == *:* && $m != ip6 ]] && arg=${t#*:}
+    [[ $m == ip6 ]] && arg=${t#ip6:}
+    if [[ $m =~ ^(a|mx)$ && $t == */* ]]; then   # a/24 or a:host/24//64 – take the matching family
+      local cidrs=${t#*/}; arg=${arg%%/*}
+      if (( v6 )); then bits=${cidrs#*/}; [[ $cidrs == */* ]] || bits=""; else bits=${cidrs%%/*}; fi
+    fi
     case $m in
-      ip4) [[ $q == + ]] && in_cidr "$ip" "$arg" && { echo pass; return; } ;;
-      a)   [[ $q == + ]] && host_has_ip "${arg:-$d}" "$ip" "$bits" && { echo pass; return; } ;;
+      include|a|mx|ptr|exists) SPF_LOOKUPS=$((SPF_LOOKUPS + 1)) ;;
+    esac
+    if (( SPF_LOOKUPS > 10 )); then SPF_RES="permerror:>10-dns-lookups"; return; fi
+    case $m in
+      ip4) (( ! v6 )) && [[ $q == + ]] && in_cidr "$ip" "$arg" && { SPF_RES=pass; return; } ;;
+      ip6) (( v6 ))   && [[ $q == + ]] && in_cidr "$ip" "$arg" && { SPF_RES=pass; return; } ;;
+      a)   [[ $q == + ]] && host_has_ip "${arg:-$d}" "$ip" $bits && { SPF_RES=pass; return; } ;;
       mx)  if [[ $q == + ]]; then
-             local mxh
              for mxh in $(DIGQ MX "${arg:-$d}" | awk '{print $2}'); do
-               host_has_ip "${mxh%.}" "$ip" "$bits" && { echo pass; return; }
+               host_has_ip "${mxh%.}" "$ip" $bits && { SPF_RES=pass; return; }
              done
            fi ;;
-      include) [[ $q == + && $(spf_eval "$arg" "$ip" $((depth + 1))) == pass ]] && { echo pass; return; } ;;
+      include) _spf "$arg" "$ip" $((depth + 1))
+               [[ $SPF_RES == permerror* ]] && return
+               [[ $q == + && $SPF_RES == pass ]] && { SPF_RES=pass; return; } ;;
       redirect) red=${t#*=} ;;
-      all) [[ $q == + ]] && { echo pass; return; } ;;
+      all) if [[ $q == + ]]; then (( depth == 0 )) && SPF_PLUSALL=1; SPF_RES=pass; return; fi
+           SPF_RES=fail; return ;;
     esac
   done
-  [[ -n $red ]] && { spf_eval "$red" "$ip" $((depth + 1)); return; }
-  echo fail
+  if [[ -n $red ]]; then SPF_LOOKUPS=$((SPF_LOOKUPS + 1)); _spf "$red" "$ip" $((depth + 1)); return; fi
+  SPF_RES=fail
+}
+dig_status() {   # dig_status NAME TYPE → NOERROR | NXDOMAIN | SERVFAIL | … (via MAILAUTH_RESOLVER)
+  dig +time=3 +tries=2 ${MAILAUTH_RESOLVER:+"@$MAILAUTH_RESOLVER"} "$2" "$1" 2>/dev/null |
+    sed -n 's/.*status: \([A-Z]*\).*/\1/p' | head -1
+}
+# ---------------------------------------------------------------- server DNS, mail TLS, domain DNS
+server_dns_check() {
+  local ptr fwd helo hname v6proto
+  echo ""; echo "Server DNS (reverse DNS / HELO):"
+  ptr=$(DIGQ -x "$PUBIP" | head -1); ptr=${ptr%.}
+  helo=$(postconf -h smtp_helo_name 2>/dev/null); [[ -z $helo || $helo == '$myhostname' ]] && helo=$(postconf -h myhostname 2>/dev/null)
+  if [[ -z $ptr ]]; then
+    echo "  $PUBIP: NO PTR record"
+    dalert "Mail: server IP $PUBIP has no reverse DNS (PTR) – many receivers (Gmail, Microsoft, T-Online) reject such mail; set it at your hosting provider"
+  else
+    if host_has_ip "$ptr" "$PUBIP"; then fwd="ok (forward-confirmed)"
+    else fwd="does NOT resolve back to $PUBIP"
+      dalert "Mail: reverse DNS $PUBIP → $ptr does not resolve back to the IP – fix A record or PTR"
+    fi
+    echo "  $PUBIP → $ptr: $fwd"
+  fi
+  if [[ -n $helo ]]; then
+    if host_has_ip "$helo" "$PUBIP"; then echo "  Postfix HELO name: $helo (resolves to this server$([[ $helo == "$ptr" ]] && echo ", matches PTR"))"
+    else echo "  Postfix HELO name: $helo – does NOT resolve to $PUBIP"
+      dalert "Mail: Postfix HELO name $helo does not resolve to $PUBIP – set myhostname/smtp_helo_name to the PTR name ${ptr:-?}"
+    fi
+  fi
+  # IPv6 – only relevant if the server has a global IPv6 and Postfix uses it
+  PUBIP6=""
+  if [[ $CHECK_IPV6 != 0 ]]; then
+    PUBIP6=$(ip -6 route get 2001:4860:4860::8888 2>/dev/null | awk '{for (i=1;i<NF;i++) if ($i=="src") print $(i+1)}')
+    v6proto=$(postconf -h inet_protocols 2>/dev/null)
+    if [[ $CHECK_IPV6 == auto && ( -z $PUBIP6 || ! $v6proto =~ all|ipv6 ) ]]; then PUBIP6=""; fi
+  fi
+  if [[ -n $PUBIP6 ]]; then
+    ptr=$(DIGQ -x "$PUBIP6" | head -1); ptr=${ptr%.}
+    if [[ -z $ptr ]]; then
+      echo "  $PUBIP6 (IPv6): NO PTR record"
+      dalert "Mail: server IPv6 $PUBIP6 has no reverse DNS – Gmail rejects IPv6 mail without PTR; set it or disable IPv6 in Postfix (inet_protocols = ipv4)"
+    elif host_has_ip "$ptr" "$PUBIP6"; then echo "  $PUBIP6 → $ptr: ok (forward-confirmed)"
+    else echo "  $PUBIP6 → $ptr: does NOT resolve back (no matching AAAA)"
+      dalert "Mail: IPv6 reverse DNS $PUBIP6 → $ptr has no matching AAAA record"
+    fi
+  else
+    echo "  IPv6: not used for mail (CHECK_IPV6=$CHECK_IPV6)"
+  fi
+}
+mail_tls_check() {
+  local name=${MAIL_TLS_NAME:-$HOST} p st c end days chk bad=0
+  echo ""; echo "Mail server certificates for $name:"
+  for p in $MAIL_TLS_PORTS; do
+    case $p in 25|587) st="-starttls smtp" ;; 143) st="-starttls imap" ;; 110) st="-starttls pop3" ;; *) st="" ;; esac
+    # shellcheck disable=SC2086
+    c=$(echo | timeout 8 openssl s_client -connect "${PUBIP:-127.0.0.1}:$p" -servername "$name" $st 2>/dev/null | openssl x509 2>/dev/null)
+    if [[ -z $c ]]; then echo "  port $p: no TLS certificate (port closed or no TLS)"; continue; fi
+    end=$(openssl x509 -noout -enddate <<<"$c" | sed 's/^notAfter=//'); days=$(( ($(date -d "$end" +%s) - $(date +%s)) / 86400 ))
+    if openssl x509 -noout -checkhost "$name" <<<"$c" 2>/dev/null | grep -q 'does match'; then chk="name ok"
+    else chk="NAME MISMATCH"; bad=1; dalert "TLS: mail certificate on port $p is not valid for $name – mail clients will show certificate warnings"; fi
+    if (( days < 0 )); then chk+=", EXPIRED"; bad=1; dalert "TLS: mail certificate on port $p has expired ($end)"
+    elif (( days < WARN_CERT_DAYS )); then chk+=", expires in $days days"; bad=1; dalert "TLS: mail certificate on port $p expires in $days days"
+    else chk+=", valid $days more days"; fi
+    echo "  port $p: $chk"
+  done
+}
+domain_dns_check() {
+  local d st a aaaa here caa par n=0 out="" r bl
+  for d in "$@"; do
+    [[ $d == "$HOST" || $d =~ ^[0-9.]+$ ]] && continue
+    n=$((n + 1))
+    st=$(dig_status "$d" A)
+    if [[ $st == SERVFAIL ]]; then
+      if [[ $(dig +cd +time=3 +tries=2 ${MAILAUTH_RESOLVER:+"@$MAILAUTH_RESOLVER"} A "$d" 2>/dev/null | sed -n 's/.*status: \([A-Z]*\).*/\1/p' | head -1) == NOERROR ]]; then
+        out+="  $d: DNSSEC broken – validating resolvers cannot resolve the domain"$'\n'
+        dalert "DNS: $d does not resolve for validating resolvers – DNSSEC is broken (DS record at the registrar vs. zone signing)"
+      else
+        out+="  $d: SERVFAIL – name servers not answering"$'\n'
+        dalert "DNS: $d does not resolve (SERVFAIL) – website and mail unreachable"
+      fi
+      continue
+    fi
+    [[ $st == NXDOMAIN ]] && { out+="  $d: does not exist in public DNS (NXDOMAIN)"$'\n'; continue; }
+    # does the domain still point here?
+    a=$(DIGQ A "$d" | grep -E '^[0-9.]+$' | xargs); here=0
+    [[ " $a " == *" $PUBIP "* ]] && here=1
+    if (( ! here )) && [[ -n $a ]]; then
+      geo "${a%% *}"; out+="  $d: website points elsewhere ($a${GEO_LABEL:+, $GEO_LABEL}) – moved? CDN?"$'\n'
+    elif [[ -z $a ]]; then out+="  $d: no A record"$'\n'; fi
+    if [[ -n ${PUBIP6:-} ]]; then
+      aaaa=$(DIGQ AAAA "$d" | grep ':' | xargs)
+      [[ -n $aaaa && " $aaaa " != *" $PUBIP6 "* ]] && (( here )) &&
+        out+="  $d: AAAA ($aaaa) differs from A – IPv6 visitors reach another server"$'\n'
+    fi
+    # CAA: issuance by Let's Encrypt allowed? (CAA is inherited from parent domains)
+    if [[ " $LE_DOMAINS " == *" $d "* ]]; then
+      par=$d; caa=""
+      while [[ $par == *.* && -z $caa ]]; do caa=$(DIGQ CAA "$par" | grep -i 'issue'); [[ -z $caa ]] && par=${par#*.}; done
+      if [[ -n $caa ]] && ! grep -qi 'issue.*letsencrypt\.org' <<<"$caa"; then
+        out+="  $d: CAA ($par) does not allow Let's Encrypt – renewal will fail"$'\n'
+        dalert "TLS: CAA record of $par does not allow Let's Encrypt – the certificate of $d cannot be renewed"
+      fi
+    fi
+    # domain blocklists (listed domains: phishing/malware on a hacked site, or spam links)
+    for bl in $DOMAIN_BLOCKLISTS; do
+      r=$(getent ahostsv4 "$d.$bl" 2>/dev/null | awk 'NR==1{print $1}')
+      [[ -z $r ]] && continue
+      case "$bl:$r" in
+        *:127.255.255.*|dbl.spamhaus.org:127.0.1.255|multi.surbl.org:127.0.0.1) BL_REFUSED+=" $bl" ;;
+        *) out+="  $d: LISTED on $bl ($r)"$'\n'
+           dalert "DNS: domain $d is listed on $bl ($r) – mails mentioning it get rejected; check the website for malware/phishing" ;;
+      esac
+    done
+  done
+  echo ""; echo "Domain DNS (points here? CAA, DNSSEC, domain blocklists):"
+  [[ -n $out ]] && printf '%s' "$out"
+  echo "  $n domain(s) checked, findings listed above"
+  [[ -n ${BL_REFUSED:-} ]] && echo "  note: some blocklists refused queries from this resolver:$(tr ' ' '\n' <<<"$BL_REFUSED" | sort -u | xargs -r echo ' ')"
+  return 0
 }
 mailauth_check() {
   local d doms ok=0 bad=0 spf dkim dmarc mxinfo mxhere ns line key dnskey m nmb probs
@@ -666,7 +821,9 @@ mailauth_check() {
     done
     (( nmb == 0 && mxhere == 0 )) && [[ -z $mxinfo ]] && continue     # no MX, no mailboxes → no mail
     # SPF
-    spf=$(spf_eval "$d" "$PUBIP")
+    spf_eval "$d" "$PUBIP"; spf=$SPF_RES
+    (( SPF_PLUSALL )) && spf="+all"
+    if [[ -n ${PUBIP6:-} ]]; then spf_eval "$d" "$PUBIP6"; [[ $SPF_RES != pass ]] && spf+="/v6:${SPF_RES%%:*}"; fi
     # DKIM: compare the public key in DNS with the private key on this server
     dkim="off"
     if [[ -r $DKIM_KEY_DIR/$d/$DKIM_SELECTOR ]]; then
@@ -680,17 +837,23 @@ mailauth_check() {
     ns=$(DIGQ NS "$d" | head -1); ns=${ns%.}
     probs=""
     [[ $spf != pass ]] && probs+=" SPF:${spf}"
+    if [[ $spf == "+all" ]] && (( mxhere )); then
+      dalert "Mail auth: $d – SPF ends in +all: anyone may send mail as this domain (DNS at ${ns:-?})"
+    fi
+    if [[ $spf == permerror* ]] && (( mxhere )); then
+      dalert "Mail auth: $d – SPF record is invalid (${spf#permerror:}) – receivers treat it as a hard error (DNS at ${ns:-?})"
+    fi
     [[ $dkim == MISSING || $dkim == MISMATCH ]] && probs+=" DKIM:${dkim,,}"
     # DMARC passes if SPF *or* DKIM passes – only both failing breaks delivery
     local broken=0
-    [[ $spf != pass && $dkim != ok ]] && broken=1
-    line=$(printf '  %-28s SPF %-4s | DKIM %-8s | DMARC %-12s | MX %s | DNS %s' "$d" \
+    [[ $spf != pass && $spf != "+all" && $dkim != ok ]] && broken=1
+    line=$(printf '  %-28s SPF %-9s | DKIM %-8s | DMARC %-12s | MX %s | DNS %s' "$d" \
       "$spf" "$dkim" "${dmarc:-missing}" "$( ((mxhere)) && echo here || echo "${mxinfo:-none}")" "${ns:-?}")
     if [[ -n $probs ]]; then
       bad=$((bad + 1)); echo "$line"
       # alert only if mail for the domain is hosted here (users send through this server)
       # and neither SPF nor DKIM passes; a single failing one is listed as a recommendation
-      if (( mxhere && broken )); then
+      if (( mxhere && broken )) && [[ $spf != permerror* ]]; then   # permerror already alerted above
         dalert "Mail auth: $d – neither SPF nor DKIM passes (${probs# }, DNS at ${ns:-?}) – mails from this domain are likely rejected or marked as spam"
       fi
     else
@@ -731,11 +894,13 @@ run_daily() {
   # --- TLS certificates (checked live on the server's public IP)
   echo ""; echo "TLS certificates:"
   local doms now d c end days san soon=0 nossl="" port
+  LE_DOMAINS=""
   now=$(date +%s)
   doms=$( { command -v plesk >/dev/null && plesk bin site --list 2>/dev/null; echo "$HOST"; } | sort -u)
   for d in $doms; do
     port=443; [[ $d == "$HOST" ]] && port=8443
-    c=$(echo | timeout 6 openssl s_client -connect "${PUBIP:-127.0.0.1}:$port" -servername "$d" 2>/dev/null | openssl x509 -noout -enddate -ext subjectAltName 2>/dev/null)
+    c=$(echo | timeout 6 openssl s_client -connect "${PUBIP:-127.0.0.1}:$port" -servername "$d" 2>/dev/null | openssl x509 -noout -enddate -issuer -ext subjectAltName 2>/dev/null)
+    grep -qi "Let's Encrypt" <<<"$c" && LE_DOMAINS+=" $d"
     [[ -z $c ]] && { nossl+=" $d"; continue; }
     san=$(grep -o 'DNS:[^,]*' <<<"$c" | sed 's/DNS://' | xargs)
     if ! grep -qwF -- "$d" <<<"$san" && ! grep -qF -- "*.${d#*.}" <<<"$san"; then nossl+=" $d"; continue; fi
@@ -747,6 +912,13 @@ run_daily() {
   done
   (( soon == 0 )) && echo "  all valid certificates are good for at least $WARN_CERT_DAYS more days"
   [[ -n $nossl ]] && echo "  no matching certificate (e.g. no SSL, mail-only, redirect):$nossl"
+
+  # --- server DNS: PTR / HELO / IPv6 and mail server certificates
+  (( SERVER_DNS_CHECK )) && command -v dig >/dev/null && server_dns_check
+  mail_tls_check
+
+  # --- per-domain DNS: A/AAAA here?, CAA, DNSSEC, domain blocklists
+  (( DOMAIN_DNS_CHECK )) && command -v dig >/dev/null && domain_dns_check $doms
 
   # --- mail authentication: SPF / DKIM / DMARC
   if (( MAILAUTH_CHECK )); then

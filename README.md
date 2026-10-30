@@ -24,7 +24,13 @@ The script only **reads** logs and system state. It never changes the server con
 | **System** | load, CPU per system user (= subscription), RAM, disks, failed systemd units, OOM killer | thresholds are exceeded |
 | **Web** | requests, 5xx errors, WordPress login POSTs and busiest IP per domain, login-attack details (distinct IPs, wp-login vs. xmlrpc, successful logins, whether xmlrpc.php is blocked), PHP fatal errors with the first message | a domain throws many 5xx/fatal errors or gets hammered |
 
-**Once a day (first run after midnight):** pending (security) updates and reboot-required, TLS certificates of all Plesk domains and the panel (expiry < 14 days), age and status of the latest **Plesk backup**, Acronis agent (if installed), and **SPF, DKIM and DMARC of every domain with mail service**: does SPF allow this server (including `include:`, `a`, `mx`), does the DKIM key in DNS match the key Plesk signs with, is there a DMARC policy, and where are MX and DNS hosted. That last part is especially useful for domains whose DNS you don't manage yourself.
+**Once a day (first run after midnight):** pending (security) updates and reboot-required, TLS certificates of all Plesk domains and the panel (expiry < 14 days), age and status of the latest **Plesk backup**, Acronis agent (if installed), and **SPF, DKIM and DMARC of every domain with mail service**: does SPF allow this server (including `include:`, `a`, `mx`), does the DKIM key in DNS match the key Plesk signs with, is there a DMARC policy, and where are MX and DNS hosted. That last part is especially useful for domains whose DNS you don't manage yourself. SPF errors that make receivers reject mail outright are flagged too: several SPF records, more than 10 DNS lookups, or `+all`.
+
+**Also once a day, server and domain DNS:**
+- **reverse DNS (PTR)** of the server IP, forward-confirmed, and whether Postfix's HELO name resolves to the server. Without a PTR record, Gmail, Microsoft and others reject mail from *all* domains on the server.
+- **IPv6** (automatic, only if the server has a global IPv6 address and Postfix uses it): PTR for IPv6, and SPF also evaluated for the IPv6 address
+- **certificates of the mail server** on ports 25/587 (STARTTLS), 465, 993 and 995: valid for the host name mail clients use (`MAIL_TLS_NAME`, default: the server's host name), and expiry
+- per Plesk domain: does the website **still point to this server** (moved domains, CDNs), does a **CAA** record block Let's Encrypt renewals, does the domain resolve at all (**broken DNSSEC**, dead name servers), and is the domain **listed on Spamhaus DBL / SURBL** (typical for hacked sites serving phishing)
 
 ### Example report (fictional data)
 
@@ -152,6 +158,22 @@ Updates available: 11, security updates: 3
 TLS certificates:
   all valid certificates are good for at least 14 more days
   no matching certificate (e.g. no SSL, mail-only, redirect): mail-only.example parked.example
+
+Server DNS (reverse DNS / HELO):
+  203.0.113.10 → host.example.com: ok (forward-confirmed)
+  Postfix HELO name: host.example.com (resolves to this server, matches PTR)
+  IPv6: not used for mail (CHECK_IPV6=auto)
+
+Mail server certificates for host.example.com:
+  port 25: name ok, valid 61 more days
+  port 465: name ok, valid 61 more days
+  port 587: name ok, valid 61 more days
+  port 993: name ok, valid 61 more days
+  port 995: name ok, valid 61 more days
+
+Domain DNS (points here? CAA, DNSSEC, domain blocklists):
+  moved.example: website points elsewhere (192.0.2.77, NL, Example Hosting B.V. [datacenter]) – moved? CDN?
+  39 domain(s) checked, findings listed above
 
 Mail authentication (SPF / DKIM / DMARC):
   nails.example                SPF fail | DKIM MISSING  | DMARC missing      | MX here | DNS ns1.other-provider.example
@@ -358,6 +380,12 @@ All thresholds apply **per run**. With the hourly cron job that means per hour. 
 | `MAILAUTH_RESOLVER` | `1.1.1.1` | DNS resolver for the SPF/DKIM/DMARC check, `""` = system resolver (see notes) |
 | `DKIM_KEY_DIR` / `DKIM_SELECTOR` | `/etc/domainkeys` / `default` | where Plesk keeps the DKIM private keys (`<dir>/<domain>/<selector>`) and the selector it signs with |
 | `MAILNAMES_DIR` | `/var/qmail/mailnames` | Plesk mailbox directory (`<dir>/<domain>/<mailbox>`) |
+| `SERVER_DNS_CHECK` | 1 | PTR / HELO / IPv6 check, 0 = off |
+| `CHECK_IPV6` | `auto` | `auto` = only if the server has a global IPv6 and Postfix uses it (`inet_protocols`), `1` = always, `0` = never |
+| `MAIL_TLS_NAME` | server host name | the host name your customers enter in their mail clients. The mail certificate must be valid for it |
+| `MAIL_TLS_PORTS` | `25 465 587 993 995` | ports whose certificate is checked (25/587 via STARTTLS, 143/110 also possible) |
+| `DOMAIN_DNS_CHECK` | 1 | per-domain A/AAAA, CAA, DNSSEC and domain-blocklist check, 0 = off |
+| `DOMAIN_BLOCKLISTS` | `dbl.spamhaus.org multi.surbl.org` | domain blocklists, queried via the local resolver |
 | `WARN_CERT_DAYS` | 14 | certificate expiry warning |
 | `WARN_BACKUP_HOURS` | 26 | maximum age of the last Plesk backup |
 
@@ -383,6 +411,8 @@ All thresholds apply **per run**. With the hourly cron job that means per hour. 
 - **Backup check** covers Plesk's own backup manager (status from `backup.log` in the PMM log directory). Provider-side snapshots are not visible to the script, except whether an Acronis agent is running.
 - **WordPress login success** is derived from the HTTP status: a successful `wp-login.php` POST returns `302`, a failed one `200`. Security plugins that change the login flow (custom login URLs, 2FA, CAPTCHAs) may change these codes. Logins via `xmlrpc.php` always return `200`, so their success cannot be told from the access log. Block `xmlrpc.php` if you don't need it (Plesk: *WordPress Toolkit → Security*).
 - **Country alerts and mail apps:** some apps connect to your mail server **from their provider's cloud**, not from the user's device. The Outlook app (iOS/Android) for IMAP accounts uses Microsoft servers, Gmail's "send mail as" uses Google servers, both often outside your country. Those logins show up as `[datacenter]` in another country. If your customers use such apps, add the operator to `GEO_TRUSTED_ORGS`, accepting that attackers on that cloud are then not flagged by country (the IP count and login ≠ from checks still apply). Geolocation is an additional signal, not proof: attackers can use VPNs in your country.
+- **Mail certificate name:** if your customers enter something other than the server's host name in their mail clients (e.g. `mail.example.com`), set `MAIL_TLS_NAME` to that name. A name mismatch shows up in clients as a certificate warning, and many users click it away.
+- **Domain DNS:** "website points elsewhere" is informational: a domain moved to another host, or sits behind a CDN such as Cloudflare. The CAA check only runs for domains whose current certificate comes from Let's Encrypt. Domain blocklists (Spamhaus DBL, SURBL) refuse queries from large public resolvers, just like the IP blocklists, so they are queried through the local resolver.
 - **Public resolver for the SPF/DKIM check:** on Plesk servers the system resolver often gives wrong answers for this check. systemd-resolved (`127.0.0.53`) returns no MX/TXT records for the server's own hostname, and a local Plesk BIND may answer from zones that exist in Plesk while the domain's real DNS is hosted elsewhere. The check therefore asks `1.1.1.1` by default (`MAILAUTH_RESOLVER`). If outbound DNS is blocked, set another resolver or `""`.
 - **SPF/DKIM check** covers every domain with a Plesk mail directory or DKIM key. An **alert** is raised only when the domain's MX points to this server (its users send through this server) **and neither SPF nor DKIM passes**. In that case DMARC fails and mails are likely rejected or marked as spam. If only one of them fails, DMARC still passes, so the domain is listed as a recommendation without an alert. Domains whose mail is hosted elsewhere are listed for information only. SPF evaluation is simplified: `ip4`, `a`, `mx`, `include` and `redirect` are followed (up to 10 levels), `ptr`/`exists`/macros and IPv6 are not. A `fail` therefore means "this server's IPv4 is not covered"; verify with an online SPF checker before contacting the domain owner. DKIM is compared byte for byte: `MISMATCH` usually means the key was regenerated in Plesk but the DNS record (often at an external DNS provider) was not updated.
 - **DB-IP Lite** data is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The attribution line at the end of every report satisfies this. Country accuracy is high, city data is not used.
@@ -438,6 +468,7 @@ Watch the repository (*Watch → Custom → Releases* or *All activity*) to get 
 
 ### Changelog
 
+- **2026-10-30**: server DNS (PTR, forward-confirmed, HELO name, optional IPv6), mail server certificates on all mail ports for the client host name, per-domain DNS (still pointing here, CAA vs. Let's Encrypt, broken DNSSEC/SERVFAIL, Spamhaus DBL/SURBL), SPF hard errors (multiple records, >10 lookups, `+all`), SPF for IPv6
 - **2026-10-30**: SPF/DKIM check queries a public resolver (systemd-resolved returned empty answers for the server's own hostname); alert only when SPF *and* DKIM fail (DMARC logic), single failures listed as recommendations
 - **2026-10-30**: daily SPF/DKIM/DMARC check for all mail domains (DKIM key in DNS compared with the Plesk key, SPF evaluated against this server's IP, MX and DNS hoster shown), paths configurable
 - **2026-10-29**: Roundcube webmail analysis (mails sent per mailbox with real client IP, recipients and geolocation, failed webmail logins, alerts for mass sending, foreign countries and sending after repeated failed logins); issue template for other CMS; optional geolocation (country + network operator, local DB-IP Lite database, monthly refresh) for successful logins and top failed-login IPs, alerts via `ALLOWED_COUNTRIES` for mailboxes, SSH, Plesk panel and WordPress logins from unexpected countries; WordPress login-attack analysis with brute-force success detection; full `PATH` for cron runs (Plesk domain list for the TLS check and the mail queue size were missing under cron)
