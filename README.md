@@ -10,6 +10,25 @@ The script only **reads** logs and system state. It never changes the server con
 
 ---
 
+## What it found so far
+
+On the author's production server (Plesk, about 40 customer domains), the first days of reports turned up real problems that had gone unnoticed for months or years:
+
+- **A public backup archive in a customer's website.** A `backup.zip` in the document root was reachable from anywhere – and the access logs showed it being downloaded by scanners.
+- **Leftover installer directories** of a forum software, including `phpinfo.php` files that exposed the full PHP configuration.
+- **A forgotten `phpinfo.php`** in a directory renamed to "…_DEACTIVATED", still served to anyone.
+- **Old database dumps and backup archives** in document roots: UpdraftPlus backups, `wp-config.php` copies and SQL dumps from 2020/2021. Blocked by the web server, but sitting where one wrong rule would expose them.
+- **An outdated DKIM key:** the key had been regenerated in Plesk, but the DNS record at the customer's registrar still had the old one, so DKIM failed for every mail.
+- **A mail domain with neither SPF nor DKIM**, so its mails were likely rejected or landed in spam. Its DNS is managed by the customer, which is why nobody had noticed.
+- **An abandoned WordPress installation** in a site's root, producing PHP errors on every request.
+- **Domains that no longer belong on the server:** websites moved to other hosts, parked domains without DNS. These were candidates for cleanup.
+- **A targeted login attempt** on the operator's own mailboxes from an unknown IP, among the usual brute-force noise.
+- **A distributed WordPress brute-force attack**, which led to the detailed login-attack section: distinct IPs, wp-login vs. xmlrpc, and successful logins after failures.
+
+Just as useful: the reports confirmed what is *fine*. Reverse DNS, HELO name and mail server certificates were correct, backups ran, and no mailbox was sending spam.
+
+---
+
 ## What the report covers
 
 **Hourly (only log lines written since the previous run):**
