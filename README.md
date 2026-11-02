@@ -400,7 +400,7 @@ ALLOWED_COUNTRIES="DE AT CH"              # alert on logins from other countries
 GEO_TRUSTED_ORGS="Microsoft"             # no country alerts for this operator (see notes)
 ```
 
-All thresholds apply **per run**. With the hourly cron job that means per hour. The full list is at the top of the script.
+All thresholds apply **per run**. With the hourly cron job that means per hour; if you run the script less often, raise them accordingly. The defaults with comments are also at the top of the script.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -409,8 +409,19 @@ All thresholds apply **per run**. With the hourly cron job that means per hour. 
 | `WARN_IPS_PER_MAILBOX` | 4 | distinct client IPs per mailbox (raise it if many users roam between networks) |
 | `WARN_FROM_MISMATCH` | 10 | mails with a sender domain different from the login's domain |
 | `WARN_MAILS_PER_SCRIPT` | 100 | mails via PHP `mail()`/sendmail per subscription |
+| `WARN_DEFERRED` | 100 | deferred deliveries |
+| `WARN_QUEUE` | 200 | messages in the Postfix queue |
+| `WARN_BLOCKLIST` | 1 | remote rejections mentioning a blocklist or bad reputation |
+| `WARN_AUTH_FAIL` | 300 | failed mail logins (SMTP + IMAP/POP3) and, separately, failed webmail logins. Raise it if routine brute-force noise (already handled by fail2ban) triggers it regularly |
+| `DNSBL_LISTS` | Spamhaus ZEN, SpamCop, Barracuda, PSBL | IP blocklists checked for the server IP |
+| `WARN_LOAD_FACTOR` | 1.5 | alert when the 5-minute load exceeds CPU cores × this factor |
+| `WARN_MEM_AVAIL_PCT` | 10 | alert when available RAM drops below this percentage |
+| `WARN_DISK_PCT` | 85 | alert when a filesystem is fuller than this percentage |
 | `WARN_CPU_USER_PCT` | 80 | CPU of one system user in the snapshot |
 | `WARN_5XX_PER_DOMAIN` / `WARN_PHP_FATAL` | 100 / 20 | web errors per domain |
+| `WARN_LOGIN_POSTS` | 300 | POSTs to `wp-login.php`/`xmlrpc.php` per domain |
+| `WEB_IGNORE_DOMAINS` | empty | space-separated domains without web alerts (still listed in the report) |
+| `UPLOADS_PHP_IGNORE` | Borlabs Cookie, Mailchimp for WP | regex of legitimate PHP files inside `wp-content/uploads` |
 | `WARN_LOGIN_DETAIL` | 20 | show login-attack details for domains with at least this many login POSTs |
 | `WARN_LOGIN_BRUTE_FAILS` | 5 | alert when an IP logs in to WordPress successfully after at least this many failures |
 | `GEOIP` | 1 | 0 switches geolocation off |
@@ -437,6 +448,13 @@ All thresholds apply **per run**. With the hourly cron job that means per hour. 
 | `WEBSHELL_FIRST_DAYS` | 7 | the first scan covers PHP files changed within this many days; later scans cover files changed since the previous scan |
 | `WARN_CERT_DAYS` | 14 | certificate expiry warning |
 | `WARN_BACKUP_HOURS` | 26 | maximum age of the last Plesk backup |
+| `REMOTE` | `reports:server-reports/<host>` | rclone `remote:path` for the upload, `""` = keep reports locally only |
+| `RETENTION_DAYS` / `LOCAL_KEEP_DAYS` | 7 / 7 | delete reports older than this many days remotely (0 = never) / locally |
+| `STATE_DIR` | `/var/lib/plesk-server-report` | log offsets, known login IPs, daily cache, local reports |
+| `VHOST_LOGS` | `/var/www/vhosts/system` | Plesk per-domain log directories |
+| `PLESK_PANEL_LOG` | `/var/log/plesk/panel.log` | Plesk panel log (successful panel logins) |
+| `ROUNDCUBE_LOG_DIR` | auto | Roundcube log directory, default `/var/log/plesk-roundcube` or `/usr/share/psa-roundcube/logs` |
+| `GEOIP_DIR` | `$STATE_DIR/geoip` | where the DB-IP Lite databases are stored |
 
 ---
 
