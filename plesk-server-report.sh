@@ -28,6 +28,7 @@
 #   --only CHECK,...  run only these checks right now and print the result; nothing
 #                     is uploaded and no state is changed (log offsets, known IPs, …)
 #   --list            list the check names for --only
+#   --version         print the version
 #   --help            show this help
 #
 # Settings: edit the defaults below or – recommended, survives updates –
@@ -38,6 +39,8 @@
 #
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
+
+VERSION=1.0.0
 
 set -uo pipefail
 export LC_ALL=C
@@ -1251,7 +1254,7 @@ daily_checks() {
 
 write_report() {
   {
-    echo "Server report $HOST – $NOW${ONLY:+ (only: $ONLY)}"
+    echo "Server report $HOST – $NOW${ONLY:+ (only: $ONLY)} – plesk-server-report v$VERSION"
     if (( ${#ALERTS[@]} )); then
       echo "STATUS: WARNING (${#ALERTS[@]})"
       printf ' ! %s\n' "${ALERTS[@]}"
@@ -1299,6 +1302,7 @@ parse_args() {
               ONLY=$2; shift ;;
       --only=*) ONLY=${1#--only=} ;;
       --list) list_checks; exit 0 ;;
+      --version) echo "plesk-server-report $VERSION"; exit 0 ;;
       -h|--help) usage; exit 0 ;;
       *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
     esac

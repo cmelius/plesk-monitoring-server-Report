@@ -241,8 +241,9 @@ The report above is what a hijacked mailbox and a hacked WordPress site look lik
 ## Installation
 
 ```bash
+# latest release (recommended)
 curl -fsSL -o /usr/local/sbin/plesk-server-report.sh \
-  https://raw.githubusercontent.com/cmelius/plesk-monitoring-server-Report/main/plesk-server-report.sh
+  https://github.com/cmelius/plesk-monitoring-server-Report/releases/latest/download/plesk-server-report.sh
 chmod 700 /usr/local/sbin/plesk-server-report.sh
 
 # read it before you run it as root
@@ -255,7 +256,9 @@ apt install mmdb-bin            # RHEL-based: dnf install libmaxminddb (EPEL)
 /usr/local/sbin/plesk-server-report.sh --no-upload
 ```
 
-Options: `--no-upload` (print instead of upload), `--only CHECK,…` (run single checks, see [First run](#first-run)), `--list` (check names), `--help`.
+Options: `--no-upload` (print instead of upload), `--only CHECK,…` (run single checks, see [First run](#first-run)), `--list` (check names), `--version`, `--help`.
+
+**Releases or `main`?** The [releases](../../releases) are tested versions that have been running on the author's server for a while. `main` gets every change as soon as it is made. To follow `main`, use `https://raw.githubusercontent.com/cmelius/plesk-monitoring-server-Report/main/plesk-server-report.sh` instead. The first line of every report shows the version.
 
 **Geolocation:** with `mmdblookup` installed, the script downloads the free [DB-IP Lite](https://db-ip.com/db/lite.php) country and ASN databases (a few MB each) on the first run into `/var/lib/plesk-server-report/geoip` and refreshes them once a month. This needs outbound HTTPS to `download.db-ip.com`. Lookups are done locally, so no IP address is sent to any service. Without `mmdblookup` the script works as before and says so at the end of the report. To get **alerts**, set your customers' countries (see [Configuration](#configuration)):
 
@@ -511,13 +514,17 @@ To update, download the script again (your settings in `/etc/plesk-server-report
 
 ```bash
 curl -fsSL -o /usr/local/sbin/plesk-server-report.sh \
-  https://raw.githubusercontent.com/cmelius/plesk-monitoring-server-Report/main/plesk-server-report.sh
+  https://github.com/cmelius/plesk-monitoring-server-Report/releases/latest/download/plesk-server-report.sh
+/usr/local/sbin/plesk-server-report.sh --version
 ```
+
+(or the `main` URL from [Installation](#installation) to get changes before they are released)
 
 Watch the repository (*Watch → Custom → Releases* or *All activity*) to get notified about changes. Issues and pull requests with your own findings are welcome.
 
 ### Changelog
 
+- **2026-11-02 – v1.0.0**: first release, after several days of running on a production server with about 40 domains. Version shown in the report header and with `--version`
 - **2026-11-02**: SPF/DKIM check recognizes Plesk domain aliases with the mail service switched off and lists them for information only instead of alerting (SPF `+all` is still reported)
 - **2026-10-30**: script restructured: one function per check (`check_mail`, `check_web`, `check_mailauth`, …) and a short `main()` that defines the order; local variables instead of globals shared between sections. Report output unchanged. New option `--only CHECK,…` runs single checks immediately without changing any state, `--list` shows the names
 - **2026-10-30**: exposed-file scan: clearer wording – files answered with 403 are reported as "blocked by the web server", files that return a server error are listed separately
