@@ -1070,8 +1070,20 @@ check_webshell() {   # recently changed PHP files with typical backdoor code
   echo "  $n document root(s) scanned, $hits suspicious file(s)"
 }
 
+# Plesk domain aliases: ALIAS_OF[alias]=primary domain, ALIAS_MAIL[alias]=true|false (mail service of the alias)
+declare -A ALIAS_OF=() ALIAS_MAIL=()
+load_aliases() {
+  local a m p
+  command -v plesk >/dev/null || return 0
+  while IFS=$'\t' read -r a m p; do
+    [[ -n $a ]] || continue
+    ALIAS_OF[$a]=$p; ALIAS_MAIL[$a]=$m
+  done < <(plesk db -Ne "SELECT a.name, a.mail, d.name FROM domain_aliases a JOIN domains d ON d.id = a.dom_id" 2>/dev/null)
+  return 0
+}
 mailauth_scan() {
-  local d doms ok=0 bad=0 spf spf_ok dkim dmarc mxinfo mxhere ns line key dnskey m nmb probs
+  local d doms ok=0 bad=0 nomail=0 spf spf_ok dkim dmarc mxinfo mxhere ns line key dnskey m nmb probs mailoff note
+  load_aliases
   doms=$( { ls "$MAILNAMES_DIR" 2>/dev/null; ls "$DKIM_KEY_DIR" 2>/dev/null; } | sort -u)
   for d in $doms; do
     [[ $d == *.* && " $MAILAUTH_IGNORE_DOMAINS " != *" $d "* ]] || continue
@@ -1101,21 +1113,29 @@ mailauth_scan() {
     fi
     dmarc=$(txt_records "_dmarc.$d" | grep -i '^v=DMARC1' | head -1 | grep -oiE 'p=[a-z]+' | head -1)
     ns=$(DIGQ NS "$d" | head -1); ns=${ns%.}
+    # Plesk alias with mail service switched off: nobody can send or receive mail with this domain
+    # here, so missing SPF/DKIM is irrelevant (SPF -all + DMARC p=reject is even the right setup)
+    mailoff=0; note=""
+    if [[ -n ${ALIAS_OF[$d]:-} && ${ALIAS_MAIL[$d]} == false ]]; then
+      mailoff=1; note=" | alias of ${ALIAS_OF[$d]}, mail off – info only"
+    fi
     probs=""
     (( spf_ok )) || [[ $spf == "+all" ]] || probs+=" SPF:${spf}"
-    if [[ $spf == "+all" ]] && (( mxhere )); then
+    if [[ $spf == "+all" ]] && (( mxhere || mailoff )); then   # +all lets anyone forge mail, sending or not
       dalert "Mail auth: $d – SPF ends in +all: anyone may send mail as this domain (DNS at ${ns:-?})"
     fi
-    if [[ $spf == permerror* ]] && (( mxhere )); then
+    if [[ $spf == permerror* ]] && (( mxhere && ! mailoff )); then
       dalert "Mail auth: $d – SPF record is invalid (${spf#permerror:}) – receivers treat it as a hard error (DNS at ${ns:-?})"
     fi
     [[ $dkim == MISSING || $dkim == MISMATCH ]] && probs+=" DKIM:${dkim,,}"
     # DMARC passes if SPF *or* DKIM passes – only both failing breaks delivery
     local broken=0
     (( ! spf_ok )) && [[ $spf != "+all" && $dkim != ok ]] && broken=1
-    line=$(printf '  %-28s SPF %-9s | DKIM %-8s | DMARC %-12s | MX %s | DNS %s' "$d" \
-      "$spf" "$dkim" "${dmarc:-missing}" "$( ((mxhere)) && echo here || echo "${mxinfo:-none}")" "${ns:-?}")
-    if [[ -n $probs ]]; then
+    line=$(printf '  %-28s SPF %-9s | DKIM %-8s | DMARC %-12s | MX %s | DNS %s%s' "$d" \
+      "$spf" "$dkim" "${dmarc:-missing}" "$( ((mxhere)) && echo here || echo "${mxinfo:-none}")" "${ns:-?}" "$note")
+    if (( mailoff )); then
+      nomail=$((nomail + 1)); [[ -n $probs ]] || (( MAILAUTH_SHOW_ALL )) && echo "$line"
+    elif [[ -n $probs ]]; then
       bad=$((bad + 1)); echo "$line"
       # alert only if mail for the domain is hosted here (users send through this server)
       # and neither SPF nor DKIM passes; a single failing one is listed as a recommendation
@@ -1126,7 +1146,7 @@ mailauth_scan() {
       ok=$((ok + 1)); (( MAILAUTH_SHOW_ALL )) && echo "$line"
     fi
   done
-  echo "  $ok domain(s) OK, $bad with findings. Alert only if SPF and DKIM both fail and the MX points here;"
+  echo "  $ok domain(s) OK, $bad with findings$( ((nomail)) && echo ", $nomail alias(es) without mail service (info only)"). Alert only if SPF and DKIM both fail and the MX points here;"
   echo "  a single missing/outdated record is a recommendation (DMARC passes if SPF or DKIM passes)."
   echo "  DNS queried via ${MAILAUTH_RESOLVER:-system resolver}"
 }
