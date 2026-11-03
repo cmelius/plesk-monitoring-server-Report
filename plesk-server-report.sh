@@ -40,7 +40,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.0.0
+VERSION=1.0.1
 
 set -uo pipefail
 export LC_ALL=C
@@ -388,13 +388,17 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       sic[u SUBSEP ip]++
     }
     # Mails injected locally (PHP mail(), sendmail) – uid = Plesk system user
-    /postfix\/pickup.*uid=/ { m=$0; sub(/.*uid=/, "", m); sub(/[ ,].*/, "", m); pick[m]++ }
-    # Recipients per envelope sender
+    /postfix\/pickup.*uid=/ { m=$0; sub(/.*uid=/, "", m); sub(/[ ,].*/, "", m); pick[m]++
+                              q=qid($0); if (q != "") pq[q]=1 }
+    # Recipients per envelope sender (all mail, incoming included)
     /postfix\/qmgr.*from=<.*nrcpt=/ {
       f=$0; sub(/.*from=</, "", f); sub(/>.*/, "", f); if (f=="") f="<> (bounce)"
       n=$0; sub(/.*nrcpt=/, "", n); sub(/[^0-9].*/, "", n); rc[f]+=n
-      # sender domain differs from the domain of the authenticated mailbox?
       q=qid($0)
+      # outgoing only: submitted after a mailbox login or injected by a local script;
+      # counted once per message (qmgr logs a message again on every delivery retry)
+      if (q != "" && ((q in sq) || (q in pq)) && !(q in oseen)) { oseen[q]=1; orc[f]+=n }
+      # sender domain differs from the domain of the authenticated mailbox?
       if (q != "" && (q in sq) && !(q in mdone) && sq[q] ~ /@/ && f ~ /@/ && dom(f) != dom(sq[q])) {
         mdone[q]=1; su=sq[q]; mm[su]++
         if (!((su SUBSEP f) in mms) && mmc[su] < 3) { mms[su SUBSEP f]=1; mmc[su]++; mml[su]=mml[su] " " f }
@@ -422,6 +426,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       for (k in sic) { split(k, kk, SUBSEP); printf "SAIP\t%d\t%s\t%s\n", sic[k], kk[1], kk[2] }
       for (m in pick) printf "PICK\t%d\t%s\n", pick[m], m
       for (f in rc)   printf "RCPT\t%d\t%s\n", rc[f], f
+      for (f in orc)  printf "ORCP\t%d\t%s\n", orc[f], f
       for (i in sip)  printf "SFIP\t%d\t%s\n", sip[i], i
       for (i in dip)  printf "DFIP\t%d\t%s\n", dip[i], i
       for (u in fu)   printf "FUSR\t%d\t%s\n", fu[u], u
@@ -454,10 +459,12 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   out ""; out "Top senders (total recipients):"
   grep '^RCPT' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -10 |
     awk -F'\t' '{printf "  %6d  %s\n", $2, $3}' >>"$BODY"
+  # alert only on mail sent FROM this server (login or script) – the list above also
+  # contains incoming mail, e.g. a shop sending many invoices to a customer's mailbox
   while IFS=$'\t' read -r _ n who; do
     [[ $who == "<> (bounce)" ]] && continue
-    (( n > WARN_MAILS_PER_SENDER )) && alert "Mail: $who sent to $n recipients"
-  done < <(grep '^RCPT' <<<"$MAILSTATS")
+    (( n > WARN_MAILS_PER_SENDER )) && alert "Mail: $who sent to $n recipients from this server (mailbox login or script)"
+  done < <(grep '^ORCP' <<<"$MAILSTATS")
 
   out ""; out "Authenticated mailboxes (mails, distinct IPs; IPs with country/operator, mails per IP):"
   SAIP=$(grep '^SAIP' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr)

@@ -404,7 +404,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `WARN_MAILS_PER_SENDER` | 150 | recipients per envelope sender |
+| `WARN_MAILS_PER_SENDER` | 150 | recipients per envelope sender, counting only mail sent **from** this server (after a mailbox login or by a local script). Incoming mail, e.g. a shop sending many invoices to one of your mailboxes, is listed under *Top senders* but raises no alert |
 | `WARN_MAILS_PER_SASL` | 150 | mails submitted by one authenticated mailbox |
 | `WARN_IPS_PER_MAILBOX` | 4 | distinct client IPs per mailbox (raise it if many users roam between networks) |
 | `WARN_FROM_MISMATCH` | 10 | mails with a sender domain different from the login's domain |
@@ -472,7 +472,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 
 - **Postfix logs `sasl_username` on failed logins too** (recent versions). The script handles this. If you adapt the parsing, keep in mind that a username appearing in the log does not mean the login succeeded.
 - **Webmail is analysed from Roundcube's own logs** (`/var/log/plesk-roundcube/sendmail` and `errors`), because Roundcube talks to Postfix and Dovecot from `localhost`: in the mail log those mails carry neither the user's IP nor (on Plesk) the mailbox name. Without this section, a hijacked mailbox sending spam through webmail would be invisible. Roundcube does not log successful logins by default (`log_logins = false`). The script doesn't need them, since every sent mail is logged with mailbox and IP. Leave that Plesk-managed config alone.
-- **"Top senders" includes incoming mail** (e.g. newsletters from Amazon SES). The *authenticated mailboxes*, *login ≠ from* and *scripts* sections are the ones that show what your server sends on behalf of your users.
+- **"Top senders" includes incoming mail** (e.g. newsletters from Amazon SES). The alert for that list only counts mail sent from this server, after a mailbox login or by a local script. The *authenticated mailboxes*, *login ≠ from* and *scripts* sections are the ones that show what your server sends on behalf of your users.
 - **Spamhaus** refuses queries coming through large public DNS resolvers. The report then shows `query-refused`, which means "unknown", not "listed". Use a local resolver for reliable results.
 - **Plesk panel logins** are matched best-effort in `/var/log/plesk/panel.log`, whose format differs between versions. SSH logins are reliable.
 - **TLS check** connects to the server's public IPv4. Domains that are mail-only, redirected elsewhere or without SSL are listed as "no matching certificate". That line is informational, not an alert.
@@ -542,6 +542,7 @@ Watch the repository (*Watch → Custom → Releases* or *All activity*) to get 
 
 ### Changelog
 
+- **v1.0.1** (on `main`, not yet released): the "sent to N recipients" alert only counts mail sent from this server (mailbox login or local script); incoming mail no longer triggers it, and delivery retries are no longer counted twice
 - **2026-11-02 – v1.0.0**: first release, after several days of running on a production server with about 40 domains. Version shown in the report header and with `--version`
 - **2026-11-02**: SPF/DKIM check recognizes Plesk domain aliases with the mail service switched off and lists them for information only instead of alerting (SPF `+all` is still reported)
 - **2026-10-30**: script restructured: one function per check (`check_mail`, `check_web`, `check_mailauth`, …) and a short `main()` that defines the order; local variables instead of globals shared between sections. Report output unchanged. New option `--only CHECK,…` runs single checks immediately without changing any state, `--list` shows the names
