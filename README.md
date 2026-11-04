@@ -256,7 +256,7 @@ apt install mmdb-bin            # RHEL-based: dnf install libmaxminddb (EPEL)
 /usr/local/sbin/plesk-server-report.sh --no-upload
 ```
 
-Options: `--no-upload` (print instead of upload), `--only CHECK,…` (run single checks, see [First run](#first-run)), `--list` (check names), `--version`, `--help`.
+Options: `--no-upload` (print instead of upload), `--only CHECK,…` (run single checks, see [First run](#first-run)), `--summary` (print the 24-hour summary from the stored reports), `--list` (check names), `--version`, `--help`.
 
 **Releases or `main`?** The [releases](../../releases) are tested versions that have been running on the author's server for a while. `main` gets every change as soon as it is made. To follow `main`, use `https://raw.githubusercontent.com/cmelius/plesk-monitoring-server-Report/main/plesk-server-report.sh` instead. The first line of every report shows the version.
 
@@ -376,10 +376,18 @@ Use a dedicated Nextcloud user and an app password (*Personal settings → Secur
 
 ## Reading the reports
 
-- **Yourself:** open `latest.txt`. The first lines tell you everything: `STATUS: OK` or `STATUS: WARNING (n)` followed by the list of alerts.
-- **With an AI assistant (this is how the author uses it, with Claude):** connect an assistant that supports your storage (e.g. a Google Drive or OneDrive connector) **to the dedicated account** and let it review the last 24 reports every morning as a scheduled task. Tell it what is normal on your server (known broken sites, mail-only domains, …) so it only reports real changes. Example prompt:
+Every run uploads three kinds of files:
 
-  > List all files in the folder `server-reports/<hostname>`. Read the reports of the last 24 hours (file names contain the UTC time). Report missing reports (gap > 2 h) as an issue. Summarise: outgoing spam signals, blocklist listings, new PHP files in uploads, logins from unknown IPs, failed services, 5xx/PHP errors, pending security updates, expiring certificates, backup status. Start with "All OK" or "Action required: …", max. 10 bullet points with a concrete next step. Read only, change nothing.
+| File | Content |
+|---|---|
+| `report-YYYYMMDD-HHMM.txt` | the full report of one run (time in the server's time zone, usually UTC) |
+| `latest.txt` | a copy of the newest report, including the daily checks and fail2ban |
+| `summary.txt` | all reports of the last 24 hours condensed into one file: every run with its status (gaps are easy to spot), every alert with how often and when it was seen, mail and web totals, peaks of load and RAM, and every line of the sections that are normally empty (successful logins, new PHP files in uploads, login ≠ from, webmail, WordPress attacks, traffic peaks, files served with 200) |
+
+- **Yourself:** open `latest.txt`. The first lines tell you everything: `STATUS: OK` or `STATUS: WARNING (n)` followed by the list of alerts. `summary.txt` shows what happened during the day.
+- **With an AI assistant (this is how the author uses it, with Claude):** connect an assistant that supports your storage (e.g. a Google Drive or OneDrive connector) **to the dedicated account** and let it review the day every morning as a scheduled task. Reading `summary.txt` and `latest.txt` instead of every single report keeps the review fast and cheap (two files instead of 24), without losing anything: the summary is built from the reports and keeps every alert. Tell the assistant what is normal on your server (known broken sites, mail-only domains, …) so it only reports real changes. Example prompt:
+
+  > In the folder `server-reports/<hostname>`, search for the files `summary.txt` and `latest.txt` by name – don't list the whole folder. Read both. `summary.txt` condenses all reports of the last 24 hours (runs with status, every alert with count and first/last time, totals, every successful login); `latest.txt` is the newest full report with the daily checks and fail2ban. If `summary.txt` is missing or its newest run is more than 2 hours old, report that as an issue. Check the run list for gaps (more than 2 hours between runs with an hourly cron job). Only if an alert needs more detail, read the single report of that time (`report-YYYYMMDD-HHMM.txt`). Summarise: outgoing spam signals, blocklist listings, new PHP files in uploads, logins from unknown IPs, failed services, 5xx/PHP errors, pending security updates, expiring certificates, mail authentication, exposed files, backup status. Start with "All OK" or "Action required: …", max. 10 bullet points with a concrete next step. Read only, change nothing.
 
 - A daily review **does not replace real-time alerting**. For "server down" use an uptime monitor (e.g. Plesk 360 Monitoring, Uptime Kuma), and set **outgoing mail limits** in Plesk (*Tools & Settings → Outgoing Mail Control*) so a hijacked mailbox is throttled immediately.
 
@@ -450,6 +458,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 | `WARN_BACKUP_HOURS` | 26 | maximum age of the last Plesk backup |
 | `REMOTE` | `reports:server-reports/<host>` | rclone `remote:path` for the upload, `""` = keep reports locally only |
 | `RETENTION_DAYS` / `LOCAL_KEEP_DAYS` | 7 / 7 | delete reports older than this many days remotely (0 = never) / locally |
+| `SUMMARY` / `SUMMARY_HOURS` | 1 / 24 | write and upload `summary.txt`, built from the local reports of the last `SUMMARY_HOURS` (see [Reading the reports](#reading-the-reports)), 0 = off |
 | `STATE_DIR` | `/var/lib/plesk-server-report` | log offsets, known login IPs, daily cache, local reports |
 | `VHOST_LOGS` | `/var/www/vhosts/system` | Plesk per-domain log directories |
 | `PLESK_PANEL_LOG` | `/var/log/plesk/panel.log` | Plesk panel log (successful panel logins) |
@@ -542,6 +551,7 @@ Watch the repository (*Watch → Custom → Releases* or *All activity*) to get 
 
 ### Changelog
 
+- **v1.1.0** (on `main`, not yet released): `summary.txt` – every run also writes a condensed summary of the last 24 hours (all alerts with count and first/last time, totals, every login and every finding of the normally empty sections) and uploads it next to `latest.txt`, so a daily review needs two files instead of every report; option `--summary`; example prompt for AI reviews updated (search the two files by name instead of listing the folder)
 - **v1.0.1** (on `main`, not yet released): the "sent to N recipients" alert only counts mail sent from this server (mailbox login or local script); incoming mail no longer triggers it, and delivery retries are no longer counted twice
 - **2026-11-02 – v1.0.0**: first release, after several days of running on a production server with about 40 domains. Version shown in the report header and with `--version`
 - **2026-11-02**: SPF/DKIM check recognizes Plesk domain aliases with the mail service switched off and lists them for information only instead of alerting (SPF `+all` is still reported)

@@ -28,6 +28,7 @@
 #   --only CHECK,...  run only these checks right now and print the result; nothing
 #                     is uploaded and no state is changed (log offsets, known IPs, …)
 #   --list            list the check names for --only
+#   --summary         print the summary of the last SUMMARY_HOURS from the stored reports (runs no checks)
 #   --version         print the version
 #   --help            show this help
 #
@@ -40,7 +41,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.0.1
+VERSION=1.1.0
 
 set -uo pipefail
 export LC_ALL=C
@@ -53,6 +54,8 @@ STATE_DIR=/var/lib/plesk-server-report
 REMOTE="reports:server-reports/${HOST}"  # rclone remote:path – empty = local only
 RETENTION_DAYS=7                         # delete remote reports older than x days (0 = never)
 LOCAL_KEEP_DAYS=7                        # keep local reports x days
+SUMMARY=1                                # write summary.txt (all reports of the last SUMMARY_HOURS condensed) and upload it
+SUMMARY_HOURS=24
 VHOST_LOGS=/var/www/vhosts/system        # Plesk per-domain log directories
 PLESK_PANEL_LOG=/var/log/plesk/panel.log
 ROUNDCUBE_LOG_DIR=""          # default: /var/log/plesk-roundcube (or /usr/share/psa-roundcube/logs)
@@ -1276,6 +1279,213 @@ write_report() {
   chmod 600 "$REPORT"
 }
 
+# ---------------------------------------------------------------- 24-hour summary
+# Condenses the local reports of the last SUMMARY_HOURS into one file (summary.txt):
+# every alert with count and first/last time, totals and peaks per section, and every
+# line of the rarely filled sections (logins, new PHP files, login ≠ from, webmail, …).
+# A reviewer (human or AI) reads this file plus latest.txt (daily checks, fail2ban)
+# instead of every single report. Built from the report files, so nothing is lost
+# that a report contains; the per-run reports stay as they are.
+summary_records() {   # summary_records FILE… – one tab-separated record per finding
+  awk '
+    function t(s) { gsub(/\t/, " ", s); return s }
+    FNR == 1 {
+      tm = "?"; if (match($0, /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]( [A-Z]+)?/)) tm = substr($0, RSTART, RLENGTH)
+      sec = ""; sub_ = ""; cur = ""; nrun++; next
+    }
+    FNR == 2 { print "RUN\t" tm "\t" $0; next }
+    /^ ! / { a = substr($0, 4); if (!(a in ac)) { ac[a] = 0; af[a] = tm; ao[++nao] = a }; ac[a]++; al[a] = tm; next }
+    /^== / { sec = $0; sub_ = ""; next }
+    sec ~ /DAILY CHECKS/ { next }
+    # ---------------- MAIL
+    sec ~ /== MAIL ==/ {
+      if ($0 ~ /^Delivered: /) { n = split($0, x, /[^0-9]+/); dl += x[2]; df += x[3]; bo += x[4]; if (x[5] + 0 > mq) { mq = x[5] + 0; mqt = tm }; next }
+      if ($0 ~ /^Rejections mentioning/) { r = $0; sub(/.*: /, "", r); rj += r; next }
+      if ($0 ~ /^DNS blocklists for/ && $0 ~ /LISTED/) { print "BL\t" tm "\t" t($0); next }
+      if ($0 ~ /^Top senders/) { sub_ = "top"; next }
+      if ($0 ~ /^Authenticated mailboxes/) { sub_ = "auth"; next }
+      if ($0 ~ /^Mailboxes sending with a foreign/) { sub_ = "mism"; next }
+      if ($0 ~ /^Mails sent by scripts/) { sub_ = "script"; next }
+      if ($0 ~ /^Failed mail logins:/) { s = $0; sub(/.*SMTP /, "", s); a1 = s + 0; sub(/.*POP3 /, "", s); a2 = s + 0
+                                         fs_ += a1; fd += a2; if (a1 + a2 > fm) { fm = a1 + a2; fmt = tm }; sub_ = "fip"; next }
+      if ($0 ~ /^Most attacked mailboxes \(failed SMTP/) { sub_ = "fusr"; next }
+      if ($0 ~ /^Webmail \(Roundcube\)/) { sub_ = "wsend"; next }
+      if ($0 ~ /^Failed webmail logins:/) { n = split($0, x, /[^0-9]+/); wf += x[2]; sub_ = "wfip"; next }
+      if ($0 ~ /^Most attacked mailboxes \(failed webmail/) { sub_ = "wfusr"; next }
+      if (sub_ == "auth" && $0 ~ /^ +[0-9]+ +[0-9]+ IPs /) { cur = $4; au[cur] += $1; next }
+      if (sub_ == "auth" && $0 ~ /^          [^ ]/) { l = $0; sub(/^ +/, "", l); k = cur SUBSEP l; if (!(k in aip)) { aip[k] = 1; print "AUTHIP\t" cur "\t" t(l) }; next }
+      if (sub_ == "mism" && $0 ~ /^ +[0-9]+ /) { l = $0; sub(/^ +/, "", l); print "MISM\t" tm "\t" t(l); next }
+      if (sub_ == "script" && $0 ~ /^ +[0-9]+ +uid /) { l = $0; sub(/^ +[0-9]+ +/, "", l); sc[l] += $1; next }
+      if (sub_ == "top" && $0 ~ /^ +[0-9]+  /) { ts[$2] += $1; next }
+      if (sub_ == "fip" && $0 ~ /^ +[0-9]+  /) { l = $0; sub(/^ +[0-9]+  /, "", l); fi[l] += $1; next }
+      if (sub_ == "fusr" && $0 ~ /^ +[0-9]+ /) { fu[$2] += $1; next }
+      if (sub_ == "wsend" && $0 ~ / rcpt /) { l = $0; sub(/^ +/, "", l); print "WSEND\t" tm "\t" t(l); next }
+      if (sub_ == "wsend" && $0 ~ /^          [^ ]/) { l = $0; sub(/^ +/, "", l); print "WSEND\t" tm "\t    " t(l); next }
+      if (sub_ == "wfusr" && $0 ~ /^ +[0-9]+ /) { wu[$2] += $1; next }
+      next
+    }
+    # ---------------- SYSTEM
+    sec ~ /== SYSTEM ==/ {
+      if ($0 ~ /^Load: /) { if ($4 + 0 > ml || mlt == "") { ml = $4 + 0; mlt = tm }; c = $0; sub(/.* on /, "", c); sub(/ cores.*/, "", c); cores = c; next }
+      if ($0 ~ /^CPU per system user/) { sub_ = "cpu"; next }
+      if ($0 ~ /^Top processes/) { sub_ = ""; next }
+      if ($0 ~ /^RAM: / && match($0, /\([0-9]+ %\)/)) { p = substr($0, RSTART + 1, RLENGTH - 4) + 0; if (rmt == "" || p < rm) { rm = p; rmt = tm }; next }
+      if ($0 ~ /^Filesystems/) { sub_ = "fs"; next }
+      if (sub_ == "cpu" && $0 ~ /^ +[0-9.]+ %/) { if ($1 + 0 > cu[$3] + 0) { cu[$3] = $1 + 0; cut[$3] = tm }; next }
+      if (sub_ == "fs" && $0 ~ /^ +[0-9]+% /) { p = $1; sub(/%/, "", p); if (!($2 in dk) || p + 0 > dk[$2] + 0) dk[$2] = p + 0; next }
+      next
+    }
+    # ---------------- WEB
+    sec ~ /== WEB / {
+      if ($0 ~ /^requests \|/) { sub_ = "table"; next }
+      if ($0 ~ /^WordPress login attacks/) { sub_ = "wp"; next }
+      if ($0 ~ /^PHP fatal errors/) { sub_ = "fatal"; next }
+      if ($0 ~ /^Attack patterns/) { sub_ = "att"; next }
+      if ($0 ~ /^Traffic peaks/) { sub_ = "peak"; next }
+      if ($0 ~ /^ModSecurity/) { sub_ = "modsec"; next }
+      if (sub_ == "table" && $0 ~ /^ +[0-9]+ +[0-9]+ +[0-9]+  /) { wr[$4] += $1; w5[$4] += $2; wl[$4] += $3; next }
+      if (sub_ == "wp" && $0 ~ /^  /) { l = $0; sub(/^  /, "", l); print "WP\t" tm "\t" t(l); next }
+      if (sub_ == "fatal" && $0 ~ /^ +[0-9]+ /) { fa[$2] += $1; if (!($2 in fx)) { m = $0; sub(/^[^–]*– /, "", m); fx[$2] = m }; next }
+      if (sub_ == "att" && $0 ~ / SQLi /) {
+        cur = $1; l = $0; i = 0
+        while (match(l, /[0-9]+\/[0-9]+/)) { i++; v = substr(l, RSTART, RLENGTH); split(v, y, "/"); at[cur, i] += y[1]; at2[cur, i] += y[2]; l = substr(l, RSTART + RLENGTH) }
+        atd[cur] = 1; next
+      }
+      if (sub_ == "att" && $0 ~ /served with 200 AND present on disk:/) { f = $0; sub(/.*disk: /, "", f); k = cur SUBSEP f; if (!(k in sv)) { sv[k] = 1; print "SERVED\t" tm "\t" cur "\t" t(f) }; next }
+      if (sub_ == "peak" && $0 ~ /^  [^ ]/) { l = $0; sub(/^  /, "", l); print "PEAK\t" tm "\t" t(l); next }
+      if (sub_ == "modsec" && $0 ~ /^ +[0-9]+ +[0-9]+  /) { mh[$3] += $1; mb[$3] += $2; next }
+      next
+    }
+    # ---------------- WEBROOTS, LOGINS, SERVICES
+    sec ~ /WEBROOTS/ {
+      if ($0 ~ /^(New since last run|First run)/) { n = $0; sub(/.*: /, "", n); up += n; next }
+      if ($0 ~ /^  \//) { l = $0; sub(/^  /, "", l); print "UPLOAD\t" tm "\t" t(l) }
+      next
+    }
+    sec ~ /SUCCESSFUL LOGINS/ {
+      if ($0 ~ /^ +[0-9]+× /) {
+        c = $1; sub(/×.*/, "", c); l = $0; sub(/^ +[0-9]+× +/, "", l)
+        if (!(l in lc)) { lc[l] = 0; lf[l] = tm; lo[++nlo] = l }; lc[l] += c; ll[l] = tm
+      }
+      next
+    }
+    sec ~ /SERVICES/ {
+      if (($0 ~ /^Failed units: / && $0 !~ /: none$/) || ($0 ~ /^OOM killer: / && $0 !~ /: none$/)) print "SVC\t" tm "\t" t($0)
+      next
+    }
+    END {
+      for (i = 1; i <= nao; i++) { a = ao[i]; print "ALERT\t" ac[a] "\t" af[a] "\t" al[a] "\t" t(a) }
+      printf "MAILTOT\t%d\t%d\t%d\t%d\t%s\t%d\n", dl, df, bo, mq, mqt, rj
+      printf "FAILTOT\t%d\t%d\t%d\t%s\t%d\n", fs_, fd, fm, fmt, wf
+      for (u in au) print "AUTH\t" au[u] "\t" u
+      for (s in sc) print "SCRIPT\t" sc[s] "\t" s
+      for (u in fu) print "FUSR\t" fu[u] "\t" u
+      for (u in ts) print "TOPS\t" ts[u] "\t" u
+      for (u in fi) print "FIP\t" fi[u] "\t" t(u)
+      for (u in wu) print "WFUSR\t" wu[u] "\t" u
+      printf "SYS\t%s\t%s\t%s\t%s\t%s\n", ml, mlt, cores, rm, rmt
+      for (u in cu) print "CPU\t" cu[u] "\t" u "\t" cut[u]
+      for (d in dk) print "DISK\t" dk[d] "\t" d
+      for (d in wr) print "WEB\t" wr[d] "\t" w5[d] "\t" wl[d] "\t" d
+      for (d in fa) print "FATAL\t" fa[d] "\t" d "\t" t(fx[d])
+      for (d in atd) printf "ATT\t%d\t%s\t%d/%d\t%d/%d\t%d/%d\t%d/%d\t%d/%d\n", at[d,1]+at[d,2]+at[d,3]+at[d,4]+at[d,5], d, at[d,1], at2[d,1], at[d,2], at2[d,2], at[d,3], at2[d,3], at[d,4], at2[d,4], at[d,5], at2[d,5]
+      for (d in mh) print "MODSEC\t" mh[d] "\t" mb[d] "\t" d
+      print "UPTOT\t" up
+      for (i = 1; i <= nlo; i++) { l = lo[i]; print "LOGIN\t" lc[l] "\t" lf[l] "\t" ll[l] "\t" t(l) }
+      print "NRUN\t" nrun
+    }' "$@"
+}
+
+write_summary() {   # write_summary OUTFILE – from the local reports of the last SUMMARY_HOURS
+  local outf=$1 recs files newest n
+  files=$(find "$OUT_DIR" -maxdepth 1 -name 'report-*.txt' -mmin -$(( SUMMARY_HOURS * 60 )) 2>/dev/null | sort)
+  [[ -n $files ]] || return 0
+  newest=$(tail -n 1 <<<"$files")
+  # shellcheck disable=SC2086
+  recs=$(summary_records $files)
+  rec() { grep "^$1"$'\t' <<<"$recs" | cut -f2-; }
+  n=$(rec NRUN)
+  {
+    echo "Server summary $HOST – last $SUMMARY_HOURS h: $n report(s), $(rec RUN | head -1 | cut -f1) to $(rec RUN | tail -1 | cut -f1) – plesk-server-report v$VERSION"
+    echo "Built from the reports of this period. Daily checks and fail2ban: see latest.txt. Details of a run: report-<date>-<time>.txt"
+    echo ""
+    echo "== RUNS (time, status) =="
+    rec RUN | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
+    echo ""
+    echo "== ALERTS (times seen, first – last, text) =="
+    if [[ -n $(rec ALERT) ]]; then
+      rec ALERT | awk -F'\t' '{printf "  %3d×  %s – %s  %s\n", $1, $2, $3, $4}'
+    else echo "  none"; fi
+
+    echo ""; echo "== MAIL =="
+    rec MAILTOT | awk -F'\t' '{printf "Delivered: %d | deferred: %d | bounced: %d | highest queue: %d%s\nRejections mentioning blocklist/reputation: %d\n", $1, $2, $3, $4, ($5 != "" ? " (" $5 ")" : ""), $6}'
+    if [[ -n $(rec BL) ]]; then echo "Server IP LISTED on a DNS blocklist:"; rec BL | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
+    else echo "DNS blocklists for the server IP: not listed in any run"; fi
+    echo ""; echo "Top senders (total recipients; incoming mail included):"
+    rec TOPS | sort -t$'\t' -k1,1nr | head -10 | awk -F'\t' '{printf "  %6d  %s\n", $1, $2}'
+    echo ""; echo "Authenticated mailboxes (mails in total; every client IP seen):"
+    rec AUTH | sort -t$'\t' -k1,1nr | head -15 | while IFS=$'\t' read -r m u; do
+      printf '  %6d  %s\n' "$m" "$u"
+      rec AUTHIP | awk -F'\t' -v u="$u" '$1 == u {print "          " $2}' | head -6
+    done
+    echo ""; echo "Mailboxes sending with a foreign sender domain (login ≠ from):"
+    rec MISM | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
+    echo ""; echo "Mails sent by scripts (total per system user):"
+    rec SCRIPT | sort -t$'\t' -k1,1nr | head -10 | awk -F'\t' '{printf "  %6d  %s\n", $1, $2}'
+    echo ""
+    rec FAILTOT | awk -F'\t' '{printf "Failed mail logins: SMTP %d | IMAP/POP3 %d in total, most in one run: %d%s\n", $1, $2, $3, ($4 != "" ? " (" $4 ")" : "")}'
+    echo "Top IPs (failed mail logins, total; only IPs that were among the top 5 of a run):"
+    rec FIP | sort -t$'\t' -k1,1nr | head -10 | awk -F'\t' '{printf "  %6d  %s\n", $1, $2}'
+    echo "Most attacked mailboxes (failed SMTP logins, total):"
+    rec FUSR | sort -t$'\t' -k1,1nr | head -8 | awk -F'\t' '{printf "  %6d  %s\n", $1, $2}'
+    echo ""; echo "Webmail (Roundcube) – mails sent (time; mails, recipients, IPs):"
+    rec WSEND | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
+    rec FAILTOT | awk -F'\t' '{printf "Failed webmail logins: %d in total\n", $5}'
+    if [[ -n $(rec WFUSR) ]]; then
+      echo "Most attacked mailboxes (failed webmail logins, total):"
+      rec WFUSR | sort -t$'\t' -k1,1nr | head -5 | awk -F'\t' '{printf "  %6d  %s\n", $1, $2}'
+    fi
+
+    echo ""; echo "== SYSTEM =="
+    rec SYS | awk -F'\t' '{printf "Highest 5-min load: %s (%s) on %s cores | lowest available RAM: %s %% (%s)\n", $1, $2, $3, $4, $5}'
+    echo "Highest CPU per system user (snapshots):"
+    rec CPU | sort -t$'\t' -k1,1nr | head -5 | awk -F'\t' '{printf "  %6s %%  %s (%s)\n", $1, $2, $3}'
+    echo "Filesystems (highest usage):"
+    rec DISK | sort -t$'\t' -k1,1nr | awk -F'\t' '{printf "  %4s%%  %s\n", $1, $2}'
+    if [[ -n $(rec SVC) ]]; then echo "Failed services / OOM killer:"; rec SVC | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
+    else echo "Failed services / OOM killer: none in any run"; fi
+
+    echo ""; echo "== WEB (totals) =="
+    echo "requests | 5xx | login POSTs | domain"
+    rec WEB | sort -t$'\t' -k1,1nr | head -10 | awk -F'\t' '{printf "  %7d %5d %6d  %s\n", $1, $2, $3, $4}'
+    rec WEB | sort -t$'\t' -k1,1nr | tail -n +11 | awk -F'\t' '$2 > 0 || $3 > 0 {printf "  %7d %5d %6d  %s\n", $1, $2, $3, $4}'
+    echo ""; echo "WordPress login attacks (time, details):"
+    rec WP | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
+    echo ""; echo "PHP fatal errors (total, domain, first message):"
+    rec FATAL | sort -t$'\t' -k1,1nr | head -8 | awk -F'\t' '{printf "  %5d  %s – %s\n", $1, $2, $3}'
+    echo ""; echo "Attack patterns & sensitive-file probes (totals, of which answered 200):"
+    rec ATT | sort -t$'\t' -k1,1nr | head -12 | awk -F'\t' '{printf "  %-26s SQLi %s | traversal %s | code exec %s | XSS %s | sensitive files %s\n", $2, $3, $4, $5, $6, $7}'
+    if [[ -n $(rec SERVED) ]]; then
+      echo "  served with 200 AND present on disk (time, domain, file):"
+      rec SERVED | awk -F'\t' '{printf "    %s  %s  %s\n", $1, $2, $3}'
+    fi
+    echo ""; echo "Traffic peaks & distributed requests (time, details):"
+    rec PEAK | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
+    echo ""; echo "ModSecurity (total hits, of which blocked):"
+    rec MODSEC | sort -t$'\t' -k1,1nr | head -8 | awk -F'\t' '{printf "  %6d %6d  %s\n", $1, $2, $3}'
+
+    echo ""; echo "== WEBROOTS: PHP files in upload folders =="
+    echo "New in this period: $(rec UPTOT)"
+    rec UPLOAD | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
+
+    echo ""; echo "== SUCCESSFUL LOGINS (SSH, Plesk panel; count, first – last) =="
+    rec LOGIN | awk -F'\t' '{printf "  %4d×  %s – %s  %s\n", $1, $2, $3, $4}'
+
+    echo ""; echo "Newest report: $(basename "$newest")"
+  } >"$outf"
+  chmod 600 "$outf"
+}
+
 upload_report() {
   if (( ! UPLOAD )); then
     cat "$REPORT"
@@ -1283,6 +1493,10 @@ upload_report() {
     rclone copyto "$REPORT" "$REMOTE/$(basename "$REPORT")" --quiet &&
     rclone copyto "$REPORT" "$REMOTE/latest.txt" --quiet ||
       logger -t plesk-server-report "upload to $REMOTE failed"
+    if (( SUMMARY )) && [[ -s $OUT_DIR/summary.txt ]]; then
+      rclone copyto "$OUT_DIR/summary.txt" "$REMOTE/summary.txt" --quiet ||
+        logger -t plesk-server-report "upload of summary.txt to $REMOTE failed"
+    fi
     if (( RETENTION_DAYS > 0 )); then
       # delete old reports permanently (Google Drive: not into the trash)
       rclone delete "$REMOTE" --include 'report-*.txt' --min-age "${RETENTION_DAYS}d" \
@@ -1301,7 +1515,7 @@ list_checks() {
   echo "groups: hourly, daily, all"
 }
 parse_args() {
-  UPLOAD=1; ONLY=""; ONLY_MODE=0
+  UPLOAD=1; ONLY=""; ONLY_MODE=0; SUMMARY_ONLY=0
   while (( $# )); do
     case $1 in
       --no-upload) UPLOAD=0 ;;
@@ -1309,6 +1523,7 @@ parse_args() {
               ONLY=$2; shift ;;
       --only=*) ONLY=${1#--only=} ;;
       --list) list_checks; exit 0 ;;
+      --summary) SUMMARY_ONLY=1 ;;
       --version) echo "plesk-server-report $VERSION"; exit 0 ;;
       -h|--help) usage; exit 0 ;;
       *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
@@ -1358,6 +1573,11 @@ init() {
 main() {
   parse_args "$@"
   init
+  if (( SUMMARY_ONLY )); then
+    write_summary "$TMPD/summary.txt"
+    if [[ -s $TMPD/summary.txt ]]; then cat "$TMPD/summary.txt"; else echo "no reports of the last $SUMMARY_HOURS h in $OUT_DIR"; fi
+    return 0
+  fi
   if (( ONLY_MODE )); then
     local hourly daily
     hourly=$(only_list "$HOURLY_CHECKS"); daily=$(only_list "$DAILY_CHECKS")
@@ -1378,6 +1598,7 @@ main() {
   run_hourly $HOURLY_CHECKS
   daily_checks
   write_report
+  (( SUMMARY )) && write_summary "$OUT_DIR/summary.txt"
   upload_report
   find "$OUT_DIR" -name 'report-*.txt' -mtime +"$LOCAL_KEEP_DAYS" -delete
   echo "$RUN_START" >"$STATE_DIR/last_run"
