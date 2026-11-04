@@ -1313,10 +1313,19 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       if ($0 ~ /^Failed webmail logins:/) { n = split($0, x, /[^0-9]+/); wf += x[2]; sub_ = "wfip"; next }
       if ($0 ~ /^Most attacked mailboxes \(failed webmail/) { sub_ = "wfusr"; next }
       if (sub_ == "auth" && $0 ~ /^ +[0-9]+ +[0-9]+ IPs /) { cur = $4; au[cur] += $1; next }
-      if (sub_ == "auth" && $0 ~ /^          [^ ]/) { l = $0; sub(/^ +/, "", l); k = cur SUBSEP l; if (!(k in aip)) { aip[k] = 1; print "AUTHIP\t" cur "\t" t(l) }; next }
+      if (sub_ == "auth" && $0 ~ /^          [^ ]/) {   # "ip (CC, operator) ×n, ip (…) ×n, …" → sum per mailbox and IP
+        l = $0
+        while (match(l, /[0-9a-fA-F:.]+( \([^)]*\))? ×[0-9]+/)) {
+          e = substr(l, RSTART, RLENGTH); l = substr(l, RSTART + RLENGTH)
+          n = e; sub(/.*×/, "", n); e = substr(e, 1, length(e) - length(n) - 3)   # strip " ×n" (× is 2 bytes)
+          k = cur SUBSEP e; if (!(k in aip)) { aip[k] = 0; aio[++naio] = k }; aip[k] += n
+        }
+        if (l ~ /…/) amore[cur] = 1
+        next
+      }
       if (sub_ == "mism" && $0 ~ /^ +[0-9]+ /) { l = $0; sub(/^ +/, "", l); print "MISM\t" tm "\t" t(l); next }
       if (sub_ == "script" && $0 ~ /^ +[0-9]+ +uid /) { l = $0; sub(/^ +[0-9]+ +/, "", l); sc[l] += $1; next }
-      if (sub_ == "top" && $0 ~ /^ +[0-9]+  /) { ts[$2] += $1; next }
+      if (sub_ == "top" && $0 ~ /^ +[0-9]+  /) { l = $0; sub(/^ +[0-9]+  /, "", l); ts[l] += $1; next }
       if (sub_ == "fip" && $0 ~ /^ +[0-9]+  /) { l = $0; sub(/^ +[0-9]+  /, "", l); fi[l] += $1; next }
       if (sub_ == "fusr" && $0 ~ /^ +[0-9]+ /) { fu[$2] += $1; next }
       if (sub_ == "wsend" && $0 ~ / rcpt /) { l = $0; sub(/^ +/, "", l); print "WSEND\t" tm "\t" t(l); next }
@@ -1378,6 +1387,8 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       printf "MAILTOT\t%d\t%d\t%d\t%d\t%s\t%d\n", dl, df, bo, mq, mqt, rj
       printf "FAILTOT\t%d\t%d\t%d\t%s\t%d\n", fs_, fd, fm, fmt, wf
       for (u in au) print "AUTH\t" au[u] "\t" u
+      for (i = 1; i <= naio; i++) { split(aio[i], kk, SUBSEP); print "AUTHIP\t" kk[1] "\t" aip[aio[i]] "\t" t(kk[2]) }
+      for (u in amore) print "AUTHMORE\t" u
       for (s in sc) print "SCRIPT\t" sc[s] "\t" s
       for (u in fu) print "FUSR\t" fu[u] "\t" u
       for (u in ts) print "TOPS\t" ts[u] "\t" u
@@ -1426,7 +1437,9 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
     echo ""; echo "Authenticated mailboxes (mails in total; every client IP seen):"
     rec AUTH | sort -t$'\t' -k1,1nr | head -15 | while IFS=$'\t' read -r m u; do
       printf '  %6d  %s\n' "$m" "$u"
-      rec AUTHIP | awk -F'\t' -v u="$u" '$1 == u {print "          " $2}' | head -6
+      rec AUTHIP | awk -F'\t' -v u="$u" '$1 == u {print $2 "\t" $3}' | sort -t$'\t' -k1,1nr |
+        awk -F'\t' '{ s = s (s == "" ? "" : ", ") $2 " ×" $1; n++ } n == 6 { exit } END { if (s != "") print "          " s }'
+      rec AUTHMORE | grep -qxF "$u" && echo "          (more IPs in single runs – see the reports)"
     done
     echo ""; echo "Mailboxes sending with a foreign sender domain (login ≠ from):"
     rec MISM | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
