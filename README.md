@@ -54,14 +54,17 @@ Just as useful: the reports confirmed what is *fine*. Reverse DNS, HELO name and
 ### Example report (fictional data)
 
 ```
-Server report host.example.com – 2026-10-26 10:05 UTC
-STATUS: WARNING (6)
+Server report host.example.com – 2026-10-26 10:05 UTC – plesk-server-report v1.1.0
+STATUS: WARNING (9)
+ ! Mail: support@bank-secure.example sent to 700 recipients from this server (mailbox login or script)
  ! Mail: mailbox info@shop.example submitted 140 mails after logins from outside DE AT CH: 192.0.2.15 (BR, Example Cloud Ltd [datacenter]) 203.0.113.99 (VN, Example Telecom) – password compromised?
  ! Mail: mailbox info@shop.example used from 12 different IPs – password compromised?
  ! Mail: mailbox info@shop.example sent 140 mails with a foreign sender domain – spam?
- ! Web: 2 new PHP file(s) in wp-content/uploads – possible malware
  ! Web: blog.example logged 48 PHP fatal errors
+ ! Web: shop.example served the sensitive file /.env (HTTP 200, file exists) – remove it or block access; assume it was downloaded
+ ! Web: 2 new PHP file(s) in wp-content/uploads – possible malware
  ! Updates: 3 security update(s) pending
+ ! Web: shop.example exposes /.env publicly (HTTP 200) – remove it from the document root or block access
 
 == MAIL ==
 Source: /var/log/maillog, 5212 new lines
@@ -201,6 +204,10 @@ Mail server certificates for host.example.com:
   port 993: name ok, valid 61 more days
   port 995: name ok, valid 61 more days
 
+Domain DNS (points here? CAA, DNSSEC, domain blocklists):
+  moved.example: website points elsewhere (192.0.2.77, NL, Example Hosting B.V. [datacenter]) – moved? CDN?
+  39 domain(s) checked, findings listed above
+
 Exposed files in document roots (.env, .git, dumps, backups, config copies, info/admin tools):
   shop.example/.env – PUBLICLY REACHABLE (HTTP 200)
   shop.example: 1 file(s) found but blocked by the web server (HTTP 403), e.g. /.git/
@@ -209,12 +216,8 @@ Exposed files in document roots (.env, .git, dumps, backups, config copies, info
 Suspicious code in recently changed PHP files (typical webshell/backdoor patterns):
   42 document root(s) scanned, 0 suspicious file(s)
 
-Domain DNS (points here? CAA, DNSSEC, domain blocklists):
-  moved.example: website points elsewhere (192.0.2.77, NL, Example Hosting B.V. [datacenter]) – moved? CDN?
-  39 domain(s) checked, findings listed above
-
 Mail authentication (SPF / DKIM / DMARC):
-  nails.example                SPF fail | DKIM MISSING  | DMARC missing      | MX here | DNS ns1.other-provider.example
+  nails.example                SPF pass      | DKIM MISSING  | DMARC missing      | MX here | DNS ns1.other-provider.example
   38 domain(s) OK, 1 with findings. Alert only if SPF and DKIM both fail and the MX points here;
   a single missing/outdated record is a recommendation (DMARC passes if SPF or DKIM passes).
   DNS queried via 1.1.1.1
@@ -226,7 +229,69 @@ Backups:
 IP geolocation: DB-IP.com Lite databases (CC BY 4.0)
 ```
 
-The report above is what a hijacked mailbox and a hacked WordPress site look like: one mailbox, used from twelve different IPs, suddenly sends 140 mails pretending to be a bank, and two PHP files show up in the uploads folder of the same customer.
+The report above is what a hijacked mailbox and a hacked WordPress site look like: one mailbox, used from twelve different IPs, suddenly sends 140 mails to 700 recipients pretending to be a bank, two PHP files show up in the uploads folder of the same customer, and that site's `.env` file with its database password can be downloaded by anyone.
+
+<details>
+<summary><b>Example <code>summary.txt</code></b> (the same day, condensed from all 24 reports; fictional data, shortened)</summary>
+
+```
+Server summary host.example.com – last 24 h: 24 report(s), 2026-10-25 11:05 UTC to 2026-10-26 10:05 UTC – plesk-server-report v1.1.0
+Built from the reports of this period. Daily checks and fail2ban: see latest.txt. Details of a run: report-<date>-<time>.txt
+
+== RUNS (time, status) ==
+  2026-10-25 11:05 UTC  STATUS: OK
+  2026-10-25 12:05 UTC  STATUS: OK
+  …
+  2026-10-26 00:05 UTC  STATUS: OK
+  2026-10-26 01:05 UTC  STATUS: WARNING (2)
+  …
+  2026-10-26 09:05 UTC  STATUS: WARNING (4)
+  2026-10-26 10:05 UTC  STATUS: WARNING (9)
+
+== ALERTS (times seen, first – last, text) ==
+   10×  2026-10-26 01:05 UTC – 2026-10-26 10:05 UTC  Updates: 3 security update(s) pending
+   10×  2026-10-26 01:05 UTC – 2026-10-26 10:05 UTC  Web: shop.example exposes /.env publicly (HTTP 200) – remove it from the document root or block access
+    1×  2026-10-26 09:05 UTC – 2026-10-26 09:05 UTC  Mail: mailbox info@shop.example used from 5 different IPs – password compromised?
+    1×  2026-10-26 09:05 UTC – 2026-10-26 09:05 UTC  Mail: mailbox info@shop.example sent 23 mails with a foreign sender domain – spam?
+    1×  2026-10-26 10:05 UTC – 2026-10-26 10:05 UTC  Mail: support@bank-secure.example sent to 700 recipients from this server (mailbox login or script)
+    …
+
+== MAIL ==
+Delivered: 1890 | deferred: 7 | bounced: 3 | highest queue: 4 (2026-10-26 10:05 UTC)
+Rejections mentioning blocklist/reputation: 0
+DNS blocklists for the server IP: not listed in any run
+
+Authenticated mailboxes (mails in total; every client IP seen):
+     163  info@shop.example
+          198.51.100.4 (DE, Example Telekom AG) ×3
+          192.0.2.15 (BR, Example Cloud Ltd [datacenter]) ×12, 203.0.113.99 (VN, Example Telecom) ×8, …
+          192.0.2.15 (BR, Example Cloud Ltd [datacenter]) ×61, 203.0.113.99 (VN, Example Telecom) ×40, …
+      87  office@agency.example
+          198.51.100.20 (DE, Example Telekom AG) ×87
+
+Mailboxes sending with a foreign sender domain (login ≠ from):
+  2026-10-26 09:05 UTC  23  info@shop.example – e.g. support@bank-secure.example
+  2026-10-26 10:05 UTC  140  info@shop.example – e.g. support@bank-secure.example
+
+Failed mail logins: SMTP 1312 | IMAP/POP3 41 in total, most in one run: 118 (2026-10-26 03:05 UTC)
+…
+
+== SYSTEM ==
+Highest 5-min load: 2.84 (2026-10-26 03:05 UTC) on 8 cores | lowest available RAM: 61 % (2026-10-26 03:05 UTC)
+…
+
+== WEBROOTS: PHP files in upload folders ==
+New in this period: 2
+  2026-10-26 10:05 UTC  /var/www/vhosts/shop.example/httpdocs/wp-content/uploads/2026/10/cache.php
+  2026-10-26 10:05 UTC  /var/www/vhosts/shop.example/httpdocs/wp-content/uploads/2026/10/wp-tmp.php
+
+== SUCCESSFUL LOGINS (SSH, Plesk panel; count, first – last) ==
+     9×  2026-10-25 14:05 UTC – 2026-10-26 10:05 UTC  SSH   root           from 198.51.100.200   (publickey)  DE, Example Telekom AG
+```
+
+The summary shows what a single report can't: the first signs at 09:05 (five IPs, 23 mails with a foreign sender), the escalation an hour later, and that the exposed `.env` had been reported since the daily check at 01:05.
+
+</details>
 
 ---
 
