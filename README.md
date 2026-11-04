@@ -522,7 +522,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 | `WARN_CERT_DAYS` | 14 | certificate expiry warning |
 | `WARN_BACKUP_HOURS` | 26 | maximum age of the last Plesk backup |
 | `REMOTE` | `reports:server-reports/<host>` | rclone `remote:path` for the upload, `""` = keep reports locally only |
-| `RETENTION_DAYS` / `LOCAL_KEEP_DAYS` | 7 / 7 | delete reports older than this many days remotely (0 = never) / locally |
+| `RETENTION_DAYS` / `LOCAL_KEEP_DAYS` | 7 / 7 | delete reports older than this many days remotely / locally (0 = never). Remote deletion is permanent, not into the trash. `latest.txt` and `summary.txt` are replaced as new files on every run instead of being overwritten, so Google Drive keeps no older versions of them. Keep at least one day locally, `summary.txt` is built from the local reports |
 | `SUMMARY` / `SUMMARY_HOURS` | 1 / 24 | write and upload `summary.txt`, built from the local reports of the last `SUMMARY_HOURS` (see [Reading the reports](#reading-the-reports)), 0 = off |
 | `STATE_DIR` | `/var/lib/plesk-server-report` | log offsets, known login IPs, daily cache, local reports |
 | `VHOST_LOGS` | `/var/www/vhosts/system` | Plesk per-domain log directories |
@@ -616,6 +616,7 @@ Watch the repository (*Watch → Custom → Releases* or *All activity*) to get 
 
 ### Changelog
 
+- **v1.1.1** (on `main`, not yet released): local reports are deleted after exactly `LOCAL_KEEP_DAYS` days (`find -mtime +7` only matched files at least 8 days old); `latest.txt` and `summary.txt` are uploaded as new files instead of being overwritten, so Google Drive keeps no older versions of them for up to 30 days
 - **2026-11-04 – v1.1.0**: `summary.txt` – every run also writes a condensed summary of the last 24 hours (all alerts with count and first/last time, totals, every login and every finding of the normally empty sections) and uploads it next to `latest.txt`, so a daily review needs two files instead of every report; option `--summary`; example prompt for AI reviews updated (search the two files by name instead of listing the folder)
 - **2026-11-03 – v1.0.1** (released as part of v1.1.0): the "sent to N recipients" alert only counts mail sent from this server (mailbox login or local script); incoming mail no longer triggers it, and delivery retries are no longer counted twice
 - **2026-11-02 – v1.0.0**: first release, after several days of running on a production server with about 40 domains. Version shown in the report header and with `--version`

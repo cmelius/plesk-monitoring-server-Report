@@ -41,7 +41,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.1.0
+VERSION=1.1.1
 
 set -uo pipefail
 export LC_ALL=C
@@ -53,7 +53,7 @@ HOST=$(hostname -f 2>/dev/null || hostname)
 STATE_DIR=/var/lib/plesk-server-report
 REMOTE="reports:server-reports/${HOST}"  # rclone remote:path – empty = local only
 RETENTION_DAYS=7                         # delete remote reports older than x days (0 = never)
-LOCAL_KEEP_DAYS=7                        # keep local reports x days
+LOCAL_KEEP_DAYS=7                        # keep local reports x days (0 = never delete; summary.txt needs at least SUMMARY_HOURS)
 SUMMARY=1                                # write summary.txt (all reports of the last SUMMARY_HOURS condensed) and upload it
 SUMMARY_HOURS=24
 VHOST_LOGS=/var/www/vhosts/system        # Plesk per-domain log directories
@@ -1499,15 +1499,23 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
   chmod 600 "$outf"
 }
 
+# replace_remote LOCALFILE NAME – upload as a new file instead of overwriting: Google Drive (and
+# some other backends) keep the old content of an overwritten file as a version for up to 30 days,
+# which would keep report data longer than RETENTION_DAYS. Deleted permanently, not into the trash.
+replace_remote() {
+  rclone deletefile "$REMOTE/$2" --drive-use-trash=false --quiet 2>/dev/null
+  rclone copyto "$1" "$REMOTE/$2" --quiet
+}
+
 upload_report() {
   if (( ! UPLOAD )); then
     cat "$REPORT"
   elif [[ -n $REMOTE ]] && command -v rclone >/dev/null; then
     rclone copyto "$REPORT" "$REMOTE/$(basename "$REPORT")" --quiet &&
-    rclone copyto "$REPORT" "$REMOTE/latest.txt" --quiet ||
+    replace_remote "$REPORT" latest.txt ||
       logger -t plesk-server-report "upload to $REMOTE failed"
     if (( SUMMARY )) && [[ -s $OUT_DIR/summary.txt ]]; then
-      rclone copyto "$OUT_DIR/summary.txt" "$REMOTE/summary.txt" --quiet ||
+      replace_remote "$OUT_DIR/summary.txt" summary.txt ||
         logger -t plesk-server-report "upload of summary.txt to $REMOTE failed"
     fi
     if (( RETENTION_DAYS > 0 )); then
@@ -1613,7 +1621,8 @@ main() {
   write_report
   (( SUMMARY )) && write_summary "$OUT_DIR/summary.txt"
   upload_report
-  find "$OUT_DIR" -name 'report-*.txt' -mtime +"$LOCAL_KEEP_DAYS" -delete
+  # -mmin instead of -mtime: "-mtime +7" only matches files at least 8 full days old
+  (( LOCAL_KEEP_DAYS > 0 )) && find "$OUT_DIR" -name 'report-*.txt' -mmin +$(( LOCAL_KEEP_DAYS * 1440 )) -delete
   echo "$RUN_START" >"$STATE_DIR/last_run"
 }
 
