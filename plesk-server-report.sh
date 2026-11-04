@@ -38,10 +38,15 @@
 # Layout: settings → helper functions → one function per check (check_<name>) →
 # report/upload → main(). The order of the report is defined in main().
 #
+# Safety: the script runs with low CPU/IO priority, every external command that can hang
+# has a time limit (CMD_TIMEOUT, FIND_TIMEOUT), cron runs are stopped after MAX_RUNTIME,
+# at most MAX_LOG_MB of each log is read per run, and an aborted or still running
+# previous run is reported as an alert instead of being skipped silently.
+#
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.1.1
+VERSION=1.2.0
 
 set -uo pipefail
 export LC_ALL=C
@@ -56,6 +61,11 @@ RETENTION_DAYS=7                         # delete remote reports older than x da
 LOCAL_KEEP_DAYS=7                        # keep local reports x days (0 = never delete; summary.txt needs at least SUMMARY_HOURS)
 SUMMARY=1                                # write summary.txt (all reports of the last SUMMARY_HOURS condensed) and upload it
 SUMMARY_HOURS=24
+# Limits, so that a hanging command or a huge log can't block the script or fill disk/RAM
+MAX_RUNTIME=50                # minutes: an unattended (cron) run is stopped after this – keep it below the cron interval (0 = no limit)
+CMD_TIMEOUT=120               # seconds per external command (plesk db, fail2ban-client, postqueue, journalctl, apt-get, rclone)
+FIND_TIMEOUT=600              # seconds per file-system scan of the web folders (find, grep)
+MAX_LOG_MB=200                # read at most x MB of new lines per log file and run, the newest part (0 = no limit)
 VHOST_LOGS=/var/www/vhosts/system        # Plesk per-domain log directories
 PLESK_PANEL_LOG=/var/log/plesk/panel.log
 ROUNDCUBE_LOG_DIR=""          # default: /var/log/plesk-roundcube (or /usr/share/psa-roundcube/logs)
@@ -146,8 +156,32 @@ section() { printf '\n== %s ==\n' "$1" >>"$BODY"; }
 out() { printf '%s\n' "$*" >>"$BODY"; }
 ignored_domain() { [[ " $WEB_IGNORE_DOMAINS " == *" $1 "* ]]; }
 num_gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
-# state files (offsets, scan stamps, known IPs) are only written in normal runs, not with --only
-can_write_state() { (( ! ONLY_MODE )); }
+# state files (offsets, scan stamps, known IPs) are only written in normal runs – not with --only,
+# --summary, or when the previous run still holds the lock
+can_write_state() { (( ! ONLY_MODE && ! SUMMARY_ONLY && ! LOCKED_OUT )); }
+# note TEXT – data problem (missing log, shortened log), shown as " i " line below the STATUS line
+note() {
+  [[ -n ${TMPD:-} ]] || return 0
+  grep -qxF -- "$*" "$TMPD/notes" 2>/dev/null || printf '%s\n' "$*" >>"$TMPD/notes"
+  return 0
+}
+# T SECONDS COMMAND… – run an external command with a time limit; a timeout becomes an alert
+T() {
+  local s=$1 rc c; shift
+  timeout --foreground -k 10 "$s" "$@"; rc=$?
+  if (( rc == 124 || rc == 137 )) && [[ -n ${TMPD:-} ]]; then
+    c="$*"; (( ${#c} > 90 )) && c="${c:0:90}…"
+    printf 'command timed out after %ss: %s\n' "$s" "$c" >>"$TMPD/timeouts"
+  fi
+  return $rc
+}
+timeouts_seen() { if [[ -f ${TMPD:-}/timeouts ]]; then wc -l <"$TMPD/timeouts"; else echo 0; fi; }
+# step NAME – remember what the run is doing (shown if the run hangs or is aborted)
+step() {
+  STEP=$1
+  [[ -n ${RUNFILE:-} ]] && can_write_state && printf '%s\t%s\t%s\t%s\n' "$$" "$RUN_START" "$NOW" "$STEP" >"$RUNFILE"
+  return 0
+}
 
 # ---------------------------------------------------------------- GeoIP
 geo_update() {   # download/refresh the DB-IP Lite databases (monthly)
@@ -210,8 +244,9 @@ geo_foreign() {
 # Document roots of all domains: "domain<TAB>path" (Plesk DB, fallback /var/www/vhosts/<domain>/httpdocs)
 docroots() {
   if [[ -z ${DOCROOTS_CACHE:-} ]]; then
-    DOCROOTS_CACHE=$(plesk db -Ne "SELECT d.name, h.www_root FROM domains d JOIN hosting h ON h.dom_id = d.id" 2>/dev/null)
-    if [[ -z $DOCROOTS_CACHE ]]; then
+    command -v plesk >/dev/null &&
+      DOCROOTS_CACHE=$(T "$CMD_TIMEOUT" plesk db -Ne "SELECT d.name, h.www_root FROM domains d JOIN hosting h ON h.dom_id = d.id" 2>/dev/null)
+    if [[ -z $DOCROOTS_CACHE && -n $VHOST_LOGS && -d $VHOST_LOGS ]]; then
       local d
       for d in "$(dirname "$VHOST_LOGS")"/*/httpdocs; do
         [[ -d $d ]] && DOCROOTS_CACHE+="$(basename "$(dirname "$d")")"$'\t'"$d"$'\n'
@@ -224,14 +259,15 @@ docroot_of() { docroots | awk -F'\t' -v d="$1" '$1 == d {print $2; exit}'; }
 # All Plesk sites plus the server host name (cached)
 site_domains() {
   [[ -n ${SITE_DOMAINS_CACHE:-} ]] ||
-    SITE_DOMAINS_CACHE=$( { command -v plesk >/dev/null && plesk bin site --list 2>/dev/null; echo "$HOST"; } | sort -u)
+    SITE_DOMAINS_CACHE=$( { command -v plesk >/dev/null && T "$CMD_TIMEOUT" plesk bin site --list 2>/dev/null; echo "$HOST"; } | sort -u)
   printf '%s\n' "$SITE_DOMAINS_CACHE"
 }
 
 # Print only the lines appended to a log file since the previous run.
 # Handles logrotate (the remainder of the rotated file .1 is read as well).
+# At most MAX_LOG_MB are read (the newest part); more is reported as a note.
 new_lines() {
-  local f=$1 key st ino size off=0 oino="" ooff=0
+  local f=$1 key st ino size off=0 oino="" ooff=0 rest=0 rsize max=$(( MAX_LOG_MB * 1048576 ))
   [[ -r $f ]] || return 0
   key=$(printf '%s' "$f" | md5sum | cut -c1-16)
   st="$STATE_DIR/offsets/$key"
@@ -241,7 +277,7 @@ new_lines() {
     if [[ $oino == "$ino" && $ooff -le $size ]]; then
       off=$ooff
     elif [[ -r $f.1 && $(stat -c %i "$f.1") == "$oino" ]]; then
-      tail -c +"$((ooff + 1))" "$f.1"          # rest of the file before rotation
+      rsize=$(stat -c %s "$f.1"); (( rsize > ooff )) && rest=$(( rsize - ooff ))   # rest of the file before rotation
     fi
   else
     # first run: only the last 20,000 lines to keep it fast
@@ -249,6 +285,11 @@ new_lines() {
     can_write_state && echo "$ino $size" >"$st"
     return 0
   fi
+  if (( max > 0 && rest + size - off > max )); then
+    note "log $f: $(( (rest + size - off) / 1048576 )) MB new since the last run – only the newest $MAX_LOG_MB MB analysed (MAX_LOG_MB)"
+    if (( size - off >= max )); then rest=0; off=$(( size - max )); else rest=$(( max - (size - off) )); fi
+  fi
+  (( rest > 0 )) && tail -c "$rest" "$f.1"
   tail -c +"$((off + 1))" "$f" | head -c "$((size - off))"
   can_write_state && echo "$ino $size" >"$st"
   return 0
@@ -371,7 +412,15 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   else
     # no log file (no rsyslog): fall back to the journal
     last=$(cat "$STATE_DIR/journal_since" 2>/dev/null || date -d '-1 hour' +%s)
-    journalctl --since "@$last" -o short -u postfix\* -u dovecot >"$TMP" 2>/dev/null
+    if command -v journalctl >/dev/null; then
+      T "$CMD_TIMEOUT" journalctl --since "@$last" -o short -u postfix\* -u dovecot 2>/dev/null |
+        if (( MAX_LOG_MB > 0 )); then head -c "$(( MAX_LOG_MB * 1048576 ))"; else cat; fi >"$TMP"
+      (( MAX_LOG_MB > 0 && $(stat -c %s "$TMP") >= MAX_LOG_MB * 1048576 )) &&
+        note "mail journal: more than $MAX_LOG_MB MB since the last run – only the first $MAX_LOG_MB MB analysed (MAX_LOG_MB)"
+    else
+      : >"$TMP"
+      note "mail: no mail log (/var/log/mail.log, /var/log/maillog) and no journal – mail figures are 0"
+    fi
     can_write_state && date +%s >"$STATE_DIR/journal_since"
     MAILLOG="journal"
   fi
@@ -438,7 +487,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     }' "$TMP")
 
   read -r _ SENT DEF BOU BL SF DF <<<"$(grep '^TOT' <<<"$MAILSTATS")"
-  QUEUE=$(postqueue -j 2>/dev/null | wc -l)
+  QUEUE=$(T "$CMD_TIMEOUT" postqueue -j 2>/dev/null | wc -l)
   out "Delivered: $SENT | deferred: $DEF | bounced: $BOU | queue: $QUEUE"
   out "Rejections mentioning blocklist/reputation: $BL"
   (( DEF > WARN_DEFERRED )) && alert "Mail: $DEF deferred deliveries"
@@ -587,6 +636,7 @@ check_webmail() {   # Roundcube: mails sent per mailbox with real client IP, fai
     grep '^WFUS' <<<"$WEBMAIL" | sort -t$'\t' -k2,2nr | head -5 | awk -F'\t' '{printf "  %6d  %s\n", $2, $3}' >>"$BODY"
   else
     out "  (no Roundcube log directory found)"
+    note "webmail: no Roundcube log directory found (ROUNDCUBE_LOG_DIR) – webmail not checked"
   fi
 }
 
@@ -629,9 +679,9 @@ check_fail2ban() {
   local JAILS j s cb tb cf
   section "FAIL2BAN"
   if command -v fail2ban-client >/dev/null; then
-    JAILS=$(fail2ban-client status 2>/dev/null | sed -n 's/.*Jail list:[[:space:]]*//p' | tr -d ' ' | tr ',' ' ')
+    JAILS=$(T "$CMD_TIMEOUT" fail2ban-client status 2>/dev/null | sed -n 's/.*Jail list:[[:space:]]*//p' | tr -d ' ' | tr ',' ' ')
     for j in $JAILS; do
-      s=$(fail2ban-client status "$j" 2>/dev/null)
+      s=$(T "$CMD_TIMEOUT" fail2ban-client status "$j" 2>/dev/null)
       cb=$(sed -n 's/.*Currently banned:[[:space:]]*//p' <<<"$s")
       tb=$(sed -n 's/.*Total banned:[[:space:]]*//p' <<<"$s")
       cf=$(sed -n 's/.*Currently failed:[[:space:]]*//p' <<<"$s")
@@ -647,6 +697,11 @@ check_web() {   # requests, 5xx, WordPress logins, PHP errors, attack patterns, 
   local dir dom lf n e5 lp top wl ws xr xb nl lt succ brute sline tok sip xnote ex
   local sq sq2 tr tr2 rc rc2 xs xs2 sf sf2 sfl pk pkm dp dn root f h b
   section "WEB (since last run)"
+  if [[ -z $VHOST_LOGS || ! -d $VHOST_LOGS ]]; then
+    out "  skipped – log directory not found"
+    note "web: log directory VHOST_LOGS=\"$VHOST_LOGS\" not found – web figures are 0"
+    return 0
+  fi
   : >"$TMP"; : >"$TMP.php"; : >"$TMP.att"; : >"$TMP.modsec"
   for dir in "$VHOST_LOGS"/*/logs; do
     [[ -d $dir ]] || continue
@@ -782,17 +837,23 @@ check_web() {   # requests, 5xx, WordPress logins, PHP errors, attack patterns, 
 }
 
 check_uploads() {   # new PHP files in wp-content/uploads
-  local SCAN_STAMP up CNT
+  local SCAN_STAMP up CNT nto
   section "WEBROOTS: PHP files in upload folders"
+  if [[ -z $VHOST_LOGS || ! -d $VHOST_LOGS ]]; then
+    out "  skipped – VHOST_LOGS not found"
+    note "web: log directory VHOST_LOGS=\"$VHOST_LOGS\" not found – web figures are 0"
+    return 0
+  fi
   SCAN_STAMP="$STATE_DIR/last_scan"
+  nto=$(timeouts_seen)
   can_write_state && touch "$SCAN_STAMP.new"   # remember the time before scanning
   while IFS= read -r up; do
     if [[ -f $SCAN_STAMP ]]; then
-      find "$up" -type f \( -iname '*.php' -o -iname '*.php[0-9]' -o -iname '*.phtml' -o -iname '*.phar' \) -newer "$SCAN_STAMP" 2>/dev/null
+      T "$FIND_TIMEOUT" find "$up" -type f \( -iname '*.php' -o -iname '*.php[0-9]' -o -iname '*.phtml' -o -iname '*.phar' \) -newer "$SCAN_STAMP" 2>/dev/null
     else
-      find "$up" -type f \( -iname '*.php' -o -iname '*.php[0-9]' -o -iname '*.phtml' -o -iname '*.phar' \) ! -name 'index.php' 2>/dev/null
+      T "$FIND_TIMEOUT" find "$up" -type f \( -iname '*.php' -o -iname '*.php[0-9]' -o -iname '*.phtml' -o -iname '*.phar' \) ! -name 'index.php' 2>/dev/null
     fi
-  done < <(find "$(dirname "$VHOST_LOGS")" -mindepth 2 -maxdepth 7 -type d -path '*/wp-content/uploads' ! -path '*/system/*' 2>/dev/null) |
+  done < <(T "$FIND_TIMEOUT" find "$(dirname "$VHOST_LOGS")" -mindepth 2 -maxdepth 7 -type d -path '*/wp-content/uploads' ! -path '*/system/*' 2>/dev/null) |
     grep -vE "$UPLOADS_PHP_IGNORE" >"$TMP"
   CNT=$(wc -l <"$TMP")
   if [[ -f $SCAN_STAMP ]]; then
@@ -803,7 +864,8 @@ check_uploads() {   # new PHP files in wp-content/uploads
     (( CNT > 0 )) && alert "Web: $CNT PHP file(s) found in wp-content/uploads – check whether legitimate"
   fi
   head -15 "$TMP" | sed 's/^/  /' >>"$BODY"
-  can_write_state && mv "$SCAN_STAMP.new" "$SCAN_STAMP"
+  # after a timeout the scan was incomplete: keep the old stamp, so the next run looks again
+  if [[ $(timeouts_seen) == "$nto" ]]; then can_write_state && mv "$SCAN_STAMP.new" "$SCAN_STAMP"; fi
   return 0
 }
 
@@ -812,11 +874,14 @@ check_logins() {   # successful SSH and Plesk panel logins, alert for previously
   section "SUCCESSFUL LOGINS (SSH, Plesk panel)"
   KNOWN="$STATE_DIR/known_login_ips"
   NEWLOGINS=$TMPD/new_login_alerts
+  [[ -n $PLESK_PANEL_LOG && -r $PLESK_PANEL_LOG ]] ||
+    note "logins: Plesk panel log PLESK_PANEL_LOG=\"$PLESK_PANEL_LOG\" not found – panel logins not checked"
   FIRST_LOGIN_RUN=0; [[ -f $KNOWN ]] || { FIRST_LOGIN_RUN=1; can_write_state && : >"$KNOWN"; }
   {
     if [[ -r /var/log/auth.log ]]; then new_lines /var/log/auth.log
     elif [[ -r /var/log/secure ]]; then new_lines /var/log/secure
-    else journalctl --since "@$SINCE" -u ssh -u sshd -o short 2>/dev/null; fi |
+    elif command -v journalctl >/dev/null; then T "$CMD_TIMEOUT" journalctl --since "@$SINCE" -u ssh -u sshd -o short 2>/dev/null
+    else note "logins: no SSH log (/var/log/auth.log, /var/log/secure) and no journal – SSH logins not checked"; fi |
       awk '/sshd.*Accepted / { for (i=1;i<=NF;i++) { if ($i=="Accepted") m=$(i+1); if ($i=="for") u=$(i+1); if ($i=="from") ip=$(i+1) }
                                print "SSH\t" u "\t" ip "\t" m }'
     # Plesk panel: best-effort match of successful login lines (format varies by version)
@@ -845,12 +910,12 @@ check_services() {   # failed systemd units, OOM killer
   local FAILED OOM
   section "SERVICES"
   if command -v systemctl >/dev/null; then
-    FAILED=$(systemctl --failed --no-legend --plain 2>/dev/null | awk '{print $1}' | xargs)
+    FAILED=$(T "$CMD_TIMEOUT" systemctl --failed --no-legend --plain 2>/dev/null | awk '{print $1}' | xargs)
     out "Failed units: ${FAILED:-none}"
     [[ -n $FAILED ]] && alert "Service(s) failed: $FAILED"
   fi
   if command -v journalctl >/dev/null; then
-    OOM=$(journalctl -k --since "@$SINCE" 2>/dev/null | grep -iE 'out of memory|oom-kill|killed process' | grep -oE 'Killed process [0-9]+ \([^)]+\)' | sort | uniq -c | xargs)
+    OOM=$(T "$CMD_TIMEOUT" journalctl -k --since "@$SINCE" 2>/dev/null | grep -iE 'out of memory|oom-kill|killed process' | grep -oE 'Killed process [0-9]+ \([^)]+\)' | sort | uniq -c | xargs)
     out "OOM killer: ${OOM:-none}"
     [[ -n $OOM ]] && alert "RAM: the kernel killed processes due to low memory: $OOM"
   fi
@@ -864,7 +929,7 @@ check_services() {   # failed systemd units, OOM killer
 check_updates() {   # pending (security) updates, reboot required
   local upg sec
   if command -v apt-get >/dev/null; then
-    upg=$(apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep '^Inst' || true)
+    upg=$(T "$CMD_TIMEOUT" apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep '^Inst' || true)
     sec=$(grep -ci 'security' <<<"$upg" || true)
     echo "Updates available: $(grep -c . <<<"$upg" || true), security updates: $sec"
     grep -i security <<<"$upg" | awk '{print "  " $2}' | head -10
@@ -1048,7 +1113,7 @@ check_exposed() {   # .env, .git, dumps, backups, config copies in document root
       else
         nerr=$((nerr + 1)); [[ -z $exerr ]] && exerr="$rel (HTTP ${code:-no answer})"
       fi
-    done < <(find "$root" -maxdepth 6 \( -path '*/node_modules' -o -path '*/wp-content/cache' -o -path '*/vendor/*/tests' \) -prune -o \
+    done < <(T "$FIND_TIMEOUT" find "$root" -maxdepth 6 \( -path '*/node_modules' -o -path '*/wp-content/cache' -o -path '*/vendor/*/tests' \) -prune -o \
                \( \( -type d -name .git \) -o \( -type d -name .svn \) \
                   -o \( -type f \( -name '.env' -o -name '.env.*' -o -iname '*.sql' -o -iname '*.sql.gz' -o -iname '*.sql.zip' \
                        -o -name 'wp-config.php.*' -o -name 'wp-config.php~' -o -name '.htpasswd' -o -name 'id_rsa' -o -name 'phpinfo.php' \
@@ -1062,9 +1127,10 @@ check_exposed() {   # .env, .git, dumps, backups, config copies in document root
   echo "  $n document root(s) scanned, $found finding(s); only publicly reachable ones raise an alert"
 }
 check_webshell() {   # recently changed PHP files with typical backdoor code
-  local stamp="$STATE_DIR/webshell_scan" new="$STATE_DIR/webshell_scan.new" dom root out="" n=0 hits=0 f
+  local stamp="$STATE_DIR/webshell_scan" new="$STATE_DIR/webshell_scan.new" dom root out="" n=0 hits=0 f nto
   local re='eval[[:space:]]*\([[:space:]]*(base64_decode|gzinflate|gzuncompress|str_rot13|gzdecode)[[:space:]]*\(|assert[[:space:]]*\([[:space:]]*\$_(POST|GET|REQUEST|COOKIE)|\$_(POST|GET|REQUEST|COOKIE)[[:space:]]*\[[^]]*\][[:space:]]*\(|preg_replace[[:space:]]*\([[:space:]]*["'"'"'][^"'"'"']*/e["'"'"']|create_function[[:space:]]*\([^)]*\$_(POST|GET|REQUEST)|(system|shell_exec|passthru|exec|popen|proc_open)[[:space:]]*\([[:space:]]*\$_(POST|GET|REQUEST|COOKIE)'
   can_write_state && touch "$new"
+  nto=$(timeouts_seen)
   echo ""; echo "Suspicious code in recently changed PHP files (typical webshell/backdoor patterns):"
   while IFS=$'\t' read -r dom root; do
     [[ -d $root ]] || continue
@@ -1074,11 +1140,12 @@ check_webshell() {   # recently changed PHP files with typical backdoor code
       hits=$((hits + 1))
       out+="  $f ($(date -r "$f" '+%Y-%m-%d %H:%M'))"$'\n'
       dalert "Web: suspicious code in recently changed file $f – check it (webshell/backdoor?)"
-    done < <(if [[ -f $stamp ]]; then find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) -newer "$stamp" 2>/dev/null
-             else find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) -mtime -"$WEBSHELL_FIRST_DAYS" 2>/dev/null; fi |
-             xargs -r -d '\n' grep -lE "$re" 2>/dev/null | head -30)
+    done < <(if [[ -f $stamp ]]; then T "$FIND_TIMEOUT" find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) -newer "$stamp" 2>/dev/null
+             else T "$FIND_TIMEOUT" find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) -mtime -"$WEBSHELL_FIRST_DAYS" 2>/dev/null; fi |
+             T "$FIND_TIMEOUT" xargs -r -d '\n' grep -lE "$re" 2>/dev/null | head -30)
   done < <(docroots)
-  can_write_state && mv "$new" "$stamp"
+  # after a timeout the scan was incomplete: keep the old stamp, so the next scan looks again
+  if [[ $(timeouts_seen) == "$nto" ]]; then can_write_state && mv "$new" "$stamp"; fi
   [[ -n $out ]] && printf '%s' "$out"
   echo "  $n document root(s) scanned, $hits suspicious file(s)"
 }
@@ -1091,16 +1158,18 @@ load_aliases() {
   while IFS=$'\t' read -r a m p; do
     [[ -n $a ]] || continue
     ALIAS_OF[$a]=$p; ALIAS_MAIL[$a]=$m
-  done < <(plesk db -Ne "SELECT a.name, a.mail, d.name FROM domain_aliases a JOIN domains d ON d.id = a.dom_id" 2>/dev/null)
+  done < <(T "$CMD_TIMEOUT" plesk db -Ne "SELECT a.name, a.mail, d.name FROM domain_aliases a JOIN domains d ON d.id = a.dom_id" 2>/dev/null)
   return 0
 }
 mailauth_scan() {
   local d doms ok=0 bad=0 nomail=0 spf spf_ok dkim dmarc mxinfo mxhere ns line key dnskey m nmb probs mailoff note
   load_aliases
+  [[ -n $MAILNAMES_DIR && -d $MAILNAMES_DIR ]] ||
+    note "mailauth: mailbox directory MAILNAMES_DIR=\"$MAILNAMES_DIR\" not found – mailbox counts are 0"
   doms=$( { ls "$MAILNAMES_DIR" 2>/dev/null; ls "$DKIM_KEY_DIR" 2>/dev/null; } | sort -u)
   for d in $doms; do
     [[ $d == *.* && " $MAILAUTH_IGNORE_DOMAINS " != *" $d "* ]] || continue
-    nmb=$(find "$MAILNAMES_DIR/$d" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | grep -vc '/@')
+    nmb=$(T "$CMD_TIMEOUT" find "$MAILNAMES_DIR/$d" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | grep -vc '/@')
     # MX: is mail for this domain hosted here?
     mxhere=0; mxinfo=""
     for m in $(DIGQ MX "$d" | awk '{print $2}'); do
@@ -1179,7 +1248,7 @@ check_backups() {   # latest Plesk backup (age, errors), Acronis agent
   echo ""; echo "Backups:"
   for pmm in /var/log/plesk/PMM /usr/local/psa/PMM/logs /opt/psa/PMM/logs; do [[ -d $pmm ]] && break; pmm=""; done
   if [[ -n $pmm ]]; then
-    last=$(find -L "$pmm" -maxdepth 2 -type d -name 'backup-*' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)
+    last=$(T "$CMD_TIMEOUT" find -L "$pmm" -maxdepth 2 -type d -name 'backup-*' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)
     if [[ -n $last ]]; then
       age=$(( (now - $(stat -c %Y "$last")) / 3600 ))
       local blog="$last/backup.log" nerr=0 nwarn=0 ec="" ex=""
@@ -1232,7 +1301,7 @@ check_needs_dig() { [[ $1 == serverdns || $1 == domaindns ]]; }
 
 run_hourly() {   # run_hourly NAME… – checks write directly into the report body
   local c
-  for c in "$@"; do check_enabled "$c" && "check_$c"; done
+  for c in "$@"; do check_enabled "$c" && { step "$c"; "check_$c"; }; done
   return 0
 }
 run_daily() {   # run_daily NAME… – section text to stdout, alerts to $DALERTS
@@ -1243,6 +1312,7 @@ run_daily() {   # run_daily NAME… – section text to stdout, alerts to $DALER
   for c in "$@"; do
     check_enabled "$c" || continue
     check_needs_dig "$c" && ! command -v dig >/dev/null && continue
+    step "daily: $c"
     "check_$c"
   done
   return 0
@@ -1252,9 +1322,10 @@ daily_checks() {
   local daily="$STATE_DIR/daily.txt" a
   DALERTS="$STATE_DIR/daily_alerts.txt"
   if [[ $(cat "$STATE_DIR/daily_date" 2>/dev/null) != "$(date +%F)" ]]; then
+    # mark the day first: if a daily check makes the run abort, the next runs still report hourly
+    date +%F >"$STATE_DIR/daily_date"
     # shellcheck disable=SC2086
     run_daily $DAILY_CHECKS >"$daily.new" 2>/dev/null; mv "$daily.new" "$daily"
-    date +%F >"$STATE_DIR/daily_date"
   fi
   section "DAILY CHECKS"
   cat "$daily" >>"$BODY" 2>/dev/null
@@ -1271,6 +1342,7 @@ write_report() {
     else
       echo "STATUS: OK"
     fi
+    [[ -s $TMPD/notes ]] && sed 's/^/ i /' "$TMPD/notes"
     cat "$BODY"
     echo ""
     if (( GEO_OK )); then echo "IP geolocation: DB-IP.com Lite databases (CC BY 4.0)"
@@ -1295,6 +1367,7 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
     }
     FNR == 2 { print "RUN\t" tm "\t" $0; next }
     /^ ! / { a = substr($0, 4); if (!(a in ac)) { ac[a] = 0; af[a] = tm; ao[++nao] = a }; ac[a]++; al[a] = tm; next }
+    /^ i / { a = substr($0, 4); if (!(a in nc)) { nc[a] = 0; nf[a] = tm; no[++nno] = a }; nc[a]++; nl[a] = tm; next }
     /^== / { sec = $0; sub_ = ""; next }
     sec ~ /DAILY CHECKS/ { next }
     # ---------------- MAIL
@@ -1384,6 +1457,7 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
     }
     END {
       for (i = 1; i <= nao; i++) { a = ao[i]; print "ALERT\t" ac[a] "\t" af[a] "\t" al[a] "\t" t(a) }
+      for (i = 1; i <= nno; i++) { a = no[i]; print "NOTE\t" nc[a] "\t" nf[a] "\t" nl[a] "\t" t(a) }
       printf "MAILTOT\t%d\t%d\t%d\t%d\t%s\t%d\n", dl, df, bo, mq, mqt, rj
       printf "FAILTOT\t%d\t%d\t%d\t%s\t%d\n", fs_, fd, fm, fmt, wf
       for (u in au) print "AUTH\t" au[u] "\t" u
@@ -1427,6 +1501,10 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
     if [[ -n $(rec ALERT) ]]; then
       rec ALERT | awk -F'\t' '{printf "  %3d×  %s – %s  %s\n", $1, $2, $3, $4}'
     else echo "  none"; fi
+    if [[ -n $(rec NOTE) ]]; then
+      echo ""; echo "== SCRIPT NOTES (missing data sources, shortened logs; times seen, first – last) =="
+      rec NOTE | awk -F'\t' '{printf "  %3d×  %s – %s  %s\n", $1, $2, $3, $4}'
+    fi
 
     echo ""; echo "== MAIL =="
     rec MAILTOT | awk -F'\t' '{printf "Delivered: %d | deferred: %d | bounced: %d | highest queue: %d%s\nRejections mentioning blocklist/reputation: %d\n", $1, $2, $3, $4, ($5 != "" ? " (" $5 ")" : ""), $6}'
@@ -1503,15 +1581,17 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
 # some other backends) keep the old content of an overwritten file as a version for up to 30 days,
 # which would keep report data longer than RETENTION_DAYS. Deleted permanently, not into the trash.
 replace_remote() {
-  rclone deletefile "$REMOTE/$2" --drive-use-trash=false --quiet 2>/dev/null
-  rclone copyto "$1" "$REMOTE/$2" --quiet
+  rcl deletefile "$REMOTE/$2" --drive-use-trash=false --quiet 2>/dev/null
+  rcl copyto "$1" "$REMOTE/$2" --quiet
 }
+# rclone with short network timeouts and few retries, as a whole limited to CMD_TIMEOUT
+rcl() { T "$CMD_TIMEOUT" rclone --contimeout 30s --timeout 60s --retries 2 --low-level-retries 3 "$@"; }
 
 upload_report() {
   if (( ! UPLOAD )); then
     cat "$REPORT"
   elif [[ -n $REMOTE ]] && command -v rclone >/dev/null; then
-    rclone copyto "$REPORT" "$REMOTE/$(basename "$REPORT")" --quiet &&
+    rcl copyto "$REPORT" "$REMOTE/$(basename "$REPORT")" --quiet &&
     replace_remote "$REPORT" latest.txt ||
       logger -t plesk-server-report "upload to $REMOTE failed"
     if (( SUMMARY )) && [[ -s $OUT_DIR/summary.txt ]]; then
@@ -1520,7 +1600,7 @@ upload_report() {
     fi
     if (( RETENTION_DAYS > 0 )); then
       # delete old reports permanently (Google Drive: not into the trash)
-      rclone delete "$REMOTE" --include 'report-*.txt' --min-age "${RETENTION_DAYS}d" \
+      rcl delete "$REMOTE" --include 'report-*.txt' --min-age "${RETENTION_DAYS}d" \
         --drive-use-trash=false --quiet ||
         logger -t plesk-server-report "deleting old reports in $REMOTE failed"
     fi
@@ -1563,37 +1643,116 @@ parse_args() {
   fi
 }
 # only_list GROUP – the checks of a group that were selected with --only, in report order
+# timeout_alerts – every command that hit its time limit in this run becomes an alert
+timeout_alerts() {
+  local a
+  [[ -s $TMPD/timeouts ]] || return 0
+  while IFS= read -r a; do alert "Script: $a – that part of the report is incomplete"; done < <(sort -u "$TMPD/timeouts")
+}
 only_list() {
   local c r=""
   for c in $1; do [[ " $ONLY " == *" $c "* ]] && r+=" $c"; done
   echo "$r"
 }
 
+# on_exit – runs at every end of the script: a run that did not finish (error, timeout, kill)
+# leaves $RUNFILE with its last step and exit code, so the next run can report it
+on_exit() {
+  local rc=$?
+  if [[ -n ${RUNFILE:-} ]] && can_write_state; then
+    if (( DONE )); then rm -f "$RUNFILE"
+    else
+      printf '%s\t%s\t%s\t%s\t%s\n' "$$" "${RUN_START:-}" "${NOW:-}" "${STEP:-}" "$rc" >"$RUNFILE"
+      logger -t plesk-server-report "run aborted (exit code $rc) during: ${STEP:-?}" 2>/dev/null
+    fi
+  fi
+  [[ -n ${TMPD:-} ]] && rm -rf "$TMPD"
+}
+
 init() {
+  local opid="" ostart="" onow="" ostep="" orc="" why
   # shellcheck source=/dev/null
   [[ -r $CONF ]] && . "$CONF"
+  if [[ -z $STATE_DIR || $STATE_DIR == / ]]; then
+    echo "plesk-server-report: STATE_DIR must not be empty or / – check $CONF" >&2
+    logger -t plesk-server-report "STATE_DIR must not be empty or /" 2>/dev/null
+    exit 1
+  fi
+  # Unattended runs (cron) are stopped after MAX_RUNTIME, together with everything they started.
+  # Interactive runs are not wrapped, so that Ctrl-C keeps working.
+  if [[ -z ${PSR_LIMITED:-} && ! -t 0 && -f $0 ]] && (( MAX_RUNTIME > 0 )); then
+    export PSR_LIMITED=1
+    exec timeout -k 60 "$(( MAX_RUNTIME * 60 ))" "$BASH" "$0" "${ARGS[@]}"
+  fi
+  renice -n 10 -p $$ >/dev/null 2>&1; ionice -c 2 -n 7 -p $$ >/dev/null 2>&1   # low priority
   OUT_DIR=$STATE_DIR/out
   mkdir -p "$STATE_DIR/offsets" "$OUT_DIR"
   chmod 700 "$STATE_DIR"
-  exec 9>"$STATE_DIR/lock"
-  flock -n 9 || exit 0
-  geo_init
   NOW=$(date '+%Y-%m-%d %H:%M %Z')
   RUN_START=$(date +%s)
+  ALERTS=()
+  trap on_exit EXIT
+  trap 'exit 143' TERM HUP
+  trap 'exit 130' INT
+  exec 9>"$STATE_DIR/lock"
+  if flock -n 9; then
+    rm -rf "$STATE_DIR"/tmp.*            # left behind by a killed run (safe: we hold the lock)
+    if can_write_state; then
+      RUNFILE=$STATE_DIR/running
+      if [[ -f $RUNFILE ]]; then         # the previous run did not finish
+        IFS=$'\t' read -r opid ostart onow ostep orc <"$RUNFILE"
+        case $orc in
+          "") why="killed" ;;
+          124|137|143) why="stopped – time limit MAX_RUNTIME reached, or killed" ;;
+          130) why="interrupted with Ctrl-C" ;;
+          *) why="exit code $orc" ;;
+        esac
+        alert "Script: the run of ${onow:-?} did not finish ($why) during: ${ostep:-?} – that report is missing; see the system log (journalctl -t plesk-server-report)"
+      fi
+      step "start"
+    fi
+  else
+    if (( ONLY_MODE || SUMMARY_ONLY )); then
+      echo "another run of plesk-server-report is in progress – try again in a few minutes" >&2
+      DONE=1; exit 1
+    fi
+    IFS=$'\t' read -r opid ostart onow ostep orc <"$STATE_DIR/running" 2>/dev/null
+    logger -t plesk-server-report "previous run (PID ${opid:-?}) is still running – this run is skipped" 2>/dev/null
+    # alert only if that run is really stuck: alive and older than MAX_RUNTIME (or 1 h) + 5 min
+    if [[ -z $opid || -z $ostart ]] || ! kill -0 "$opid" 2>/dev/null ||
+       (( RUN_START - ostart < ( MAX_RUNTIME > 0 ? MAX_RUNTIME : 60 ) * 60 + 300 )); then
+      DONE=1; exit 0
+    fi
+    LOCKED_OUT=1
+    LOCK_ALERT="Script: the previous run (started $onow, PID $opid) is still running after $(( (RUN_START - ostart) / 60 )) min, at: $ostep – this report has no new data; check the process (ps -fp $opid) and what it is waiting for"
+  fi
+  if (( LOCKED_OUT )); then GEO_OK=0; GEO_NOTE=""; else geo_init; fi
   SINCE=$(cat "$STATE_DIR/last_run" 2>/dev/null || date -d '-1 hour' +%s)
-  TMPD=$(mktemp -d)
-  trap 'rm -rf "$TMPD"' EXIT
+  # temporary files on disk under STATE_DIR (on Debian 13 /tmp is in RAM)
+  TMPD=$(mktemp -d "$STATE_DIR/tmp.XXXXXX")
   BODY=$TMPD/body; TMP=$TMPD/tmp; : >"$BODY"
   if (( ONLY_MODE )); then REPORT=$TMPD/report.txt
   else REPORT="$OUT_DIR/report-$(date '+%Y%m%d-%H%M').txt"; fi
-  ALERTS=()
   PUBIP6=""
   detect_pubip
+  local v
+  for v in VHOST_LOGS PLESK_PANEL_LOG MAILNAMES_DIR DKIM_KEY_DIR; do
+    [[ -n ${!v} ]] || note "config: $v is empty in $CONF – the checks that need it are skipped"
+  done
+  command -v plesk >/dev/null || note "plesk command not found – domain list from VHOST_LOGS only, domain aliases unknown"
 }
 
 main() {
+  ARGS=("$@")
   parse_args "$@"
   init
+  if (( LOCKED_OUT )); then          # previous run stuck: report that instead of staying silent
+    alert "$LOCK_ALERT"
+    write_report
+    (( SUMMARY )) && write_summary "$OUT_DIR/summary.txt"
+    upload_report
+    return 0
+  fi
   if (( SUMMARY_ONLY )); then
     write_summary "$TMPD/summary.txt"
     if [[ -s $TMPD/summary.txt ]]; then cat "$TMPD/summary.txt"; else echo "no reports of the last $SUMMARY_HOURS h in $OUT_DIR"; fi
@@ -1611,6 +1770,7 @@ main() {
       run_daily $daily >>"$BODY" 2>/dev/null
       while IFS= read -r a; do [[ -n $a ]] && alert "$a"; done <"$DALERTS"
     fi
+    timeout_alerts
     write_report
     cat "$REPORT"
     return 0
@@ -1618,12 +1778,17 @@ main() {
   # shellcheck disable=SC2086
   run_hourly $HOURLY_CHECKS
   daily_checks
+  timeout_alerts
+  step "report"
   write_report
   (( SUMMARY )) && write_summary "$OUT_DIR/summary.txt"
+  step "upload"
   upload_report
   # -mmin instead of -mtime: "-mtime +7" only matches files at least 8 full days old
   (( LOCAL_KEEP_DAYS > 0 )) && find "$OUT_DIR" -name 'report-*.txt' -mmin +$(( LOCAL_KEEP_DAYS * 1440 )) -delete
   echo "$RUN_START" >"$STATE_DIR/last_run"
 }
 
+LOCKED_OUT=0; DONE=0; STEP=""; RUNFILE=""; SUMMARY_ONLY=0; ONLY_MODE=0
 main "$@"
+DONE=1
