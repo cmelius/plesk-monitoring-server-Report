@@ -2,7 +2,7 @@
 # =============================================================================
 # plesk-server-report.sh
 #
-# Hourly health & security report for Plesk servers (Linux, Postfix/Dovecot).
+# Hourly health & security report for Plesk servers (Linux, Postfix with Dovecot or Courier).
 #
 # Focus: outgoing spam from compromised mailboxes or hacked websites, CPU/RAM,
 # plus brute-force noise, fail2ban, web errors, successful logins, new PHP files
@@ -413,7 +413,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     # no log file (no rsyslog): fall back to the journal
     last=$(cat "$STATE_DIR/journal_since" 2>/dev/null || date -d '-1 hour' +%s)
     if command -v journalctl >/dev/null; then
-      T "$CMD_TIMEOUT" journalctl --since "@$last" -o short -u postfix\* -u dovecot 2>/dev/null |
+      T "$CMD_TIMEOUT" journalctl --since "@$last" -o short -u postfix\* -u dovecot -u courier\* 2>/dev/null |
         if (( MAX_LOG_MB > 0 )); then head -c "$(( MAX_LOG_MB * 1048576 ))"; else cat; fi >"$TMP"
       (( MAX_LOG_MB > 0 && $(stat -c %s "$TMP") >= MAX_LOG_MB * 1048576 )) &&
         note "mail journal: more than $MAX_LOG_MB MB since the last run – only the first $MAX_LOG_MB MB analysed (MAX_LOG_MB)"
@@ -469,8 +469,17 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       sf++; sip[ipof($0)]++
       if (match($0, /sasl_username=[^ ,]+/)) fu[substr($0, RSTART+14, RLENGTH-14)]++
     }
+    # IMAP/POP3 – Dovecot: "imap-login: Disconnected (auth failed, …): user=<x>, …, rip=1.2.3.4"
     /(imap|pop3)-login: .*(auth failed|Authentication failed)/ {
       df++; r=$0; if (match(r, /rip=[0-9a-fA-F:.]+/)) dip[substr(r, RSTART+4, RLENGTH-4)]++
+      if (match($0, /user=<[^>]+>/)) fu[substr($0, RSTART+6, RLENGTH-7)]++
+    }
+    # IMAP/POP3 – Courier (Plesk alternative): one line per failed attempt,
+    # "imapd: LOGIN FAILED, user=x, ip=[::ffff:1.2.3.4], port=[…]" (user= is not always logged)
+    /(imapd|pop3d)(-ssl)?(\[[0-9]+\])?: LOGIN FAILED/ {
+      df++
+      if (match($0, /ip=\[[^]]+\]/)) { r=substr($0, RSTART+4, RLENGTH-5); sub(/^::ffff:/, "", r); dip[r]++ }
+      if (match($0, /user=[^,]+/)) fu[substr($0, RSTART+5, RLENGTH-5)]++
     }
     END {
       printf "TOT\t%d\t%d\t%d\t%d\t%d\t%d\n", sent, def, bou, bl, sf, df
@@ -565,7 +574,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   while IFS=$'\t' read -r c ip; do
     geo "$ip"; printf '  %6d  %s%s\n' "$c" "$ip" "${GEO_LABEL:+ ($GEO_LABEL)}" >>"$BODY"
   done < <(grep -E '^(SFIP|DFIP)' <<<"$MAILSTATS" | awk -F'\t' '{a[$3]+=$2} END{for(i in a) print a[i]"\t"i}' | sort -nr | head -5)
-  out "Most attacked mailboxes (failed SMTP logins):"
+  out "Most attacked mailboxes (failed SMTP/IMAP/POP3 logins):"
   grep '^FUSR' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -5 |
     awk -F'\t' '{printf "  %6d  %s\n", $2, $3}' >>"$BODY"
 
@@ -1527,7 +1536,7 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
     rec FAILTOT | awk -F'\t' '{printf "Failed mail logins: SMTP %d | IMAP/POP3 %d in total, most in one run: %d%s\n", $1, $2, $3, ($4 != "" ? " (" $4 ")" : "")}'
     echo "Top IPs (failed mail logins, total; only IPs that were among the top 5 of a run):"
     rec FIP | sort -t$'\t' -k1,1nr | head -10 | awk -F'\t' '{printf "  %6d  %s\n", $1, $2}'
-    echo "Most attacked mailboxes (failed SMTP logins, total):"
+    echo "Most attacked mailboxes (failed SMTP/IMAP/POP3 logins, total):"
     rec FUSR | sort -t$'\t' -k1,1nr | head -8 | awk -F'\t' '{printf "  %6d  %s\n", $1, $2}'
     echo ""; echo "Webmail (Roundcube) – mails sent (time; mails, recipients, IPs):"
     rec WSEND | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'

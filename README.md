@@ -98,7 +98,7 @@ Failed mail logins: SMTP 64 | IMAP/POP3 3 – top IPs:
        9  192.0.2.200 (NL, Example Hosting B.V. [datacenter])
        3  198.51.100.66 (US, Example Cloud Ltd [datacenter])
        1  203.0.113.45 (CN, Example Telecom)
-Most attacked mailboxes (failed SMTP logins):
+Most attacked mailboxes (failed SMTP/IMAP/POP3 logins):
        8  admin@agency.example
        4  info@lawfirm.example
        3  jane
@@ -297,7 +297,7 @@ The summary shows what a single report can't: the first signs at 09:05 (five IPs
 
 ## Requirements
 
-- Plesk Obsidian on Linux with Postfix (tested on Debian; Ubuntu should work the same; RHEL-based systems are partially supported: updates via `dnf`, SSH logins via `/var/log/secure`)
+- Plesk Obsidian on Linux with Postfix and Dovecot or Courier for IMAP/POP3 – Plesk lets you choose; both log formats are recognized automatically (tested on Debian; Ubuntu should work the same; RHEL-based systems are partially supported: updates via `dnf`, SSH logins via `/var/log/secure`)
 - root access, `bash`, `awk`, `openssl`, `procps` (`top`, `free`) – all present on a standard Plesk server
 - optional: `fail2ban` (Plesk component), `rclone` for the upload, `mmdblookup` for geolocation (see below)
 
@@ -549,8 +549,9 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 ## Notes and limitations
 
 - **Postfix logs `sasl_username` on failed logins too** (recent versions). The script handles this. If you adapt the parsing, keep in mind that a username appearing in the log does not mean the login succeeded.
-- **Webmail is analysed from Roundcube's own logs** (`/var/log/plesk-roundcube/sendmail` and `errors`), because Roundcube talks to Postfix and Dovecot from `localhost`: in the mail log those mails carry neither the user's IP nor (on Plesk) the mailbox name. Without this section, a hijacked mailbox sending spam through webmail would be invisible. Roundcube does not log successful logins by default (`log_logins = false`). The script doesn't need them, since every sent mail is logged with mailbox and IP. Leave that Plesk-managed config alone.
+- **Webmail is analysed from Roundcube's own logs** (`/var/log/plesk-roundcube/sendmail` and `errors`), because Roundcube talks to Postfix and the IMAP server (Dovecot or Courier) from `localhost`: in the mail log those mails carry neither the user's IP nor (on Plesk) the mailbox name. Without this section, a hijacked mailbox sending spam through webmail would be invisible. Roundcube does not log successful logins by default (`log_logins = false`). The script doesn't need them, since every sent mail is logged with mailbox and IP. Leave that Plesk-managed config alone.
 - **"Top senders" includes incoming mail** (e.g. newsletters from Amazon SES). The alert for that list only counts mail sent from this server, after a mailbox login or by a local script. The *authenticated mailboxes*, *login ≠ from* and *scripts* sections are the ones that show what your server sends on behalf of your users.
+- **Courier IMAP/POP3 and fail2ban:** if Plesk uses Courier instead of Dovecot, its fail2ban jail `plesk-courierimap` is switched off by default, so failed IMAP/POP3 logins are never banned. Switch it on in *Tools & Settings → IP Address Banning → Jails*. Before you do, check the *Failed mail logins* section for IPs of your customers: a device with an outdated password retries every few seconds and gets its whole connection banned.
 - **Spamhaus** refuses queries coming through large public DNS resolvers. The report then shows `query-refused`, which means "unknown", not "listed". Use a local resolver for reliable results.
 - **Plesk panel logins** are matched best-effort in `/var/log/plesk/panel.log`, whose format differs between versions. SSH logins are reliable.
 - **TLS check** connects to the server's public IPv4. Domains that are mail-only, redirected elsewhere or without SSL are listed as "no matching certificate". That line is informational, not an alert.
@@ -621,7 +622,7 @@ Watch the repository (*Watch → Custom → Releases* or *All activity*) to get 
 
 ### Changelog
 
-- **v1.2.0** (on `main`, not yet released): safety limits – time limits for every command that can hang (`CMD_TIMEOUT`, `FIND_TIMEOUT`) and for the whole cron run (`MAX_RUNTIME`), at most `MAX_LOG_MB` per log and run, low CPU/IO priority, temporary files under the state directory instead of `/tmp`. Nothing fails silently any more: aborted runs, a run still hanging, commands that timed out raise a `Script: …` alert, and missing data sources (logs not found, empty paths in the configuration) are shown as ` i ` notes and in a new SCRIPT NOTES section of `summary.txt`. The daily checks no longer run again in every following run if one of them aborted the run. `--only` and `--summary` say so when another run is in progress instead of exiting silently. Example prompt: report `Script:` alerts and script notes. Includes v1.1.1:
+- **v1.2.0** (on `main`, not yet released): safety limits – time limits for every command that can hang (`CMD_TIMEOUT`, `FIND_TIMEOUT`) and for the whole cron run (`MAX_RUNTIME`), at most `MAX_LOG_MB` per log and run, low CPU/IO priority, temporary files under the state directory instead of `/tmp`. Nothing fails silently any more: aborted runs, a run still hanging, commands that timed out raise a `Script: …` alert, and missing data sources (logs not found, empty paths in the configuration) are shown as ` i ` notes and in a new SCRIPT NOTES section of `summary.txt`. The daily checks no longer run again in every following run if one of them aborted the run. `--only` and `--summary` say so when another run is in progress instead of exiting silently. Failed IMAP/POP3 logins are now also counted when Plesk uses Courier instead of Dovecot (until now they were missing, the report showed 0), including top IPs and attacked mailboxes; for Dovecot the attacked mailboxes are now listed too. Example prompt: report `Script:` alerts and script notes. Includes v1.1.1:
 - **v1.1.1**: local reports are deleted after exactly `LOCAL_KEEP_DAYS` days (`find -mtime +7` only matched files at least 8 days old); `latest.txt` and `summary.txt` are uploaded as new files instead of being overwritten, so Google Drive keeps no older versions of them for up to 30 days
 - **2026-11-04 – v1.1.0**: `summary.txt` – every run also writes a condensed summary of the last 24 hours (all alerts with count and first/last time, totals, every login and every finding of the normally empty sections) and uploads it next to `latest.txt`, so a daily review needs two files instead of every report; option `--summary`; example prompt for AI reviews updated (search the two files by name instead of listing the folder)
 - **2026-11-03 – v1.0.1** (released as part of v1.1.0): the "sent to N recipients" alert only counts mail sent from this server (mailbox login or local script); incoming mail no longer triggers it, and delivery retries are no longer counted twice
