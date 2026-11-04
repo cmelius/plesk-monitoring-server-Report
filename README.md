@@ -373,7 +373,7 @@ Install rclone with `apt install rclone` (Debian/Ubuntu) or `dnf install rclone`
    | `n/s/q>` | `n` (new remote) |
    | `name>` | `reports` |
    | `Storage>` | `drive` (Google Drive) |
-   | `client_id>` / `client_secret>` | Enter (empty). Fine for one small upload per hour; for heavy use [create your own client ID](https://rclone.org/drive/#making-your-own-client-id). |
+   | `client_id>` / `client_secret>` | Enter (empty) works, but rclone's built-in client ID is shared by all rclone users worldwide and regularly runs into Google's rate limit (`Error 403 … rateLimitExceeded`, uploads fail). Recommended: [create your own client ID](https://rclone.org/drive/#making-your-own-client-id) and enter it here (free, about 10 minutes). |
    | `scope>` | **`drive.file`**: rclone can only see files it created itself, not the rest of the drive |
    | `service_account_file>` | Enter |
    | `Edit advanced config?` | `n` |

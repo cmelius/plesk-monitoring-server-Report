@@ -1584,8 +1584,10 @@ replace_remote() {
   rcl deletefile "$REMOTE/$2" --drive-use-trash=false --quiet 2>/dev/null
   rcl copyto "$1" "$REMOTE/$2" --quiet
 }
-# rclone with short network timeouts and few retries, as a whole limited to CMD_TIMEOUT
-rcl() { T "$CMD_TIMEOUT" rclone --contimeout 30s --timeout 60s --retries 2 --low-level-retries 3 "$@"; }
+# rclone with short network timeouts, as a whole limited to CMD_TIMEOUT. rclone's own retries
+# stay at their defaults: Google Drive answers bursts with "rate limit exceeded", which rclone
+# handles by waiting and retrying
+rcl() { T "$CMD_TIMEOUT" rclone --contimeout 30s --timeout 60s "$@"; }
 
 upload_report() {
   if (( ! UPLOAD )); then
