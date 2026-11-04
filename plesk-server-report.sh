@@ -469,6 +469,9 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       sf++; sip[ipof($0)]++
       if (match($0, /sasl_username=[^ ,]+/)) fu[substr($0, RSTART+14, RLENGTH-14)]++
     }
+    # plausibility check: lines of the IMAP/POP3 server vs. login lines recognized (ok or failed)
+    /(dovecot|imap-login|pop3-login|imapd|pop3d)/ { imapl++ }
+    /(imap|pop3)-login: Login: / || /(imapd|pop3d)(-ssl)?(\[[0-9]+\])?: LOGIN, user=/ { imapok++ }
     # IMAP/POP3 – Dovecot: "imap-login: Disconnected (auth failed, …): user=<x>, …, rip=1.2.3.4"
     /(imap|pop3)-login: .*(auth failed|Authentication failed)/ {
       df++; r=$0; if (match(r, /rip=[0-9a-fA-F:.]+/)) dip[substr(r, RSTART+4, RLENGTH-4)]++
@@ -483,6 +486,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     }
     END {
       printf "TOT\t%d\t%d\t%d\t%d\t%d\t%d\n", sent, def, bou, bl, sf, df
+      printf "IMAPCHK\t%d\t%d\n", imapl, imapok + df
       for (u in sasl) printf "SASL\t%d\t%d\t%s\t%s\n", sasl[u], nip[u], u, ipl[u]
       for (k in sic) { split(k, kk, SUBSEP); printf "SAIP\t%d\t%s\t%s\n", sic[k], kk[1], kk[2] }
       for (m in pick) printf "PICK\t%d\t%s\n", pick[m], m
@@ -569,6 +573,10 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     (( n > WARN_MAILS_PER_SCRIPT )) && alert "Mail: scripts of ${user:-uid $uid} ($home) sent $n mails"
   done < <(grep '^PICK' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -10)
 
+  # IMAP/POP3 server active, but none of its login lines recognized → unknown log format, counts would be 0
+  read -r _ n c <<<"$(grep '^IMAPCHK' <<<"$MAILSTATS")"
+  (( ${n:-0} > 0 && ${c:-0} == 0 )) &&
+    note "mail: $n log lines of the IMAP/POP3 server, but no login recognized – log format unknown (supported: Dovecot, Courier), IMAP/POP3 figures are 0"
   out ""; out "Failed mail logins: SMTP $SF | IMAP/POP3 $DF – top IPs:"
   (( SF + DF > WARN_AUTH_FAIL )) && alert "Mail: $((SF + DF)) failed mail logins (brute force?)"
   while IFS=$'\t' read -r c ip; do
