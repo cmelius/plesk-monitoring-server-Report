@@ -570,26 +570,35 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   done < <(grep '^SASL' <<<"$MAILSTATS")
 
   # successful IMAP/POP3 logins: a mailbox read from an unexpected country sends nothing, so the
-  # sending checks above don't see it
+  # sending checks above don't see it. Every login from outside ALLOWED_COUNTRIES is listed, but
+  # the alert comes only once per mailbox and country (state: known_imap_countries) – someone on
+  # holiday triggers one alert, not one per run. First run: current countries are stored silently.
   out ""; out "IMAP/POP3 logins (logins, mailbox, IP) from outside ALLOWED_COUNTRIES:"
   local -A IMF=() IMU=() IMI=()
-  local imn=0
+  local imn=0 KNOWNC="$STATE_DIR/known_imap_countries" firstc=0 isnew
+  [[ -f $KNOWNC ]] || { firstc=1; can_write_state && : >"$KNOWNC"; }
   while IFS=$'\t' read -r _ c who ip; do
     [[ -n $ip ]] || continue
     imn=$((imn + c)); IMU[$who]=1; IMI[$ip]=1
     geo "$ip"
     if geo_foreign; then
-      printf '  %6d  %s  from %s (%s)\n' "$c" "$who" "$ip" "$GEO_LABEL" >>"$BODY"
-      [[ ${IMF[$who]:-} == *"$ip "* ]] || IMF[$who]+="$ip ($GEO_LABEL) "
+      isnew=""
+      if ! grep -qxF "$who $GEO_CC" "$KNOWNC" 2>/dev/null; then
+        can_write_state && echo "$who $GEO_CC" >>"$KNOWNC"
+        (( firstc )) || isnew=1
+      fi
+      printf '  %6d  %s  from %s (%s)%s\n' "$c" "$who" "$ip" "$GEO_LABEL" "${isnew:+  – first login from $GEO_CC}" >>"$BODY"
+      [[ -n $isnew && ${IMF[$who]:-} != *"$ip "* ]] && IMF[$who]+="$ip ($GEO_LABEL) "
     fi
   done < <(grep '^IMOK' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr)
+  (( firstc )) && out "  (first run: countries listed here are stored as known for these mailboxes, list: $KNOWNC)"
   if (( GEO_OK )) && [[ -n $ALLOWED_COUNTRIES ]]; then
     out "  ($imn logins of ${#IMU[@]} mailboxes from ${#IMI[@]} IPs checked)"
   else
     out "  ($imn logins of ${#IMU[@]} mailboxes – country check off: needs GeoIP and ALLOWED_COUNTRIES)"
   fi
   for who in "${!IMF[@]}"; do
-    alert "Mail: mailbox $who logged in via IMAP/POP3 from outside $ALLOWED_COUNTRIES: ${IMF[$who]% } – password compromised?"
+    alert "Mail: mailbox $who logged in via IMAP/POP3 from a new country outside $ALLOWED_COUNTRIES: ${IMF[$who]% } – travelling, or password compromised?"
   done
 
   out ""; out "Mailboxes sending with a foreign sender domain (login ≠ from):"
