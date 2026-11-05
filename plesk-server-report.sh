@@ -46,7 +46,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.2.0
+VERSION=1.3.0
 
 set -uo pipefail
 export LC_ALL=C
@@ -470,8 +470,16 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       if (match($0, /sasl_username=[^ ,]+/)) fu[substr($0, RSTART+14, RLENGTH-14)]++
     }
     # plausibility check: lines of the IMAP/POP3 server vs. login lines recognized (ok or failed)
-    /(dovecot|imap-login|pop3-login|imapd|pop3d)/ { imapl++ }
-    /(imap|pop3)-login: Login: / || /(imapd|pop3d)(-ssl)?(\[[0-9]+\])?: LOGIN, user=/ { imapok++ }
+    /(dovecot|imap-login|pop3-login|imap[ds]|pop3[ds])/ { imapl++ }
+    /(imap|pop3)-login: Login: / || /(imap|pop3)[ds](-ssl)?(\[[0-9]+\])?: LOGIN, user=/ { imapok++ }
+    # successful IMAP/POP3 logins per mailbox and client IP (country check)
+    /(imap|pop3)-login: Login: user=<[^>]+>.*rip=/ {
+      u=$0; sub(/.*user=</, "", u); sub(/>.*/, "", u); r=$0; sub(/.*rip=/, "", r); sub(/[, ].*/, "", r); iok[u SUBSEP r]++
+    }
+    /(imap|pop3)[ds](-ssl)?(\[[0-9]+\])?: LOGIN, user=[^,]+, ip=\[/ {
+      u=$0; sub(/.*LOGIN, user=/, "", u); sub(/,.*/, "", u); r=$0; sub(/.*ip=\[/, "", r); sub(/\].*/, "", r); sub(/^::ffff:/, "", r)
+      iok[u SUBSEP r]++
+    }
     # IMAP/POP3 – Dovecot: "imap-login: Disconnected (auth failed, …): user=<x>, …, rip=1.2.3.4"
     /(imap|pop3)-login: .*(auth failed|Authentication failed)/ {
       df++; r=$0; if (match(r, /rip=[0-9a-fA-F:.]+/)) dip[substr(r, RSTART+4, RLENGTH-4)]++
@@ -479,7 +487,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     }
     # IMAP/POP3 – Courier (Plesk alternative): one line per failed attempt,
     # "imapd: LOGIN FAILED, user=x, ip=[::ffff:1.2.3.4], port=[…]" (user= is not always logged)
-    /(imapd|pop3d)(-ssl)?(\[[0-9]+\])?: LOGIN FAILED/ {
+    /(imap|pop3)[ds](-ssl)?(\[[0-9]+\])?: LOGIN FAILED/ {
       df++
       if (match($0, /ip=\[[^]]+\]/)) { r=substr($0, RSTART+4, RLENGTH-5); sub(/^::ffff:/, "", r); dip[r]++ }
       if (match($0, /user=[^,]+/)) fu[substr($0, RSTART+5, RLENGTH-5)]++
@@ -487,6 +495,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     END {
       printf "TOT\t%d\t%d\t%d\t%d\t%d\t%d\n", sent, def, bou, bl, sf, df
       printf "IMAPCHK\t%d\t%d\n", imapl, imapok + df
+      for (k in iok) { split(k, kk, SUBSEP); printf "IMOK\t%d\t%s\t%s\n", iok[k], kk[1], kk[2] }
       for (u in sasl) printf "SASL\t%d\t%d\t%s\t%s\n", sasl[u], nip[u], u, ipl[u]
       for (k in sic) { split(k, kk, SUBSEP); printf "SAIP\t%d\t%s\t%s\n", sic[k], kk[1], kk[2] }
       for (m in pick) printf "PICK\t%d\t%s\n", pick[m], m
@@ -559,6 +568,29 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     (( n > WARN_MAILS_PER_SASL )) && alert "Mail: mailbox $who submitted $n mails"
     (( nip > WARN_IPS_PER_MAILBOX )) && alert "Mail: mailbox $who used from $nip different IPs – password compromised?"
   done < <(grep '^SASL' <<<"$MAILSTATS")
+
+  # successful IMAP/POP3 logins: a mailbox read from an unexpected country sends nothing, so the
+  # sending checks above don't see it
+  out ""; out "IMAP/POP3 logins (logins, mailbox, IP) from outside ALLOWED_COUNTRIES:"
+  local -A IMF=() IMU=() IMI=()
+  local imn=0
+  while IFS=$'\t' read -r _ c who ip; do
+    [[ -n $ip ]] || continue
+    imn=$((imn + c)); IMU[$who]=1; IMI[$ip]=1
+    geo "$ip"
+    if geo_foreign; then
+      printf '  %6d  %s  from %s (%s)\n' "$c" "$who" "$ip" "$GEO_LABEL" >>"$BODY"
+      [[ ${IMF[$who]:-} == *"$ip "* ]] || IMF[$who]+="$ip ($GEO_LABEL) "
+    fi
+  done < <(grep '^IMOK' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr)
+  if (( GEO_OK )) && [[ -n $ALLOWED_COUNTRIES ]]; then
+    out "  ($imn logins of ${#IMU[@]} mailboxes from ${#IMI[@]} IPs checked)"
+  else
+    out "  ($imn logins of ${#IMU[@]} mailboxes – country check off: needs GeoIP and ALLOWED_COUNTRIES)"
+  fi
+  for who in "${!IMF[@]}"; do
+    alert "Mail: mailbox $who logged in via IMAP/POP3 from outside $ALLOWED_COUNTRIES: ${IMF[$who]% } – password compromised?"
+  done
 
   out ""; out "Mailboxes sending with a foreign sender domain (login ≠ from):"
   while IFS=$'\t' read -r _ n who ex; do
@@ -1395,6 +1427,7 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       if ($0 ~ /^Top senders/) { sub_ = "top"; next }
       if ($0 ~ /^Authenticated mailboxes/) { sub_ = "auth"; next }
       if ($0 ~ /^Mailboxes sending with a foreign/) { sub_ = "mism"; next }
+      if ($0 ~ /^IMAP\/POP3 logins \(/) { sub_ = "imapf"; next }
       if ($0 ~ /^Mails sent by scripts/) { sub_ = "script"; next }
       if ($0 ~ /^Failed mail logins:/) { s = $0; sub(/.*SMTP /, "", s); a1 = s + 0; sub(/.*POP3 /, "", s); a2 = s + 0
                                          fs_ += a1; fd += a2; if (a1 + a2 > fm) { fm = a1 + a2; fmt = tm }; sub_ = "fip"; next }
@@ -1413,6 +1446,7 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
         if (l ~ /…/) amore[cur] = 1
         next
       }
+      if (sub_ == "imapf" && $0 ~ /^ +[0-9]+  .* from /) { l = $0; sub(/^ +/, "", l); print "IMAPF\t" tm "\t" t(l); next }
       if (sub_ == "mism" && $0 ~ /^ +[0-9]+ /) { l = $0; sub(/^ +/, "", l); print "MISM\t" tm "\t" t(l); next }
       if (sub_ == "script" && $0 ~ /^ +[0-9]+ +uid /) { l = $0; sub(/^ +[0-9]+ +/, "", l); sc[l] += $1; next }
       if (sub_ == "top" && $0 ~ /^ +[0-9]+  /) { l = $0; sub(/^ +[0-9]+  /, "", l); ts[l] += $1; next }
@@ -1536,6 +1570,8 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
         awk -F'\t' '{ s = s (s == "" ? "" : ", ") $2 " ×" $1; n++ } n == 6 { exit } END { if (s != "") print "          " s }'
       rec AUTHMORE | grep -qxF "$u" && echo "          (more IPs in single runs – see the reports)"
     done
+    echo ""; echo "IMAP/POP3 logins from outside the allowed countries (time; logins, mailbox, IP):"
+    rec IMAPF | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
     echo ""; echo "Mailboxes sending with a foreign sender domain (login ≠ from):"
     rec MISM | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
     echo ""; echo "Mails sent by scripts (total per system user):"
