@@ -8,6 +8,26 @@ The script only **reads** logs and system state. It never changes the server con
 
 > **Built with Claude.** This script was written together with [Claude](https://claude.ai) (Anthropic) and tested against a production Plesk server. On that server, Claude also reads the uploaded reports every morning as a scheduled task, through a Google Drive connector linked to a dedicated account, and sends a push notification when something needs attention. See [Reading the reports](#reading-the-reports). Findings from these daily reviews flow back into the script, see [Updates](#updates).
 
+## Quick start – no configuration needed
+
+The script works out of the box on a standard Plesk 18 server. Every setting further down has a sensible default; you can ignore them until a report shows you something you want to tune.
+
+```bash
+curl -fsSL -o /usr/local/sbin/plesk-server-report.sh \
+  https://github.com/cmelius/plesk-monitoring-server-Report/releases/latest/download/plesk-server-report.sh
+chmod 700 /usr/local/sbin/plesk-server-report.sh
+/usr/local/sbin/plesk-server-report.sh --no-upload        # test run: prints the report
+echo '5 * * * * root /usr/local/sbin/plesk-server-report.sh' > /etc/cron.d/plesk-server-report
+```
+
+That's it: from now on a report is written every hour to `/var/lib/plesk-server-report/out/`. Three optional extras are worth the few minutes:
+
+1. **Upload** the reports to cloud storage, so you (or an AI assistant) can read them anywhere – [Storage for the reports](#storage-for-the-reports). Without it, the reports stay on the server.
+2. **Geolocation** of login IPs: `apt install mmdb-bin` – no configuration needed.
+3. **Country alerts:** `echo 'ALLOWED_COUNTRIES="DE AT CH"' >> /etc/plesk-server-report.conf` (your customers' countries).
+
+The sections below explain everything in detail; you don't need to read them to get started.
+
 ---
 
 ## What it found so far
@@ -462,7 +482,7 @@ Every run uploads three kinds of files:
 
 ## Configuration
 
-Override any default in `/etc/plesk-server-report.conf` (bash syntax; it survives script updates):
+**You don't need to change anything here** – the defaults fit a typical Plesk server with an hourly cron job. Override a default only when a report tells you to (e.g. a threshold that is too low for your server) in `/etc/plesk-server-report.conf` (bash syntax; it survives script updates):
 
 ```bash
 REMOTE="reports:server-reports/myhost"   # "" = local only
