@@ -78,7 +78,7 @@ WARN_MAILS_PER_SCRIPT=100     # mails per system user (PHP mail() / sendmail)
 WARN_IPS_PER_MAILBOX=4        # distinct client IPs per authenticated mailbox
 WARN_FROM_MISMATCH=10         # mails of a mailbox with a foreign sender domain
 WARN_DEFERRED=100             # deferred deliveries
-WARN_BLOCKLIST=1              # remote rejections mentioning a blocklist/reputation
+WARN_BLOCKLIST=1              # remote rejections mentioning a blocklist, reputation, spam or rate limiting
 WARN_QUEUE=200                # messages in the Postfix queue
 WARN_AUTH_FAIL=300            # failed mail logins (SMTP + IMAP/POP3)
 WARN_LOAD_FACTOR=1.5          # 5-min load > CPU cores × factor
@@ -461,10 +461,20 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     / status=deferred/ { def++ }
     / status=bounced/  { bou++ }
     / status=(deferred|bounced)/ {
-      l=tolower($0)
-      if (l ~ /blacklist|blocklist|blocked|spamhaus|barracuda|spamcop|listed|reputation|poor ip|banned/) {
-        bl++; if (blx < 3) bex[++blx]=substr($0, 1, 300)
+      l=tolower($0); sub(/.* status=(deferred|bounced) /, "", l)   # only the remote reply, not the addresses
+      # blocklists and reputation, plus the wording of the big providers: Gmail "likely unsolicited",
+      # "unusual rate" (4.7.28), unauthenticated (5.7.26); Microsoft "block list", "rate limited" (4.7.650)
+      if (l ~ /blacklist|blocklist|block list|blocked|spamhaus|barracuda|spamcop|listed|reputation|poor ip|banned|unsolicited|spam|rate limit|rate-limit|unusual rate|4\.7\.28|5\.7\.26|4\.7\.650/) {
+        # example: time, recipient domain and the remote reply (without the delivery details)
+        if (blx < 3) { d=$0
+          e=substr($0, 1, 15); sub(/.* to=<[^@>]*@?/, "", d); sub(/>.*/, "", d); r=$0; sub(/.* status=(deferred|bounced) \(/, "", r)
+          bex[++blx]=e " " d ": " substr(r, 1, 220) }
+        bl++
       }
+    }
+    # SpamAssassin skipped a message because it is larger than the scan limit (Plesk: SA_MAX_MAIL_SIZE)
+    /spamc\[[0-9]+\]: skipped message, greater than max message size/ {
+      sk++; if (match($0, /\([0-9]+ bytes\)/)) skl = substr($0, RSTART+1, RLENGTH-8)
     }
     /SASL (LOGIN|PLAIN|CRAM-MD5) authentication failed/ {
       sf++; sip[ipof($0)]++
@@ -496,6 +506,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     END {
       printf "TOT\t%d\t%d\t%d\t%d\t%d\t%d\n", sent, def, bou, bl, sf, df
       printf "IMAPCHK\t%d\t%d\n", imapl, imapok + df
+      printf "SKIP\t%d\t%s\n", sk, skl
       for (k in iok) { split(k, kk, SUBSEP); printf "IMOK\t%d\t%s\t%s\n", iok[k], kk[1], kk[2] }
       for (u in sasl) printf "SASL\t%d\t%d\t%s\t%s\n", sasl[u], nip[u], u, ipl[u]
       for (k in sic) { split(k, kk, SUBSEP); printf "SAIP\t%d\t%s\t%s\n", sic[k], kk[1], kk[2] }
@@ -512,11 +523,17 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   read -r _ SENT DEF BOU BL SF DF <<<"$(grep '^TOT' <<<"$MAILSTATS")"
   QUEUE=$(T "$CMD_TIMEOUT" postqueue -j 2>/dev/null | wc -l)
   out "Delivered: $SENT | deferred: $DEF | bounced: $BOU | queue: $QUEUE"
-  out "Rejections mentioning blocklist/reputation: $BL"
+  out "Rejections mentioning blocklist/reputation/spam/rate limit: $BL"
   (( DEF > WARN_DEFERRED )) && alert "Mail: $DEF deferred deliveries"
-  (( BL >= WARN_BLOCKLIST )) && alert "Mail: $BL rejections mentioning a blocklist/reputation – check the server IP"
+  (( BL >= WARN_BLOCKLIST )) && alert "Mail: $BL rejections by remote servers mentioning a blocklist, reputation, spam or rate limit – check the server IP and the examples"
   (( QUEUE > WARN_QUEUE )) && alert "Mail: $QUEUE messages in the queue"
   grep '^BLEX' <<<"$MAILSTATS" | cut -f2- | sed 's/^/  example: /' >>"$BODY"
+  read -r _ n c <<<"$(grep '^SKIP' <<<"$MAILSTATS")"
+  if (( ${n:-0} > 0 )); then
+    out "Spam filter: $n mail(s) not scanned – larger than the limit of ${c:-?} bytes (Plesk: SA_MAX_MAIL_SIZE in /etc/psa/psa.conf)"
+  else
+    out "Spam filter: all mails scanned (none above the size limit)"
+  fi
 
   if is_public_ipv4 "$PUBIP"; then
     REV=$(awk -F. '{print $4"."$3"."$2"."$1}' <<<"$PUBIP")
@@ -1445,6 +1462,8 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
     sec ~ /== MAIL ==/ {
       if ($0 ~ /^Delivered: /) { n = split($0, x, /[^0-9]+/); dl += x[2]; df += x[3]; bo += x[4]; if (x[5] + 0 > mq) { mq = x[5] + 0; mqt = tm }; next }
       if ($0 ~ /^Rejections mentioning/) { r = $0; sub(/.*: /, "", r); rj += r; next }
+      if ($0 ~ /^  example: /) { if (nbx < 5) { l = $0; sub(/^  example: /, "", l); print "BLX\t" tm "\t" t(substr(l, 1, 260)); nbx++ }; next }
+      if ($0 ~ /^Spam filter: [0-9]+ mail/) { r = $0; sub(/^Spam filter: /, "", r); skt += r + 0; if (match($0, /limit of [0-9]+/)) skl = substr($0, RSTART+9, RLENGTH-9); next }
       if ($0 ~ /^DNS blocklists for/ && $0 ~ /LISTED/) { print "BL\t" tm "\t" t($0); next }
       if ($0 ~ /^Top senders/) { sub_ = "top"; next }
       if ($0 ~ /^Authenticated mailboxes/) { sub_ = "auth"; next }
@@ -1532,6 +1551,7 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       for (i = 1; i <= nao; i++) { a = ao[i]; print "ALERT\t" ac[a] "\t" af[a] "\t" al[a] "\t" t(a) }
       for (i = 1; i <= nno; i++) { a = no[i]; print "NOTE\t" nc[a] "\t" nf[a] "\t" nl[a] "\t" t(a) }
       printf "MAILTOT\t%d\t%d\t%d\t%d\t%s\t%d\n", dl, df, bo, mq, mqt, rj
+      printf "SKIPTOT\t%d\t%s\n", skt, skl
       printf "FAILTOT\t%d\t%d\t%d\t%s\t%d\n", fs_, fd, fm, fmt, wf
       for (u in au) print "AUTH\t" au[u] "\t" u
       for (i = 1; i <= naio; i++) { split(aio[i], kk, SUBSEP); print "AUTHIP\t" kk[1] "\t" aip[aio[i]] "\t" t(kk[2]) }
@@ -1580,7 +1600,9 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
     fi
 
     echo ""; echo "== MAIL =="
-    rec MAILTOT | awk -F'\t' '{printf "Delivered: %d | deferred: %d | bounced: %d | highest queue: %d%s\nRejections mentioning blocklist/reputation: %d\n", $1, $2, $3, $4, ($5 != "" ? " (" $5 ")" : ""), $6}'
+    rec MAILTOT | awk -F'\t' '{printf "Delivered: %d | deferred: %d | bounced: %d | highest queue: %d%s\nRejections mentioning blocklist/reputation/spam/rate limit: %d\n", $1, $2, $3, $4, ($5 != "" ? " (" $5 ")" : ""), $6}'
+    rec BLX | awk -F'\t' '{printf "  example (%s): %s\n", $1, $2}'
+    rec SKIPTOT | awk -F'\t' '$1 > 0 {printf "Spam filter: %d mail(s) not scanned, larger than the limit of %s bytes\n", $1, $2} $1 == 0 {print "Spam filter: all mails scanned"}'
     if [[ -n $(rec BL) ]]; then echo "Server IP LISTED on a DNS blocklist:"; rec BL | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
     else echo "DNS blocklists for the server IP: not listed in any run"; fi
     echo ""; echo "Top senders (total recipients; incoming mail included):"
