@@ -11,6 +11,7 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 - **`WATCH_RECIPIENT_DOMAINS`** (new setting): business-critical recipient domains, e.g. `invoices.example.com`. Every deferral or bounce to them raises an alert with the remote reply.
 - **Spam filter line:** `Spam filter: N mail(s) not scanned` for mails above SpamAssassin's size limit (Plesk: `SA_MAX_MAIL_SIZE`), summed in `summary.txt`. The current limit is shown in MB and bytes, also when all mails were scanned.
 - README: quick start at the top. The script works without any configuration.
+- README: the example report and the example `summary.txt` show the new parts.
 
 ### Fixed
 - **Plesk panel logins were never detected.** `panel.log` contains no login events, and a task line with `runTaskUnderLogin=admin` could even be misread as a login. Logins are now read from the panel's access log `/var/log/plesk/httpsd_access_log` (`PLESK_PANEL_LOG` now points there): successful logins with IP and country, an alert for unknown IPs, and a count of failed attempts.

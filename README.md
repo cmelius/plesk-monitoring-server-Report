@@ -74,12 +74,14 @@ Just as useful: the reports confirmed what is *fine*. Reverse DNS, HELO name and
 ### Example report (fictional data)
 
 ```
-Server report host.example.com – 2026-10-26 10:05 UTC – plesk-server-report v1.1.0
-STATUS: WARNING (9)
+Server report host.example.com – 2026-10-26 10:05 UTC – plesk-server-report v1.3.0
+STATUS: WARNING (11)
  ! Mail: support@bank-secure.example sent to 700 recipients from this server (mailbox login or script)
  ! Mail: mailbox info@shop.example submitted 140 mails after logins from outside DE AT CH: 192.0.2.15 (BR, Example Cloud Ltd [datacenter]) 203.0.113.99 (VN, Example Telecom) – password compromised?
  ! Mail: mailbox info@shop.example used from 12 different IPs – password compromised?
  ! Mail: mailbox info@shop.example sent 140 mails with a foreign sender domain – spam?
+ ! Mail: 61 rejections by remote servers mentioning a blocklist, reputation, spam or rate limit – check the server IP and the examples
+ ! Mail: mailbox info@shop.example logged in via IMAP/POP3 from a new country outside DE AT CH: 192.0.2.15 (BR, Example Cloud Ltd [datacenter]) – travelling, or password compromised?
  ! Web: blog.example logged 48 PHP fatal errors
  ! Web: shop.example served the sensitive file /.env (HTTP 200, file exists) – remove it or block access; assume it was downloaded
  ! Web: 2 new PHP file(s) in wp-content/uploads – possible malware
@@ -88,8 +90,19 @@ STATUS: WARNING (9)
 
 == MAIL ==
 Source: /var/log/maillog, 5212 new lines
-Delivered: 162 | deferred: 3 | bounced: 1 | queue: 4
-Rejections mentioning blocklist/reputation/spam/rate limit: 0
+Delivered: 548 | deferred: 87 | bounced: 34 | queue: 4
+Rejections mentioning blocklist/reputation/spam/rate limit: 61
+  example: Oct 26 09:41:12 gmail.com: host gmail-smtp-in.l.google.com[192.0.2.26] said: 421-4.7.28 [203.0.113.10] Gmail has detected an unusual rate of unsolicited mail originating from your IP address. To protect our users from spam, mail sent from your IP addr
+  example: Oct 26 09:44:03 outlook.com: host outlook-com.olc.protection.outlook.com[192.0.2.40] said: 451 4.7.650 The mail server [203.0.113.10] has been temporarily rate limited due to IP reputation. (in reply to MAIL FROM command))
+  example: Oct 26 09:52:37 icloud.com: host mx01.mail.icloud.com[192.0.2.61] said: 550 5.7.1 Your message was rejected due to icloud.com's local policy [CS01] (in reply to end of DATA command))
+Outgoing deliveries per provider (sent / deferred / bounced):
+  google                   310 / 52 / 18
+  microsoft                141 / 29 / 11
+  gmx/web.de/ionos          47 / 0 / 2
+  apple icloud              12 / 6 / 3
+  t-online                   9 / 0 / 0
+  mailhost.example           6 / 0 / 0
+Watched recipient domain invoices.example.com: 3 sent, 0 deferred, 0 bounced
 Spam filter: all mails scanned – none above the size limit (limit 3.0 MB = 3145728 bytes, Plesk: SA_MAX_MAIL_SIZE in /etc/psa/psa.conf)
 DNS blocklists for 203.0.113.10: zen.spamhaus.org:clean bl.spamcop.net:clean b.barracudacentral.org:clean psbl.surriel.com:clean
 
@@ -106,6 +119,11 @@ Authenticated mailboxes (mails, distinct IPs; IPs with country/operator, mails p
           198.51.100.20 (DE, Example Telekom AG) ×9
        3   1 IPs  jane@lawfirm.example
           198.51.100.44 (AT, Example Kabel GmbH) ×3
+
+IMAP/POP3 logins (logins, mailbox, IP) from outside ALLOWED_COUNTRIES:
+      14  info@shop.example  from 192.0.2.15 (BR, Example Cloud Ltd [datacenter])  – first login from BR
+       6  jane@lawfirm.example  from 198.51.100.90 (ES, Example Movil S.A.)
+  (86 logins of 23 mailboxes from 31 IPs checked)
 
 Mailboxes sending with a foreign sender domain (login ≠ from):
      140  info@shop.example – e.g. support@bank-secure.example
@@ -196,7 +214,8 @@ New since last run: 2
 
 == SUCCESSFUL LOGINS (SSH, Plesk panel) ==
      2× SSH   root           from 198.51.100.200   (publickey)  DE, Example Telekom AG
-     1× Plesk admin          from 198.51.100.200   (panel)  DE, Example Telekom AG
+     1× Plesk -              from 198.51.100.200   (panel, user not logged)  DE, Example Telekom AG
+  Plesk panel: 7 failed login attempt(s) (fail2ban jail plesk-panel)
 
 == SERVICES ==
 Failed units: none
@@ -250,13 +269,13 @@ Backups:
 IP geolocation: DB-IP.com Lite databases (CC BY 4.0)
 ```
 
-The report above is what a hijacked mailbox and a hacked WordPress site look like: one mailbox, used from twelve different IPs, suddenly sends 140 mails to 700 recipients pretending to be a bank, two PHP files show up in the uploads folder of the same customer, and that site's `.env` file with its database password can be downloaded by anyone.
+The report above is what a hijacked mailbox and a hacked WordPress site look like: one mailbox, read via IMAP from a Brazilian datacenter for the first time and used from twelve different IPs, suddenly sends 140 mails to 700 recipients pretending to be a bank. Gmail, Microsoft and Apple start throttling and rejecting the server's mail – for every customer on it. Two PHP files show up in the uploads folder of the same customer, and that site's `.env` file with its database password can be downloaded by anyone. The second IMAP line (Spain) raises no alert: that mailbox has been seen there before, someone on holiday.
 
 <details>
 <summary><b>Example <code>summary.txt</code></b> (the same day, condensed from all reports of the last 24 hours – 24 with the hourly cron job, 12 if it runs every 2 hours; fictional data, shortened)</summary>
 
 ```
-Server summary host.example.com – last 24 h: 24 report(s), 2026-10-25 11:05 UTC to 2026-10-26 10:05 UTC – plesk-server-report v1.1.0
+Server summary host.example.com – last 24 h: 24 report(s), 2026-10-25 11:05 UTC to 2026-10-26 10:05 UTC – plesk-server-report v1.3.0
 Built from the reports of this period. Daily checks and fail2ban: see latest.txt. Details of a run: report-<date>-<time>.txt
 
 == RUNS (time, status) ==
@@ -267,19 +286,31 @@ Built from the reports of this period. Daily checks and fail2ban: see latest.txt
   2026-10-26 01:05 UTC  STATUS: WARNING (2)
   …
   2026-10-26 09:05 UTC  STATUS: WARNING (4)
-  2026-10-26 10:05 UTC  STATUS: WARNING (9)
+  2026-10-26 10:05 UTC  STATUS: WARNING (11)
 
 == ALERTS (times seen, first – last, text) ==
    10×  2026-10-26 01:05 UTC – 2026-10-26 10:05 UTC  Updates: 3 security update(s) pending
    10×  2026-10-26 01:05 UTC – 2026-10-26 10:05 UTC  Web: shop.example exposes /.env publicly (HTTP 200) – remove it from the document root or block access
     1×  2026-10-26 09:05 UTC – 2026-10-26 09:05 UTC  Mail: mailbox info@shop.example used from 5 different IPs – password compromised?
     1×  2026-10-26 09:05 UTC – 2026-10-26 09:05 UTC  Mail: mailbox info@shop.example sent 23 mails with a foreign sender domain – spam?
+    1×  2026-10-26 09:05 UTC – 2026-10-26 09:05 UTC  Mail: mailbox info@shop.example logged in via IMAP/POP3 from a new country outside DE AT CH: 192.0.2.15 (BR, Example Cloud Ltd [datacenter]) – travelling, or password compromised?
     1×  2026-10-26 10:05 UTC – 2026-10-26 10:05 UTC  Mail: support@bank-secure.example sent to 700 recipients from this server (mailbox login or script)
+    1×  2026-10-26 10:05 UTC – 2026-10-26 10:05 UTC  Mail: 61 rejections by remote servers mentioning a blocklist, reputation, spam or rate limit – check the server IP and the examples
     …
 
 == MAIL ==
-Delivered: 1890 | deferred: 7 | bounced: 3 | highest queue: 4 (2026-10-26 10:05 UTC)
-Rejections mentioning blocklist/reputation/spam/rate limit: 0
+Delivered: 2276 | deferred: 91 | bounced: 36 | highest queue: 4 (2026-10-26 10:05 UTC)
+Rejections mentioning blocklist/reputation/spam/rate limit: 61
+  example (2026-10-26 10:05 UTC): Oct 26 09:41:12 gmail.com: host gmail-smtp-in.l.google.com[192.0.2.26] said: 421-4.7.28 [203.0.113.10] Gmail has detected an unusual rate of unsolicited mail …
+  example (2026-10-26 10:05 UTC): Oct 26 09:44:03 outlook.com: host outlook-com.olc.protection.outlook.com[192.0.2.40] said: 451 4.7.650 The mail server [203.0.113.10] has been temporarily rate limited …
+Outgoing deliveries per provider (total sent / deferred / bounced):
+  google                  1104 / 53 / 19
+  microsoft                512 / 31 / 11
+  gmx/web.de/ionos         301 / 1 / 2
+  t-online                  88 / 0 / 0
+  apple icloud              41 / 6 / 4
+  mailhost.example          37 / 0 / 0
+Watched recipient domain invoices.example.com: 21 sent, 0 deferred, 0 bounced
 Spam filter: all mails scanned (limit 3.0 MB = 3145728 bytes)
 DNS blocklists for the server IP: not listed in any run
 
@@ -290,6 +321,11 @@ Authenticated mailboxes (mails in total; every client IP seen):
           192.0.2.15 (BR, Example Cloud Ltd [datacenter]) ×61, 203.0.113.99 (VN, Example Telecom) ×40, …
       87  office@agency.example
           198.51.100.20 (DE, Example Telekom AG) ×87
+
+IMAP/POP3 logins from outside the allowed countries (time; logins, mailbox, IP):
+  2026-10-26 09:05 UTC  9  info@shop.example  from 192.0.2.15 (BR, Example Cloud Ltd [datacenter])  – first login from BR
+  2026-10-26 10:05 UTC  14  info@shop.example  from 192.0.2.15 (BR, Example Cloud Ltd [datacenter])
+  …
 
 Mailboxes sending with a foreign sender domain (login ≠ from):
   2026-10-26 09:05 UTC  23  info@shop.example – e.g. support@bank-secure.example
@@ -309,9 +345,10 @@ New in this period: 2
 
 == SUCCESSFUL LOGINS (SSH, Plesk panel; count, first – last) ==
      9×  2026-10-25 14:05 UTC – 2026-10-26 10:05 UTC  SSH   root           from 198.51.100.200   (publickey)  DE, Example Telekom AG
+     2×  2026-10-26 08:05 UTC – 2026-10-26 10:05 UTC  Plesk -              from 198.51.100.200   (panel, user not logged)  DE, Example Telekom AG
 ```
 
-The summary shows what a single report can't: the first signs at 09:05 (five IPs, 23 mails with a foreign sender), the escalation an hour later, and that the exposed `.env` had been reported since the daily check at 01:05.
+The summary shows what a single report can't: the first signs at 09:05 (the first IMAP login from Brazil, five IPs, 23 mails with a foreign sender), the escalation an hour later with the big providers throttling the server, and that the exposed `.env` had been reported since the daily check at 01:05.
 
 </details>
 
