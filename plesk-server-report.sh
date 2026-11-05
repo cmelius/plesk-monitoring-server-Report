@@ -529,10 +529,14 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   (( QUEUE > WARN_QUEUE )) && alert "Mail: $QUEUE messages in the queue"
   grep '^BLEX' <<<"$MAILSTATS" | cut -f2- | sed 's/^/  example: /' >>"$BODY"
   read -r _ n c <<<"$(grep '^SKIP' <<<"$MAILSTATS")"
+  # current limit: from the log line, else from Plesk's configuration (default 256000 bytes)
+  [[ -n ${c:-} ]] || c=$(awk '$1 == "SA_MAX_MAIL_SIZE" {print $2; exit}' /etc/psa/psa.conf /etc/psa/psa.conf.default 2>/dev/null)
+  local lim=""
+  [[ $c =~ ^[0-9]+$ ]] && lim="limit $(awk -v b="$c" 'BEGIN{printf "%.1f MB", b/1048576}') = $c bytes, Plesk: SA_MAX_MAIL_SIZE in /etc/psa/psa.conf"
   if (( ${n:-0} > 0 )); then
-    out "Spam filter: $n mail(s) not scanned – larger than the limit of ${c:-?} bytes (Plesk: SA_MAX_MAIL_SIZE in /etc/psa/psa.conf)"
+    out "Spam filter: $n mail(s) not scanned – larger than the size limit (${lim:-limit unknown})"
   else
-    out "Spam filter: all mails scanned (none above the size limit)"
+    out "Spam filter: all mails scanned – none above the size limit${lim:+ ($lim)}"
   fi
 
   if is_public_ipv4 "$PUBIP"; then
@@ -1473,7 +1477,8 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       if ($0 ~ /^Delivered: /) { n = split($0, x, /[^0-9]+/); dl += x[2]; df += x[3]; bo += x[4]; if (x[5] + 0 > mq) { mq = x[5] + 0; mqt = tm }; next }
       if ($0 ~ /^Rejections mentioning/) { r = $0; sub(/.*: /, "", r); rj += r; next }
       if ($0 ~ /^  example: /) { if (nbx < 5) { l = $0; sub(/^  example: /, "", l); print "BLX\t" tm "\t" t(substr(l, 1, 260)); nbx++ }; next }
-      if ($0 ~ /^Spam filter: [0-9]+ mail/) { r = $0; sub(/^Spam filter: /, "", r); skt += r + 0; if (match($0, /limit of [0-9]+/)) skl = substr($0, RSTART+9, RLENGTH-9); next }
+      if ($0 ~ /^Spam filter: /) { r = $0; sub(/^Spam filter: /, "", r); skt += r + 0
+                                   if (match($0, /= [0-9]+ bytes/) || match($0, /limit of [0-9]+/)) { l = substr($0, RSTART, RLENGTH); gsub(/[^0-9]/, "", l); skl = l }; next }
       if ($0 ~ /^DNS blocklists for/ && $0 ~ /LISTED/) { print "BL\t" tm "\t" t($0); next }
       if ($0 ~ /^Top senders/) { sub_ = "top"; next }
       if ($0 ~ /^Authenticated mailboxes/) { sub_ = "auth"; next }
@@ -1612,7 +1617,9 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
     echo ""; echo "== MAIL =="
     rec MAILTOT | awk -F'\t' '{printf "Delivered: %d | deferred: %d | bounced: %d | highest queue: %d%s\nRejections mentioning blocklist/reputation/spam/rate limit: %d\n", $1, $2, $3, $4, ($5 != "" ? " (" $5 ")" : ""), $6}'
     rec BLX | awk -F'\t' '{printf "  example (%s): %s\n", $1, $2}'
-    rec SKIPTOT | awk -F'\t' '$1 > 0 {printf "Spam filter: %d mail(s) not scanned, larger than the limit of %s bytes\n", $1, $2} $1 == 0 {print "Spam filter: all mails scanned"}'
+    rec SKIPTOT | awk -F'\t' '{ lim = ($2 != "" ? sprintf("limit %.1f MB = %s bytes", $2/1048576, $2) : "") }
+      $1 > 0 {printf "Spam filter: %d mail(s) not scanned, larger than the size limit%s\n", $1, (lim != "" ? " (" lim ")" : "")}
+      $1 == 0 {printf "Spam filter: all mails scanned%s\n", (lim != "" ? " (" lim ")" : "")}'
     if [[ -n $(rec BL) ]]; then echo "Server IP LISTED on a DNS blocklist:"; rec BL | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
     else echo "DNS blocklists for the server IP: not listed in any run"; fi
     echo ""; echo "Top senders (total recipients; incoming mail included):"

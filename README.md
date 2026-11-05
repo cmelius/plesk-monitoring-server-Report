@@ -90,7 +90,7 @@ STATUS: WARNING (9)
 Source: /var/log/maillog, 5212 new lines
 Delivered: 162 | deferred: 3 | bounced: 1 | queue: 4
 Rejections mentioning blocklist/reputation/spam/rate limit: 0
-Spam filter: all mails scanned (none above the size limit)
+Spam filter: all mails scanned – none above the size limit (limit 3.0 MB = 3145728 bytes, Plesk: SA_MAX_MAIL_SIZE in /etc/psa/psa.conf)
 DNS blocklists for 203.0.113.10: zen.spamhaus.org:clean bl.spamcop.net:clean b.barracudacentral.org:clean psbl.surriel.com:clean
 
 Top senders (total recipients):
@@ -280,7 +280,7 @@ Built from the reports of this period. Daily checks and fail2ban: see latest.txt
 == MAIL ==
 Delivered: 1890 | deferred: 7 | bounced: 3 | highest queue: 4 (2026-10-26 10:05 UTC)
 Rejections mentioning blocklist/reputation/spam/rate limit: 0
-Spam filter: all mails scanned
+Spam filter: all mails scanned (limit 3.0 MB = 3145728 bytes)
 DNS blocklists for the server IP: not listed in any run
 
 Authenticated mailboxes (mails in total; every client IP seen):

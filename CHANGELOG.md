@@ -7,7 +7,7 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 ### Added
 - **Country check for IMAP/POP3 logins** (Dovecot and Courier). Logins from outside `ALLOWED_COUNTRIES` are listed in the report and in `summary.txt`. The alert (`mailbox … logged in via IMAP/POP3 from a new country …`) is raised only once per mailbox and country, so holidays don't cause an alert in every run. A country not seen for a mailbox for `IMAP_COUNTRY_KEEP_DAYS` (new setting, default 30) is forgotten, so the next trip alerts again.
 - **Rejections by the big providers:** deferrals and bounces with the wording of Gmail and Microsoft (`likely unsolicited`, `unusual rate`, rate limiting, `4.7.28`, `5.7.26`, `4.7.650`) now count towards `WARN_BLOCKLIST`. Examples show the recipient domain and the remote reply, also in `summary.txt`.
-- **Spam filter line:** `Spam filter: N mail(s) not scanned` for mails above SpamAssassin's size limit (Plesk: `SA_MAX_MAIL_SIZE`), summed in `summary.txt`.
+- **Spam filter line:** `Spam filter: N mail(s) not scanned` for mails above SpamAssassin's size limit (Plesk: `SA_MAX_MAIL_SIZE`), summed in `summary.txt`. The current limit is shown in MB and bytes, also when all mails were scanned.
 - README: quick start at the top. The script works without any configuration.
 
 ### Fixed
