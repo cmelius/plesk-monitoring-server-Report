@@ -65,6 +65,7 @@ SUMMARY_HOURS=24
 MAX_RUNTIME=50                # minutes: an unattended (cron) run is stopped after this – keep it below the cron interval (0 = no limit)
 CMD_TIMEOUT=120               # seconds per external command (plesk db, fail2ban-client, postqueue, journalctl, apt-get, rclone)
 FIND_TIMEOUT=600              # seconds per file-system scan of the web folders (find, grep)
+IMAP_COUNTRY_KEEP_DAYS=30     # forget a mailbox's foreign country after x days without a login from there (0 = never)
 MAX_LOG_MB=200                # read at most x MB of new lines per log file and run, the newest part (0 = no limit)
 VHOST_LOGS=/var/www/vhosts/system        # Plesk per-domain log directories
 PLESK_PANEL_LOG=/var/log/plesk/panel.log
@@ -571,26 +572,38 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
 
   # successful IMAP/POP3 logins: a mailbox read from an unexpected country sends nothing, so the
   # sending checks above don't see it. Every login from outside ALLOWED_COUNTRIES is listed, but
-  # the alert comes only once per mailbox and country (state: known_imap_countries) – someone on
-  # holiday triggers one alert, not one per run. First run: current countries are stored silently.
+  # the alert comes only once per mailbox and country: someone on holiday triggers one alert, not
+  # one per run. State: known_imap_countries ("mailbox CC last-seen-epoch"); a country not seen
+  # for IMAP_COUNTRY_KEEP_DAYS is forgotten, so the next trip alerts again. First run: silent.
   out ""; out "IMAP/POP3 logins (logins, mailbox, IP) from outside ALLOWED_COUNTRIES:"
-  local -A IMF=() IMU=() IMI=()
-  local imn=0 KNOWNC="$STATE_DIR/known_imap_countries" firstc=0 isnew
-  [[ -f $KNOWNC ]] || { firstc=1; can_write_state && : >"$KNOWNC"; }
+  local -A IMF=() IMU=() IMI=() KC=()
+  local imn=0 KNOWNC="$STATE_DIR/known_imap_countries" firstc=0 isnew km kc kt now
+  now=$(date +%s)
+  if [[ -f $KNOWNC ]]; then
+    while read -r km kc kt; do
+      [[ -n $kc ]] || continue
+      kt=${kt:-$now}
+      (( IMAP_COUNTRY_KEEP_DAYS > 0 && now - kt > IMAP_COUNTRY_KEEP_DAYS * 86400 )) && continue   # expired
+      KC["$km $kc"]=$kt
+    done <"$KNOWNC"
+  else
+    firstc=1
+  fi
   while IFS=$'\t' read -r _ c who ip; do
     [[ -n $ip ]] || continue
     imn=$((imn + c)); IMU[$who]=1; IMI[$ip]=1
     geo "$ip"
     if geo_foreign; then
       isnew=""
-      if ! grep -qxF "$who $GEO_CC" "$KNOWNC" 2>/dev/null; then
-        can_write_state && echo "$who $GEO_CC" >>"$KNOWNC"
-        (( firstc )) || isnew=1
-      fi
+      [[ -n ${KC["$who $GEO_CC"]+x} ]] || { (( firstc )) || isnew=1; }
+      KC["$who $GEO_CC"]=$now
       printf '  %6d  %s  from %s (%s)%s\n' "$c" "$who" "$ip" "$GEO_LABEL" "${isnew:+  – first login from $GEO_CC}" >>"$BODY"
       [[ -n $isnew && ${IMF[$who]:-} != *"$ip "* ]] && IMF[$who]+="$ip ($GEO_LABEL) "
     fi
   done < <(grep '^IMOK' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr)
+  if can_write_state; then
+    for km in "${!KC[@]}"; do printf '%s %s\n' "$km" "${KC[$km]}"; done | sort >"$KNOWNC.new" && mv "$KNOWNC.new" "$KNOWNC"
+  fi
   (( firstc )) && out "  (first run: countries listed here are stored as known for these mailboxes, list: $KNOWNC)"
   if (( GEO_OK )) && [[ -n $ALLOWED_COUNTRIES ]]; then
     out "  ($imn logins of ${#IMU[@]} mailboxes from ${#IMI[@]} IPs checked)"
