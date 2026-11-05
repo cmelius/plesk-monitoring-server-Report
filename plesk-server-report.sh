@@ -78,6 +78,7 @@ WARN_MAILS_PER_SCRIPT=100     # mails per system user (PHP mail() / sendmail)
 WARN_IPS_PER_MAILBOX=4        # distinct client IPs per authenticated mailbox
 WARN_FROM_MISMATCH=10         # mails of a mailbox with a foreign sender domain
 WARN_DEFERRED=100             # deferred deliveries
+WATCH_RECIPIENT_DOMAINS=""    # space-separated recipient domains whose deliveries matter most (e.g. "invoices.example.com"): every deferral or bounce raises an alert
 WARN_BLOCKLIST=1              # remote rejections mentioning a blocklist, reputation, spam or rate limiting
 WARN_QUEUE=200                # messages in the Postfix queue
 WARN_AUTH_FAIL=300            # failed mail logins (SMTP + IMAP/POP3)
@@ -427,7 +428,22 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   fi
   out "Source: $MAILLOG, $(wc -l <"$TMP") new lines"
 
-  MAILSTATS=$(awk '
+  MAILSTATS=$(awk -v watch="$WATCH_RECIPIENT_DOMAINS" '
+    # provider of a delivery: the big mail services by their MX host, others by the MX base domain
+    function prov(line,   h, r, n, x) {
+      h = ""; if (match(line, /relay=[^[, ]+/)) h = tolower(substr(line, RSTART+6, RLENGTH-6))
+      if (h == "" || h == "none") { r = line; if (match(r, /to=<[^>]+>/)) { h = tolower(substr(r, RSTART+4, RLENGTH-5)); sub(/.*@/, "", h) } }
+      if (h ~ /(outlook|hotmail)\.(com|de)$|protection\.outlook\.com$/) return "microsoft"
+      if (h ~ /(google|googlemail|gmail)\.com$/) return "google"
+      if (h ~ /(icloud|me|mac)\.com$/) return "apple icloud"
+      if (h ~ /(gmx\.net|gmx\.de|web\.de|ionos\.(de|com)|kundenserver\.de|1and1\.[a-z]+)$/) return "gmx/web.de/ionos"
+      if (h ~ /t-online\.de$/) return "t-online"
+      if (h ~ /(yahoodns\.net|yahoo\.com|aol\.com)$/) return "yahoo/aol"
+      if (h ~ /rzone\.de$|strato\.de$/) return "strato"
+      n = split(h, x, "."); return (n >= 2 ? x[n-1] "." x[n] : h)
+    }
+    function rdom(line,   r) { r = ""; if (match(line, /to=<[^>]+>/)) { r = tolower(substr(line, RSTART+4, RLENGTH-5)); sub(/.*@/, "", r) }; return r }
+    function watched(d,   i, n, w) { n = split(watch, w, " "); for (i = 1; i <= n; i++) if (d == tolower(w[i]) || d ~ ("\\." tolower(w[i]) "$")) return tolower(w[i]); return "" }
     function qid(s) { if (match(s, /\]: [0-9A-Za-z]+: /)) return substr(s, RSTART+3, RLENGTH-5); return "" }
     function dom(a) { a=tolower(a); sub(/.*@/, "", a); return a }
     function ipof(s) { if (match(s, /\[[0-9a-fA-F]*[.:][0-9a-fA-F:.]*\]/)) return substr(s, RSTART+1, RLENGTH-2); return "?" }
@@ -456,6 +472,12 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
         mdone[q]=1; su=sq[q]; mm[su]++
         if (!((su SUBSEP f) in mms) && mmc[su] < 3) { mms[su SUBSEP f]=1; mmc[su]++; mml[su]=mml[su] " " f }
       }
+    }
+    / status=(sent|deferred|bounced)/ && /postfix\/smtp\[/ {
+      p = prov($0); st = ($0 ~ / status=sent/ ? 1 : ($0 ~ / status=deferred/ ? 2 : 3)); pv[p, st]++; pt[p]++
+      w = watched(rdom($0))
+      if (w != "") { wv[w, st]++
+        if (st > 1 && wx[w] == "") { r = $0; sub(/.* status=(deferred|bounced) \(/, "", r); sub(/\)$/, "", r); wx[w] = substr($0, 1, 15) " " rdom($0) ": " substr(r, 1, 200) } }
     }
     / status=sent/     { sent++ }
     / status=deferred/ { def++ }
@@ -511,6 +533,8 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       printf "TOT\t%d\t%d\t%d\t%d\t%d\t%d\n", sent, def, bou, bl, sf, df
       printf "IMAPCHK\t%d\t%d\n", imapl, imapok + df
       printf "SKIP\t%d\t%s\n", sk, skl
+      for (p in pt) printf "PROV\t%d\t%d\t%d\t%d\t%s\n", pt[p], pv[p, 1], pv[p, 2], pv[p, 3], p
+      nw = split(watch, ww, " "); for (i = 1; i <= nw; i++) { w = tolower(ww[i]); printf "WATCH\t%d\t%d\t%d\t%s\t%s\n", wv[w, 1], wv[w, 2], wv[w, 3], w, wx[w] }
       for (k in iok) { split(k, kk, SUBSEP); printf "IMOK\t%d\t%s\t%s\n", iok[k], kk[1], kk[2] }
       for (u in sasl) printf "SASL\t%d\t%d\t%s\t%s\n", sasl[u], nip[u], u, ipl[u]
       for (k in sic) { split(k, kk, SUBSEP); printf "SAIP\t%d\t%s\t%s\n", sic[k], kk[1], kk[2] }
@@ -532,6 +556,19 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   (( BL >= WARN_BLOCKLIST )) && alert "Mail: $BL rejections by remote servers mentioning a blocklist, reputation, spam or rate limit – check the server IP and the examples"
   (( QUEUE > WARN_QUEUE )) && alert "Mail: $QUEUE messages in the queue"
   grep '^BLEX' <<<"$MAILSTATS" | cut -f2- | sed 's/^/  example: /' >>"$BODY"
+  # outgoing deliveries per provider: shows trouble with a big provider whatever its reply says
+  if grep -q '^PROV' <<<"$MAILSTATS"; then
+    out "Outgoing deliveries per provider (sent / deferred / bounced):"
+    grep '^PROV' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -10 |
+      awk -F'\t' '{printf "  %-22s %5d / %d / %d\n", $6, $3, $4, $5}' >>"$BODY"
+  fi
+  # watched recipient domains (WATCH_RECIPIENT_DOMAINS): every deferral or bounce is an alert
+  while IFS=$'\t' read -r _ n c k who ex; do
+    [[ -n $who ]] || continue
+    out "Watched recipient domain $who: $n sent, $c deferred, $k bounced"
+    [[ -n $ex ]] && out "  example (watched): $ex"
+    (( c + k > 0 )) && alert "Mail: deliveries to watched domain $who: $c deferred, $k bounced – check the examples (customer process affected?)"
+  done < <(grep '^WATCH' <<<"$MAILSTATS")
   read -r _ n c <<<"$(grep '^SKIP' <<<"$MAILSTATS")"
   # current limit: from the log line, else from Plesk's configuration (default 256000 bytes)
   [[ -n ${c:-} ]] || c=$(awk '$1 == "SA_MAX_MAIL_SIZE" {print $2; exit}' /etc/psa/psa.conf /etc/psa/psa.conf.default 2>/dev/null)
@@ -1481,6 +1518,13 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       if ($0 ~ /^Delivered: /) { n = split($0, x, /[^0-9]+/); dl += x[2]; df += x[3]; bo += x[4]; if (x[5] + 0 > mq) { mq = x[5] + 0; mqt = tm }; next }
       if ($0 ~ /^Rejections mentioning/) { r = $0; sub(/.*: /, "", r); rj += r; next }
       if ($0 ~ /^  example: /) { if (nbx < 5) { l = $0; sub(/^  example: /, "", l); print "BLX\t" tm "\t" t(substr(l, 1, 260)); nbx++ }; next }
+      if ($0 ~ /^Outgoing deliveries per provider/) { sub_ = "prov"; next }
+      if (sub_ == "prov" && $0 ~ /^  [^ ].* [0-9]+ \/ [0-9]+ \/ [0-9]+$/) {
+        n = split($0, x, " "); pn = $0; sub(/^  /, "", pn); sub(/ +[0-9]+ \/ [0-9]+ \/ [0-9]+$/, "", pn)
+        ps[pn] += x[n-4]; pd[pn] += x[n-2]; pb[pn] += x[n]; next }
+      if ($0 ~ /^Watched recipient domain /) { sub_ = ""; w = $0; sub(/^Watched recipient domain /, "", w); sub(/:.*/, "", w)
+        if (match($0, /[0-9]+ sent, [0-9]+ deferred, [0-9]+ bounced/)) { split(substr($0, RSTART, RLENGTH), x, /[^0-9]+/); ws[w] += x[1]; wd[w] += x[2]; wb[w] += x[3] }; next }
+      if ($0 ~ /^  example \(watched\): /) { if (nwx < 5) { l = $0; sub(/^  example \(watched\): /, "", l); print "WATCHX\t" tm "\t" t(substr(l, 1, 260)); nwx++ }; next }
       if ($0 ~ /^Spam filter: /) { r = $0; sub(/^Spam filter: /, "", r); skt += r + 0
                                    if (match($0, /= [0-9]+ bytes/) || match($0, /limit of [0-9]+/)) { l = substr($0, RSTART, RLENGTH); gsub(/[^0-9]/, "", l); skl = l }; next }
       if ($0 ~ /^DNS blocklists for/ && $0 ~ /LISTED/) { print "BL\t" tm "\t" t($0); next }
@@ -1571,6 +1615,8 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       for (i = 1; i <= nno; i++) { a = no[i]; print "NOTE\t" nc[a] "\t" nf[a] "\t" nl[a] "\t" t(a) }
       printf "MAILTOT\t%d\t%d\t%d\t%d\t%s\t%d\n", dl, df, bo, mq, mqt, rj
       printf "SKIPTOT\t%d\t%s\n", skt, skl
+      for (p in ps) printf "PROVTOT\t%d\t%d\t%d\t%d\t%s\n", ps[p] + pd[p] + pb[p], ps[p], pd[p], pb[p], p
+      for (w in ws) printf "WATCHTOT\t%d\t%d\t%d\t%s\n", ws[w], wd[w], wb[w], w
       printf "FAILTOT\t%d\t%d\t%d\t%s\t%d\n", fs_, fd, fm, fmt, wf
       for (u in au) print "AUTH\t" au[u] "\t" u
       for (i = 1; i <= naio; i++) { split(aio[i], kk, SUBSEP); print "AUTHIP\t" kk[1] "\t" aip[aio[i]] "\t" t(kk[2]) }
@@ -1621,6 +1667,12 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
     echo ""; echo "== MAIL =="
     rec MAILTOT | awk -F'\t' '{printf "Delivered: %d | deferred: %d | bounced: %d | highest queue: %d%s\nRejections mentioning blocklist/reputation/spam/rate limit: %d\n", $1, $2, $3, $4, ($5 != "" ? " (" $5 ")" : ""), $6}'
     rec BLX | awk -F'\t' '{printf "  example (%s): %s\n", $1, $2}'
+    if [[ -n $(rec PROVTOT) ]]; then
+      echo "Outgoing deliveries per provider (total sent / deferred / bounced):"
+      rec PROVTOT | sort -t$'\t' -k1,1nr | head -10 | awk -F'\t' '{printf "  %-22s %5d / %d / %d\n", $5, $2, $3, $4}'
+    fi
+    rec WATCHTOT | awk -F'\t' '{printf "Watched recipient domain %s: %d sent, %d deferred, %d bounced\n", $4, $1, $2, $3}'
+    rec WATCHX | awk -F'\t' '{printf "  example (%s): %s\n", $1, $2}'
     rec SKIPTOT | awk -F'\t' '{ lim = ($2 != "" ? sprintf("limit %.1f MB = %s bytes", $2/1048576, $2) : "") }
       $1 > 0 {printf "Spam filter: %d mail(s) not scanned, larger than the size limit%s\n", $1, (lim != "" ? " (" lim ")" : "")}
       $1 == 0 {printf "Spam filter: all mails scanned%s\n", (lim != "" ? " (" lim ")" : "")}'
