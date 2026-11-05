@@ -30,7 +30,7 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 - `--only` and `--summary` say so when another run is in progress instead of exiting silently.
 - rclone keeps its default retries, which Google Drive's rate limits need. README recommends an own Google client ID for rclone.
 
-## [1.1.1] – released as part of 1.2.0
+## [1.1.1] – 2026-11-04 (released as part of 1.2.0)
 
 ### Fixed
 - Local reports are deleted after exactly `LOCAL_KEEP_DAYS` days (`find -mtime +7` only matched files at least 8 days old).
