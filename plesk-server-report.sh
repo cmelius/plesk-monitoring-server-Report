@@ -68,7 +68,7 @@ FIND_TIMEOUT=600              # seconds per file-system scan of the web folders 
 IMAP_COUNTRY_KEEP_DAYS=30     # forget a mailbox's foreign country after x days without a login from there (0 = never)
 MAX_LOG_MB=200                # read at most x MB of new lines per log file and run, the newest part (0 = no limit)
 VHOST_LOGS=/var/www/vhosts/system        # Plesk per-domain log directories
-PLESK_PANEL_LOG=/var/log/plesk/panel.log
+PLESK_PANEL_LOG=/var/log/plesk/httpsd_access_log   # access log of the Plesk panel (port 8443) – panel logins
 ROUNDCUBE_LOG_DIR=""          # default: /var/log/plesk-roundcube (or /usr/share/psa-roundcube/logs)
 
 # Alert thresholds – per run (with an hourly cron job: per hour)
@@ -972,11 +972,19 @@ check_logins() {   # successful SSH and Plesk panel logins, alert for previously
     else note "logins: no SSH log (/var/log/auth.log, /var/log/secure) and no journal – SSH logins not checked"; fi |
       awk '/sshd.*Accepted / { for (i=1;i<=NF;i++) { if ($i=="Accepted") m=$(i+1); if ($i=="for") u=$(i+1); if ($i=="from") ip=$(i+1) }
                                print "SSH\t" u "\t" ip "\t" m }'
-    # Plesk panel: best-effort match of successful login lines (format varies by version)
-    new_lines "$PLESK_PANEL_LOG" | grep -iE 'log(ged)? ?in' | grep -viE 'fail|invalid|wrong|denied|error' |
-      awk '{ ip=""; if (match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) ip=substr($0, RSTART, RLENGTH);
-             u="?"; if (match($0, /login[=: ]+"?[A-Za-z0-9_.@-]+/)) { u=substr($0, RSTART, RLENGTH); sub(/login[=: ]+"?/, "", u) }
-             if (ip != "") print "Plesk\t" u "\t" ip "\tpanel" }'
+    # Plesk panel: Plesk logs no login events, but its access log shows them: a login is a
+    # "POST /login_up.php", and only a successful one is followed by a page of the panel
+    # (/admin/, /smb/, /cp/) with login_up.php as referrer. The user name is not logged.
+    # Requests proxied through a domain (https://domain/login.php) come from 127.0.0.1 with
+    # the real client IP in the last quoted field.
+    new_lines "$PLESK_PANEL_LOG" | awk -F'"' -v failf="$TMPD/panel_fail" '
+      { ip = $1; sub(/ .*/, "", ip)
+        if ((ip == "127.0.0.1" || ip == "::1") && $(NF-1) ~ /^[0-9a-fA-F:.]+$/) ip = $(NF-1)
+        split($2, rq, " "); st = $3; sub(/^ /, "", st); sub(/ .*/, "", st) }
+      rq[1] == "POST" && rq[2] ~ /^\/login_up\.php/ { pend[ip]++; next }
+      (ip in pend) && rq[1] == "GET" && rq[2] ~ /^\/(admin|smb|cp)\// && $4 ~ /login_up\.php/ && st ~ /^(200|30[0-9])$/ {
+        print "Plesk\t-\t" ip "\tpanel, user not logged"; delete pend[ip] }
+      END { for (i in pend) f += pend[i]; print f + 0 > failf }'
   } | sort | uniq -c | while read -r cnt rest; do
     IFS=$'\t' read -r kind user ip meth <<<"$rest"
     geo "$ip"
@@ -984,12 +992,14 @@ check_logins() {   # successful SSH and Plesk panel logins, alert for previously
     if ! grep -qxF "$ip" "$KNOWN" 2>/dev/null; then
       can_write_state && echo "$ip" >>"$KNOWN"
       fnote=""; geo_foreign && fnote=" – OUTSIDE $ALLOWED_COUNTRIES"
-      (( FIRST_LOGIN_RUN )) || echo "$kind login as $user from previously unknown IP $ip${GEO_LABEL:+ ($GEO_LABEL)}$fnote" >>"$NEWLOGINS"
+      (( FIRST_LOGIN_RUN )) || echo "$( [[ $kind == Plesk ]] && echo "Plesk panel login" || echo "$kind login as $user") from previously unknown IP $ip${GEO_LABEL:+ ($GEO_LABEL)}$fnote" >>"$NEWLOGINS"
     fi
   done
   if [[ -s $NEWLOGINS ]]; then
     while IFS= read -r a; do alert "Login: $a"; done <"$NEWLOGINS"
   fi
+  [[ -s $TMPD/panel_fail ]] && (( $(cat "$TMPD/panel_fail") > 0 )) &&
+    out "  Plesk panel: $(cat "$TMPD/panel_fail") failed login attempt(s) (fail2ban jail plesk-panel)"
   (( FIRST_LOGIN_RUN )) && out "  (first run: all IPs stored as known; from now on new IPs raise an alert. List: $KNOWN)"
   return 0
 }
