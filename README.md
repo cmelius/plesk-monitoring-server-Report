@@ -36,7 +36,7 @@ Just as useful: the reports confirmed what is *fine*. Reverse DNS, HELO name and
 | Area | Checks | Alerts when … |
 |---|---|---|
 | **Outgoing mail / spam** | recipients per sender, mails per authenticated mailbox, distinct client IPs per mailbox, **login ≠ sender domain**, mails injected by scripts (PHP `mail()`, per Plesk subscription), **mail sent through Roundcube webmail** (mailbox, real client IP, recipients), failed webmail logins, deferred/bounced, queue size | a mailbox suddenly sends a lot, is used from many IPs, sends with foreign `From` domains, a website's scripts send mass mail, or a webmail user sends after repeated failed logins |
-| **Reputation** | server IP against Spamhaus, SpamCop, Barracuda, PSBL; remote rejections mentioning blocklists | the server IP is listed or recipients reject because of reputation |
+| **Reputation** | server IP against Spamhaus, SpamCop, Barracuda, PSBL; remote rejections mentioning blocklists, reputation, spam or rate limits (including the wording Gmail and Microsoft use, e.g. "likely unsolicited", "unusual rate", 4.7.28, 5.7.26, 4.7.650), with examples; mails the spam filter skipped because of their size | the server IP is listed or recipients reject or throttle mail because of reputation |
 | **Brute force** | failed SMTP/IMAP/POP3 logins, most attacked mailboxes, fail2ban jails | failures spike |
 | **Intrusion** | successful SSH and Plesk panel logins, **new PHP files in `wp-content/uploads`**, **successful WordPress logins during a brute-force attack** | a login comes from a never-seen IP, a PHP file appears in an upload folder, or an IP logs in to WordPress after repeated failures |
 | **Geolocation** (optional) | country and network operator of every IP with a successful login (mailboxes, SSH, Plesk panel, WordPress) and of the top failed-login IPs, datacenter networks marked, from a **local** database, so no IP leaves the server | a mailbox sends mail, is read via IMAP/POP3, or someone logs in, from a country outside `ALLOWED_COUNTRIES` |
@@ -69,7 +69,8 @@ STATUS: WARNING (9)
 == MAIL ==
 Source: /var/log/maillog, 5212 new lines
 Delivered: 162 | deferred: 3 | bounced: 1 | queue: 4
-Rejections mentioning blocklist/reputation: 0
+Rejections mentioning blocklist/reputation/spam/rate limit: 0
+Spam filter: all mails scanned (none above the size limit)
 DNS blocklists for 203.0.113.10: zen.spamhaus.org:clean bl.spamcop.net:clean b.barracudacentral.org:clean psbl.surriel.com:clean
 
 Top senders (total recipients):
@@ -258,7 +259,8 @@ Built from the reports of this period. Daily checks and fail2ban: see latest.txt
 
 == MAIL ==
 Delivered: 1890 | deferred: 7 | bounced: 3 | highest queue: 4 (2026-10-26 10:05 UTC)
-Rejections mentioning blocklist/reputation: 0
+Rejections mentioning blocklist/reputation/spam/rate limit: 0
+Spam filter: all mails scanned
 DNS blocklists for the server IP: not listed in any run
 
 Authenticated mailboxes (mails in total; every client IP seen):
@@ -484,7 +486,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 | `WARN_MAILS_PER_SCRIPT` | 100 | mails via PHP `mail()`/sendmail per subscription |
 | `WARN_DEFERRED` | 100 | deferred deliveries |
 | `WARN_QUEUE` | 200 | messages in the Postfix queue |
-| `WARN_BLOCKLIST` | 1 | remote rejections mentioning a blocklist or bad reputation |
+| `WARN_BLOCKLIST` | 1 | remote rejections or deferrals mentioning a blocklist, bad reputation, spam or rate limiting (Gmail and Microsoft wording included). Up to three examples with recipient domain and reply are listed below the count |
 | `WARN_AUTH_FAIL` | 300 | failed mail logins (SMTP + IMAP/POP3) and, separately, failed webmail logins. Raise it if routine brute-force noise (already handled by fail2ban) triggers it regularly |
 | `DNSBL_LISTS` | Spamhaus ZEN, SpamCop, Barracuda, PSBL | IP blocklists checked for the server IP |
 | `WARN_LOAD_FACTOR` | 1.5 | alert when the 5-minute load exceeds CPU cores × this factor |
@@ -554,6 +556,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 - **Webmail is analysed from Roundcube's own logs** (`/var/log/plesk-roundcube/sendmail` and `errors`), because Roundcube talks to Postfix and the IMAP server (Dovecot or Courier) from `localhost`: in the mail log those mails carry neither the user's IP nor (on Plesk) the mailbox name. Without this section, a hijacked mailbox sending spam through webmail would be invisible. Roundcube does not log successful logins by default (`log_logins = false`). The script doesn't need them, since every sent mail is logged with mailbox and IP. Leave that Plesk-managed config alone.
 - **"Top senders" includes incoming mail** (e.g. newsletters from Amazon SES). The alert for that list only counts mail sent from this server, after a mailbox login or by a local script. The *authenticated mailboxes*, *login ≠ from* and *scripts* sections are the ones that show what your server sends on behalf of your users.
 - **Courier IMAP/POP3 and fail2ban:** Plesk's default jails cover Dovecot (`plesk-dovecot`), not Courier. If your server uses Courier, check whether the jail `plesk-courierimap` is switched on – if not, failed IMAP/POP3 logins are never banned. Switch it on in *Tools & Settings → IP Address Banning → Jails*. Before you do, check the *Failed mail logins* section for IPs of your customers: a device with an outdated password retries every few seconds and gets its whole connection banned.
+- **Spam filter size limit:** SpamAssassin skips mails larger than its limit (Plesk default 256 KB, `SA_MAX_MAIL_SIZE` in `/etc/psa/psa.conf`). Spam waves with large image attachments use exactly that gap. The report counts the skipped mails (`Spam filter: N mail(s) not scanned`); if the number is high, raise the limit (e.g. to `3145728` = 3 MiB).
 - **Spamhaus** refuses queries coming through large public DNS resolvers. The report then shows `query-refused`, which means "unknown", not "listed". Use a local resolver for reliable results.
 - **Plesk panel logins** are matched best-effort in `/var/log/plesk/panel.log`, whose format differs between versions. SSH logins are reliable.
 - **TLS check** connects to the server's public IPv4. Domains that are mail-only, redirected elsewhere or without SSL are listed as "no matching certificate". That line is informational, not an alert.
@@ -629,7 +632,7 @@ Watch the repository (*Watch → Custom → Releases* or *All activity*) to get 
 
 ### Changelog
 
-- **v1.3.0** (on `main`, not yet released): successful IMAP/POP3 logins (Dovecot and Courier) are checked by country; logins from outside `ALLOWED_COUNTRIES` are listed (also in `summary.txt`); an alert is raised once per mailbox and new country (`mailbox … logged in via IMAP/POP3 from a new country …`), so holidays don't cause an alert in every run; a country not seen for `IMAP_COUNTRY_KEEP_DAYS` (default 30) is forgotten, so the next trip alerts again. Fix: Courier's SSL services (`courier-imaps`, `courier-pop3s`) were not recognized, so failed logins on ports 993/995 were missing from the IMAP/POP3 count
+- **v1.3.0** (on `main`, not yet released): successful IMAP/POP3 logins (Dovecot and Courier) are checked by country; logins from outside `ALLOWED_COUNTRIES` are listed (also in `summary.txt`); an alert is raised once per mailbox and new country (`mailbox … logged in via IMAP/POP3 from a new country …`), so holidays don't cause an alert in every run; a country not seen for `IMAP_COUNTRY_KEEP_DAYS` (default 30) is forgotten, so the next trip alerts again. Rejections and deferrals by remote servers now also count the wording of Gmail and Microsoft ("likely unsolicited", "unusual rate", rate limiting, 4.7.28, 5.7.26, 4.7.650) and show recipient domain and reply as examples, also in `summary.txt`; new line `Spam filter: N mail(s) not scanned` for mails above SpamAssassin's size limit. Fix: Courier's SSL services (`courier-imaps`, `courier-pop3s`) were not recognized, so failed logins on ports 993/995 were missing from the IMAP/POP3 count
 - **2026-11-05 – v1.2.0**: safety limits – time limits for every command that can hang (`CMD_TIMEOUT`, `FIND_TIMEOUT`) and for the whole cron run (`MAX_RUNTIME`), at most `MAX_LOG_MB` per log and run, low CPU/IO priority, temporary files under the state directory instead of `/tmp`. Nothing fails silently any more: aborted runs, a run still hanging, commands that timed out raise a `Script: …` alert, and missing data sources (logs not found, empty paths in the configuration) are shown as ` i ` notes and in a new SCRIPT NOTES section of `summary.txt`. The daily checks no longer run again in every following run if one of them aborted the run. `--only` and `--summary` say so when another run is in progress instead of exiting silently. Failed IMAP/POP3 logins are now also counted when Plesk uses Courier instead of Dovecot (until now they were missing, the report showed 0), including top IPs and attacked mailboxes; for Dovecot the attacked mailboxes are now listed too. If the IMAP/POP3 server writes log lines but no login is recognized, a note says the log format is unknown. Example prompt: report `Script:` alerts and script notes. Includes v1.1.1:
 - **v1.1.1** (released as part of v1.2.0): local reports are deleted after exactly `LOCAL_KEEP_DAYS` days (`find -mtime +7` only matched files at least 8 days old); `latest.txt` and `summary.txt` are uploaded as new files instead of being overwritten, so Google Drive keeps no older versions of them for up to 30 days
 - **2026-11-04 – v1.1.0**: `summary.txt` – every run also writes a condensed summary of the last 24 hours (all alerts with count and first/last time, totals, every login and every finding of the normally empty sections) and uploads it next to `latest.txt`, so a daily review needs two files instead of every report; option `--summary`; example prompt for AI reviews updated (search the two files by name instead of listing the folder)
