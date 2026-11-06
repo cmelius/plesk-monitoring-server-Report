@@ -63,7 +63,7 @@ SUMMARY=1                                # write summary.txt (all reports of the
 SUMMARY_HOURS=24
 # Limits, so that a hanging command or a huge log can't block the script or fill disk/RAM
 MAX_RUNTIME=50                # minutes: an unattended (cron) run is stopped after this – keep it below the cron interval (0 = no limit)
-CMD_TIMEOUT=120               # seconds per external command (plesk db, fail2ban-client, postqueue, journalctl, apt-get, rclone)
+CMD_TIMEOUT=120               # seconds per external command (plesk db, fail2ban-client, postqueue, journalctl, apt-get/dnf, rclone)
 FIND_TIMEOUT=600              # seconds per file-system scan of the web folders (find, grep)
 IMAP_COUNTRY_KEEP_DAYS=30     # forget a mailbox's foreign country after x days without a login from there (0 = never)
 KNOWN_MAIL_IP_DAYS=30         # remember IPs with successful mail logins this long – alert when fail2ban bans one of them
@@ -1194,7 +1194,7 @@ check_updates() {   # pending (security) updates, reboot required
       dalert "System: reboot required after updates"
     fi
   elif command -v dnf >/dev/null; then
-    sec=$(dnf -q updateinfo list --security 2>/dev/null | grep -c . || true)
+    sec=$(T "$CMD_TIMEOUT" dnf -q updateinfo list --security 2>/dev/null | grep -c . || true)
     echo "Security updates available: $sec"
     (( sec > 0 )) && dalert "Updates: $sec security update(s) pending"
     if command -v needs-restarting >/dev/null && ! needs-restarting -r >/dev/null 2>&1; then

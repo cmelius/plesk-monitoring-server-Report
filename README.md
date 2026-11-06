@@ -1,6 +1,6 @@
 # plesk-server-report
 
-A single bash script that writes an **hourly health and security report** for a Plesk server and (optionally) uploads it to cloud storage with [rclone](https://rclone.org/).
+A single bash script that writes an **hourly health and security report** for a Plesk server on Linux and (optionally) uploads it to cloud storage with [rclone](https://rclone.org/).
 
 It is built around the most common way a shared Plesk server gets into trouble: **a compromised mailbox or a hacked website starts sending spam**, the server IP ends up on a blocklist, and every customer's mail bounces. The report is short, plain text and readable by a human or by an AI assistant that summarises it for you once a day.
 
@@ -10,7 +10,7 @@ The script only **reads** logs and system state. It never changes the server con
 
 ## Quick start – no configuration needed
 
-The script works out of the box on a standard Plesk 18 server. Every setting further down has a sensible default; you can ignore them until a report shows you something you want to tune.
+The script works out of the box on a standard Plesk 18 (Obsidian) server on Linux – Debian and Ubuntu, RHEL-based systems (AlmaLinux, Rocky Linux) with a few limits, see [Requirements](#requirements). Plesk for Windows is not supported. Every setting further down has a sensible default; you can ignore them until a report shows you something you want to tune.
 
 ```bash
 curl -fsSL -o /usr/local/sbin/plesk-server-report.sh \
@@ -371,7 +371,7 @@ The summary shows what a single report can't: the first signs at 09:05 (the firs
 
 ## Requirements
 
-- Plesk Obsidian on Linux with Postfix and Dovecot or Courier for IMAP/POP3 – Plesk lets you choose; both log formats are recognized automatically (tested on Debian; Ubuntu should work the same; RHEL-based systems are partially supported: updates via `dnf`, SSH logins via `/var/log/secure`)
+- Plesk Obsidian on Linux with Postfix and Dovecot or Courier for IMAP/POP3 – Plesk lets you choose; both log formats are recognized automatically (tested on Debian; Ubuntu should work the same; RHEL-based systems are partially supported: the daily check for pending OS updates uses `dnf` instead of `apt-get` and reports security updates only, SSH logins are read from `/var/log/secure`). The script itself is installed and updated with `curl` on every system, see [Quick start](#quick-start--no-configuration-needed).
 - root access, `bash`, `awk`, `openssl`, `procps` (`top`, `free`) – all present on a standard Plesk server
 - optional: `fail2ban` (Plesk component), `rclone` for the upload, `mmdblookup` for geolocation (see below)
 
