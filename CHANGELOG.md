@@ -2,7 +2,12 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [Unreleased] (on `main`)
+## [1.6.0] – not yet released (on `main`)
+
+### Added
+- **Description of the state directory:** every normal run keeps a `README.txt` in `/var/lib/plesk-server-report` that explains each file – what it contains, what it is used for and what happens if you delete it. The same text is in [STATE-FILES.md](STATE-FILES.md) and is printed by `--state-readme`; it comes with the script, so it always matches the installed version.
+- **`--show-state`:** prints what the script remembers – known login IPs, client IPs of mail logins, foreign countries per mailbox, log positions – with dates instead of Unix timestamps. Changes nothing.
+- The log position files in `offsets/` also store the path of their log, so `--show-state` can name it.
 
 ### Changed
 - README: the example prompt for AI reviews also covers rejections by the big mail providers, watched recipient domains, IMAP/POP3 logins from new countries and customers banned by fail2ban (with the unban command); recommendations such as missing HSTS are mentioned once at the end instead of as issues. If you use the prompt, update your copy.

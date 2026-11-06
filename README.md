@@ -532,6 +532,12 @@ Every run uploads three kinds of files:
 
 ---
 
+## What the script remembers
+
+Between runs the script keeps its memory in `/var/lib/plesk-server-report`: where it stopped reading each log, known login IPs, countries per mailbox, the local reports. You never have to touch it – but if you wonder why an alert did not come, or want the script to forget a known IP, [STATE-FILES.md](STATE-FILES.md) describes every file (the same text is kept as `README.txt` in that folder), and `plesk-server-report.sh --show-state` prints what is stored in readable form.
+
+---
+
 ## Configuration
 
 **You don't need to change anything here** – the defaults fit a typical Plesk server with an hourly cron job. Override a default only when a report tells you to (e.g. a threshold that is too low for your server) in `/etc/plesk-server-report.conf` (bash syntax; it survives script updates):
