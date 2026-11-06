@@ -46,7 +46,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.3.1
+VERSION=1.4.0
 
 set -uo pipefail
 export LC_ALL=C
@@ -116,6 +116,7 @@ MAIL_TLS_PORTS="25 465 587 993 995"   # ports whose certificate is checked (25/5
 # Daily per-domain DNS checks (all Plesk domains)
 DOMAIN_DNS_CHECK=1            # A/AAAA still pointing here, CAA vs. Let's Encrypt, broken DNSSEC, domain blocklists
 DOMAIN_BLOCKLISTS="dbl.spamhaus.org multi.surbl.org"   # queried via the local resolver (public ones are refused)
+HTTPS_CHECK=1                 # daily: HSTS header and http→https redirect on domains with a valid certificate (recommendation, no alert)
 # Web attack statistics (hourly) and document-root scans (daily)
 ATTACK_STATS=1                # SQLi/traversal/RCE/XSS patterns, sensitive-file probes, peaks, ModSecurity
 EXPOSED_FILES_CHECK=1         # daily: .env, .git, SQL dumps, backup archives, config copies in document roots
@@ -145,7 +146,7 @@ CONF=/etc/plesk-server-report.conf
 # Check names in report order. Hourly checks analyse the log lines since the previous run,
 # daily checks run once a day and are cached in $STATE_DIR/daily.txt.
 HOURLY_CHECKS="mail webmail system fail2ban web uploads logins services backups"
-DAILY_CHECKS="updates certificates serverdns mailtls domaindns exposed webshell mailauth"
+DAILY_CHECKS="updates certificates https serverdns mailtls domaindns exposed webshell mailauth"
 
 # =============================================================================
 # Helper functions
@@ -1164,6 +1165,63 @@ check_certificates() {   # expiry of all site certificates and the panel certifi
   [[ -n $nossl ]] && echo "  no matching certificate (e.g. no SSL, mail-only, redirect):$nossl"
 }
 
+# https_head URL DOMAIN – response headers of one request to this server (no redirects followed)
+https_head() {
+  curl -skI --max-time 6 --resolve "$2:443:$PUBIP" --resolve "www.$2:443:$PUBIP" \
+       --resolve "$2:80:$PUBIP" --resolve "www.$2:80:$PUBIP" "$1" 2>/dev/null | tr -d '\r'
+}
+# same_site URL DOMAIN – true if URL points to DOMAIN or www.DOMAIN (redirects worth following)
+same_site() { [[ $1 =~ ^https?://(www\.)?${2//./\\.}(:[0-9]+)?(/|$) ]]; }
+
+check_https() {   # HSTS header and http→https redirect on domains with a valid certificate that point here
+  local now d c san end h loc a n=0 skip=0 nohsts="" noredir="" noans=""
+  echo ""; echo "HTTPS (HSTS and http→https redirect; domains with a valid certificate that point here):"
+  [[ -n ${PUBIP:-} ]] || { echo "  skipped: public IP of the server unknown"; return 0; }
+  command -v curl >/dev/null || { echo "  skipped: curl not installed"; return 0; }
+  cert_scan
+  now=$(date +%s)
+  for d in $(site_domains); do
+    [[ $d == "$HOST" || $d =~ ^[0-9.]+$ ]] && continue
+    # only domains whose certificate is valid for them – the others can't use HSTS (aliases, redirects, mail-only)
+    c=${CERT_INFO[$d]}; [[ -z $c ]] && continue
+    san=$(grep -o 'DNS:[^,]*' <<<"$c" | sed 's/DNS://' | xargs)
+    grep -qwF -- "$d" <<<"$san" || grep -qF -- "*.${d#*.}" <<<"$san" || continue
+    end=$(sed -n 's/^notAfter=//p' <<<"$c"); (( $(date -d "$end" +%s 2>/dev/null || echo 0) > now )) || continue
+    # only domains that point here – elsewhere (CDN, other hoster) this server's headers don't matter
+    a=$(DIGQ A "$d" | grep -E '^[0-9.]+$' | xargs)
+    [[ " $a " == *" $PUBIP "* ]] || { skip=$((skip + 1)); continue; }
+    n=$((n + 1))
+    # HSTS: on the first answer, or after one redirect to the same site (domain ↔ www)
+    h=$(https_head "https://$d/" "$d")
+    if [[ -z $h ]]; then noans+=" $d"; continue; fi
+    if ! grep -qi '^strict-transport-security:' <<<"$h"; then
+      loc=$(sed -n 's/^[Ll]ocation: *//p' <<<"$h" | head -1)
+      if [[ $loc == https://* ]] && same_site "$loc" "$d"; then h=$(https_head "$loc" "$d"); fi
+      grep -qi '^strict-transport-security:' <<<"$h" || nohsts+=" $d"
+    fi
+    # http → https: a redirect to https (directly or after one hop to www/without www); port 80 closed is fine too
+    h=$(https_head "http://$d/" "$d")
+    if [[ -n $h ]]; then
+      loc=$(sed -n 's/^[Ll]ocation: *//p' <<<"$h" | head -1)
+      if [[ $loc == http://* ]] && same_site "$loc" "$d"; then
+        h=$(https_head "$loc" "$d"); loc=$(sed -n 's/^[Ll]ocation: *//p' <<<"$h" | head -1)
+      fi
+      [[ $loc == https://* ]] || noredir+=" $d"
+    fi
+  done
+  [[ -n $noans ]] && echo "  no answer on https (timeout or error):$noans"
+  if [[ -z $nohsts && -z $noredir ]]; then
+    echo "  $n domain(s) checked, all send HSTS and redirect http to https"
+  else
+    [[ -n $nohsts ]] && echo "  no HSTS:$nohsts"
+    [[ -n $noredir ]] && echo "  no redirect from http to https:$noredir"
+    echo "  security can be improved (Plesk: Websites & Domains → SSL/TLS Certificates → HSTS / Redirect from http to https)"
+    echo "  $n domain(s) checked"
+  fi
+  (( skip )) && echo "  $skip domain(s) with a certificate point elsewhere and were skipped"
+  return 0
+}
+
 check_serverdns() {   # PTR of the server IP, HELO name, IPv6 reverse DNS
   local ptr fwd helo
   echo ""; echo "Server DNS (reverse DNS / HELO):"
@@ -1437,11 +1495,12 @@ check_enabled() {
     exposed)   (( EXPOSED_FILES_CHECK )) ;;
     webshell)  (( WEBSHELL_CHECK )) ;;
     mailauth)  (( MAILAUTH_CHECK )) ;;
+    https)     (( HTTPS_CHECK )) ;;
     *) return 0 ;;
   esac
 }
 # checks that need dig are skipped silently without it (mailauth prints a note)
-check_needs_dig() { [[ $1 == serverdns || $1 == domaindns ]]; }
+check_needs_dig() { [[ $1 == serverdns || $1 == domaindns || $1 == https ]]; }
 
 run_hourly() {   # run_hourly NAME… – checks write directly into the report body
   local c

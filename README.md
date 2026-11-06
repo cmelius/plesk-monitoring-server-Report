@@ -64,7 +64,7 @@ Just as useful: the reports confirmed what is *fine*. Reverse DNS, HELO name and
 | **Backups** | time, age and status of the latest **Plesk backup** (errors from its `backup.log`), Acronis agent (if installed) | the latest backup is older than `WARN_BACKUP_HOURS` or finished with errors, or the Acronis agent is not running |
 | **Web** | requests, 5xx errors, WordPress login POSTs and busiest IP per domain, login-attack details (distinct IPs, wp-login vs. xmlrpc, successful logins, whether xmlrpc.php is blocked), PHP fatal errors with the first message, **attack patterns** per domain (SQL injection, path traversal, code execution, XSS) and how many were answered with 200, **probes for sensitive files** (`.env`, `.git`, dumps, backups, config copies), **traffic peaks** (busiest minute) and URLs requested by unusually many IPs, **ModSecurity** hits and top rules | a domain throws many 5xx/fatal errors, a sensitive file was served with 200 *and* exists on disk, a traffic peak exceeds `WARN_REQ_PER_MIN`, or one URL is hit by a botnet-sized number of IPs |
 
-**Once a day (first run after midnight):** pending (security) updates and reboot-required, TLS certificates of all Plesk domains and the panel (expiry < 14 days), and **SPF, DKIM and DMARC of every domain with mail service**: does SPF allow this server (including `include:`, `a`, `mx`), does the DKIM key in DNS match the key Plesk signs with, is there a DMARC policy, and where are MX and DNS hosted. That last part is especially useful for domains whose DNS you don't manage yourself. SPF errors that make receivers reject mail outright are flagged too: several SPF records, more than 10 DNS lookups, or `+all`.
+**Once a day (first run after midnight):** pending (security) updates and reboot-required, TLS certificates of all Plesk domains and the panel (expiry < 14 days), **HSTS and http→https redirect** on every domain with a valid certificate (a recommendation, no alert), and **SPF, DKIM and DMARC of every domain with mail service**: does SPF allow this server (including `include:`, `a`, `mx`), does the DKIM key in DNS match the key Plesk signs with, is there a DMARC policy, and where are MX and DNS hosted. That last part is especially useful for domains whose DNS you don't manage yourself. SPF errors that make receivers reject mail outright are flagged too: several SPF records, more than 10 DNS lookups, or `+all`.
 
 **Also once a day, server and domain DNS:**
 - **reverse DNS (PTR)** of the server IP, forward-confirmed, and whether Postfix's HELO name resolves to the server. Without a PTR record, Gmail, Microsoft and others reject mail from *all* domains on the server.
@@ -75,7 +75,7 @@ Just as useful: the reports confirmed what is *fine*. Reverse DNS, HELO name and
 ### Example report (fictional data)
 
 ```
-Server report host.example.com – 2026-10-26 10:05 UTC – plesk-server-report v1.3.1
+Server report host.example.com – 2026-10-26 10:05 UTC – plesk-server-report v1.4.0
 STATUS: WARNING (11)
  ! Mail: support@bank-secure.example sent to 700 recipients from this server (mailbox login or script)
  ! Mail: mailbox info@shop.example submitted 140 mails after logins from outside DE AT CH: 192.0.2.15 (BR, Example Cloud Ltd [datacenter]) 203.0.113.99 (VN, Example Telecom) – password compromised?
@@ -237,6 +237,12 @@ TLS certificates:
   all valid certificates are good for at least 14 more days
   no matching certificate (e.g. no SSL, mail-only, redirect): mail-only.example parked.example
 
+HTTPS (HSTS and http→https redirect; domains with a valid certificate that point here):
+  no HSTS: lawfirm.example
+  no redirect from http to https: lawfirm.example
+  security can be improved (Plesk: Websites & Domains → SSL/TLS Certificates → HSTS / Redirect from http to https)
+  23 domain(s) checked
+
 Server DNS (reverse DNS / HELO):
   203.0.113.10 → host.example.com: ok (forward-confirmed)
   Postfix HELO name: host.example.com (resolves to this server, matches PTR)
@@ -276,7 +282,7 @@ The report above is what a hijacked mailbox and a hacked WordPress site look lik
 <summary><b>Example <code>summary.txt</code></b> (the same day, condensed from all reports of the last 24 hours – 24 with the hourly cron job, 12 if it runs every 2 hours; fictional data, shortened)</summary>
 
 ```
-Server summary host.example.com – last 24 h: 24 report(s), 2026-10-25 11:05 UTC to 2026-10-26 10:05 UTC – plesk-server-report v1.3.1
+Server summary host.example.com – last 24 h: 24 report(s), 2026-10-25 11:05 UTC to 2026-10-26 10:05 UTC – plesk-server-report v1.4.0
 Built from the reports of this period. Daily checks and fail2ban: see latest.txt. Details of a run: report-<date>-<time>.txt
 
 == RUNS (time, status) ==
@@ -577,6 +583,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 | `MAIL_TLS_PORTS` | `25 465 587 993 995` | ports whose certificate is checked (25/587 via STARTTLS, 143/110 also possible) |
 | `DOMAIN_DNS_CHECK` | 1 | per-domain A/AAAA, CAA, DNSSEC and domain-blocklist check, 0 = off |
 | `DOMAIN_BLOCKLISTS` | `dbl.spamhaus.org multi.surbl.org` | domain blocklists, queried via the local resolver |
+| `HTTPS_CHECK` | 1 | daily HSTS and http→https redirect check, 0 = off |
 | `ATTACK_STATS` | 1 | hourly attack-pattern, sensitive-file, traffic-peak and ModSecurity statistics |
 | `WARN_REQ_PER_MIN` | 600 | alert when a domain's busiest minute exceeds this many requests |
 | `WARN_DISTRIBUTED_IPS` | 100 | alert when one URL (static files excluded) is requested by this many different IPs in one run |
@@ -623,6 +630,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 - **Spamhaus** refuses queries coming through large public DNS resolvers. The report then shows `query-refused`, which means "unknown", not "listed". Use a local resolver for reliable results.
 - **Plesk panel logins:** Plesk writes no login events to `panel.log` (it only contains errors), so logins are read from the panel's access log `/var/log/plesk/httpsd_access_log` (Plesk 18 on Debian, Ubuntu and RHEL-based systems). A login is a `POST /login_up.php`; only a successful one is followed by a panel page (`/admin/`, `/smb/` or `/cp/`) with `login_up.php` as referrer. Only the standard access-log fields are used (IP, request, status, referrer), so older log formats work too; logins through a domain (`https://example.com/login.php`, proxied from `127.0.0.1`) are attributed to the real client IP when Plesk logs it. The access log doesn't contain the user name, so the report shows the IP only. Logins that did not reach a panel page are counted as failed attempts. Logins via the Plesk API or "Log in as customer" are not covered. SSH logins are read from `auth.log`/`secure` or the journal.
 - **TLS check** connects to the server's public IPv4. Domains that are mail-only, redirected elsewhere or without SSL are listed as "no matching certificate". That line is informational, not an alert.
+- **HSTS and http→https check** looks only at domains whose certificate is valid for them and whose A record points to this server – aliases, redirects and mail-only domains can't use HSTS, and for a domain hosted elsewhere this server's headers don't matter. One HEAD request per domain to this server (and one redirect to the same domain with or without `www.` is followed). The header counts no matter who sets it: Plesk, `.htaccess` or a WordPress plugin. Missing HSTS or redirect is a recommendation, not an alert. `max-age` and `preload` are not judged: Plesk's default of six months is fine, and `preload` is hard to undo, so it is the site owner's decision.
 - **Backup check** covers Plesk's own backup manager (status from `backup.log` in the PMM log directory). Provider-side snapshots are not visible to the script, except whether an Acronis agent is running.
 - **WordPress login success** is derived from the HTTP status: a successful `wp-login.php` POST returns `302`, a failed one `200`. Security plugins that change the login flow (custom login URLs, 2FA, CAPTCHAs) may change these codes. Logins via `xmlrpc.php` always return `200`, so their success cannot be told from the access log. Block `xmlrpc.php` if you don't need it (Plesk: *WordPress Toolkit → Security*).
 - **IMAP/POP3 logins** are checked by country as well: an attacker with a guessed password who only reads mail sends nothing, so the sending checks never see him. The report lists every login from outside `ALLOWED_COUNTRIES` (plus a count of all logins checked), but the **alert comes only once per mailbox and country**:
