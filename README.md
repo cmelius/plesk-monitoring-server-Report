@@ -2,7 +2,7 @@
 
 A single bash script that writes an **hourly health and security report** for a Plesk server on Linux and (optionally) uploads it to cloud storage with [rclone](https://rclone.org/).
 
-It is built around the most common way a shared Plesk server gets into trouble: **a compromised mailbox or a hacked website starts sending spam**, the server IP ends up on a blocklist, and every customer's mail bounces. The report is short, plain text and readable by a human or by an AI assistant that summarises it for you once a day.
+It is built around the most common way a shared Plesk server gets into trouble: **a compromised mailbox or a hacked website starts sending spam**, the server IP ends up on a blocklist, and every customer's mail bounces. The report is short, plain text and readable by a human – but that's where it really shines: an AI assistant reads the latest report and a 24-hour summary every morning and tells you in a few lines whether anything needs your attention. The reports are written for exactly that; see [Reading the reports](#reading-the-reports) for an example prompt.
 
 The script only **reads** logs and system state. It never changes the server configuration, mail queue or websites.
 
