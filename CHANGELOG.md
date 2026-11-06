@@ -10,7 +10,7 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 ### Fixed
 - RHEL-based systems: the daily `dnf` check for pending updates had no time limit (`CMD_TIMEOUT`) and could hang on a slow mirror.
 - README: says up front that the script is for Plesk on Linux; the note on RHEL-based systems no longer reads as if the script were updated with `dnf`.
-- **Log lines lost at rotation** when the rotated file isn't called `.1`: Plesk renames the mail log to `maillog.processed`, RHEL-based systems add a date (`maillog-20261106`). The lines between the last run and the rotation were never read. The rotated file is now found by its inode, whatever its name.
+- **Log lines lost at rotation** when the rotated file isn't called `.1`: Plesk's daily maintenance moves the mail log to `maillog.processed` (on every Linux distribution), and logrotate on RHEL-based systems adds a date to the other logs (e.g. `secure-20261106`, where SSH logins are read from). The lines between the last run and the rotation were never read. The rotated file is now found by its inode, whatever its name.
 
 ## [1.4.0] – 2026-11-06
 

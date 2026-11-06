@@ -268,7 +268,7 @@ site_domains() {
 }
 
 # rotated_file FILE INODE – the rotated copy of FILE that still has INODE (renaming keeps the inode):
-# FILE.1 (Debian logrotate), FILE.processed (Plesk's mail log), FILE-20261106 (dateext, RHEL)
+# FILE.1 (Debian logrotate), FILE.processed (Plesk's mail log, any distribution), FILE-20261106 (dateext, RHEL)
 rotated_file() {
   local c
   for c in "$1".* "$1"-*; do
