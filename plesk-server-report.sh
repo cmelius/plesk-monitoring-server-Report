@@ -6,8 +6,8 @@
 #
 # Focus: outgoing spam from compromised mailboxes or hacked websites, CPU/RAM,
 # plus brute-force noise, fail2ban, web errors, successful logins, new PHP files
-# in upload folders, failed services, OOM kills, DNS blocklists – and once a day:
-# pending updates, expiring certificates and Plesk backup status.
+# in upload folders, failed services, OOM kills, DNS blocklists, Plesk backup
+# status – and once a day: pending updates and expiring certificates.
 # Mail sent through Roundcube webmail is analysed separately (its SMTP
 # connections come from localhost and are invisible in the mail log).
 # Web logs are also scanned for attack patterns, probes for sensitive files, traffic
@@ -46,7 +46,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.3.0
+VERSION=1.3.1
 
 set -uo pipefail
 export LC_ALL=C
@@ -144,8 +144,8 @@ CONF=/etc/plesk-server-report.conf
 
 # Check names in report order. Hourly checks analyse the log lines since the previous run,
 # daily checks run once a day and are cached in $STATE_DIR/daily.txt.
-HOURLY_CHECKS="mail webmail system fail2ban web uploads logins services"
-DAILY_CHECKS="updates certificates serverdns mailtls domaindns exposed webshell mailauth backups"
+HOURLY_CHECKS="mail webmail system fail2ban web uploads logins services backups"
+DAILY_CHECKS="updates certificates serverdns mailtls domaindns exposed webshell mailauth"
 
 # =============================================================================
 # Helper functions
@@ -1065,6 +1065,44 @@ check_services() {   # failed systemd units, OOM killer
   return 0
 }
 
+check_backups() {   # latest Plesk backup (time, age, errors), Acronis agent – every run, so the age is current
+  local pmm last age st now mt
+  now=$(date +%s)
+  section "BACKUPS"
+  for pmm in /var/log/plesk/PMM /usr/local/psa/PMM/logs /opt/psa/PMM/logs; do [[ -d $pmm ]] && break; pmm=""; done
+  if [[ -n $pmm ]]; then
+    last=$(T "$CMD_TIMEOUT" find -L "$pmm" -maxdepth 2 -type d -name 'backup-*' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)
+    if [[ -n $last ]]; then
+      mt=$(stat -c %Y "$last"); age=$(( (now - mt) / 3600 ))
+      local blog="$last/backup.log" nerr=0 nwarn=0 ec="" ex=""
+      if [[ -r $blog ]]; then
+        nerr=$(grep -cE '\] (ERROR|CRITICAL|FATAL):' "$blog"); nwarn=$(grep -cE '\] WARNING:' "$blog")
+        ec=$(grep -oE 'Exit code: [0-9]+' "$blog" | tail -1 | grep -oE '[0-9]+$')
+        ex=$(grep -m1 -E '\] (ERROR|CRITICAL|FATAL):' "$blog" | cut -c1-220)
+      fi
+      if [[ ! -r $blog ]]; then st="unknown (no backup.log)"
+      elif (( nerr > 0 )) || [[ -n $ec && $ec != 0 ]]; then st="ERROR ($nerr error lines, exit code ${ec:-?})"
+      elif (( nwarn > 0 )); then st="OK with $nwarn warnings"
+      else st="OK (exit code ${ec:-?})"; fi
+      out "Plesk backup: last run $(date -d "@$mt" '+%Y-%m-%d %H:%M %Z') ($age h ago, $(basename "$last")), status: $st"
+      [[ -n $ex ]] && out "  first error: $ex"
+      (( age > WARN_BACKUP_HOURS )) && alert "Backup: latest Plesk backup is $age hours old"
+      [[ $st == ERROR* ]] && alert "Backup: latest Plesk backup finished with errors"
+    else
+      out "Plesk backup: no backup logs found in $pmm"
+    fi
+  else
+    out "Plesk backup: log directory not found"
+  fi
+  # Acronis agent (used by several hosting providers for image backups) – only if installed
+  if pgrep -x aakore >/dev/null || pgrep -f '[a]cronis' >/dev/null; then
+    out "Acronis agent: running"
+  elif [[ -d /usr/lib/Acronis || -d /opt/acronis || -d /var/lib/Acronis ]]; then
+    out "Acronis agent: installed but NOT running"; alert "Backup: Acronis agent is not running"
+  fi
+  return 0
+}
+
 # =============================================================================
 # Daily checks – write their section text to stdout, alerts via dalert
 # =============================================================================
@@ -1385,43 +1423,6 @@ check_mailauth() {   # SPF / DKIM / DMARC of every domain with mail service
     mailauth_scan
   fi
 }
-check_backups() {   # latest Plesk backup (age, errors), Acronis agent
-  local pmm last age st now
-  now=$(date +%s)
-  echo ""; echo "Backups:"
-  for pmm in /var/log/plesk/PMM /usr/local/psa/PMM/logs /opt/psa/PMM/logs; do [[ -d $pmm ]] && break; pmm=""; done
-  if [[ -n $pmm ]]; then
-    last=$(T "$CMD_TIMEOUT" find -L "$pmm" -maxdepth 2 -type d -name 'backup-*' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)
-    if [[ -n $last ]]; then
-      age=$(( (now - $(stat -c %Y "$last")) / 3600 ))
-      local blog="$last/backup.log" nerr=0 nwarn=0 ec="" ex=""
-      if [[ -r $blog ]]; then
-        nerr=$(grep -cE '\] (ERROR|CRITICAL|FATAL):' "$blog"); nwarn=$(grep -cE '\] WARNING:' "$blog")
-        ec=$(grep -oE 'Exit code: [0-9]+' "$blog" | tail -1 | grep -oE '[0-9]+$')
-        ex=$(grep -m1 -E '\] (ERROR|CRITICAL|FATAL):' "$blog" | cut -c1-220)
-      fi
-      if [[ ! -r $blog ]]; then st="unknown (no backup.log)"
-      elif (( nerr > 0 )) || [[ -n $ec && $ec != 0 ]]; then st="ERROR ($nerr error lines, exit code ${ec:-?})"
-      elif (( nwarn > 0 )); then st="OK with $nwarn warnings"
-      else st="OK (exit code ${ec:-?})"; fi
-      echo "  Plesk backup: last run $age h ago ($(basename "$last")), status: $st"
-      [[ -n $ex ]] && echo "    first error: $ex"
-      (( age > WARN_BACKUP_HOURS )) && dalert "Backup: latest Plesk backup is $age hours old"
-      [[ $st == ERROR* ]] && dalert "Backup: latest Plesk backup finished with errors"
-    else
-      echo "  Plesk backup: no backup logs found in $pmm"
-    fi
-  else
-    echo "  Plesk backup: log directory not found"
-  fi
-  # Acronis agent (used by several hosting providers for image backups) – only if installed
-  if pgrep -x aakore >/dev/null || pgrep -f '[a]cronis' >/dev/null; then
-    echo "  Acronis agent: running"
-  elif [[ -d /usr/lib/Acronis || -d /opt/acronis || -d /var/lib/Acronis ]]; then
-    echo "  Acronis agent: installed but NOT running"; dalert "Backup: Acronis agent is not running"
-  fi
-  return 0
-}
 
 # =============================================================================
 # Running the checks, report, upload
@@ -1610,9 +1611,15 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       if (($0 ~ /^Failed units: / && $0 !~ /: none$/) || ($0 ~ /^OOM killer: / && $0 !~ /: none$/)) print "SVC\t" tm "\t" t($0)
       next
     }
+    sec ~ /== BACKUPS ==/ {   # backup status: the lines of the newest report
+      if ($0 == "") next
+      if (bkrun != nrun) { nbk = 0; bkrun = nrun }
+      bk[++nbk] = $0; next
+    }
     END {
       for (i = 1; i <= nao; i++) { a = ao[i]; print "ALERT\t" ac[a] "\t" af[a] "\t" al[a] "\t" t(a) }
       for (i = 1; i <= nno; i++) { a = no[i]; print "NOTE\t" nc[a] "\t" nf[a] "\t" nl[a] "\t" t(a) }
+      for (i = 1; i <= nbk; i++) print "BKP\t" t(bk[i])
       printf "MAILTOT\t%d\t%d\t%d\t%d\t%s\t%d\n", dl, df, bo, mq, mqt, rj
       printf "SKIPTOT\t%d\t%s\n", skt, skl
       for (p in ps) printf "PROVTOT\t%d\t%d\t%d\t%d\t%s\n", ps[p] + pd[p] + pb[p], ps[p], pd[p], pb[p], p
@@ -1715,6 +1722,7 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
     rec DISK | sort -t$'\t' -k1,1nr | awk -F'\t' '{printf "  %4s%%  %s\n", $1, $2}'
     if [[ -n $(rec SVC) ]]; then echo "Failed services / OOM killer:"; rec SVC | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
     else echo "Failed services / OOM killer: none in any run"; fi
+    if [[ -n $(rec BKP) ]]; then echo "Backups (newest report):"; rec BKP | sed 's/^/  /'; fi
 
     echo ""; echo "== WEB (totals) =="
     echo "requests | 5xx | login POSTs | domain"

@@ -2,6 +2,11 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
+## [1.3.1] – not yet released (on `main`)
+
+### Changed
+- **Backup check in every run** instead of once a day. The daily checks run shortly after midnight, before most backups, so the age shown all day was the one from the previous night's backup, and a failed backup was reported almost a day later. The line now shows the time of the latest backup, e.g. `last run 2026-11-06 03:25 UTC (3 h ago, …)`, in its own BACKUPS section and in `summary.txt`.
+
 ## [1.3.0] – 2026-11-06
 
 ### Added

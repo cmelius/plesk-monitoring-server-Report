@@ -61,9 +61,10 @@ Just as useful: the reports confirmed what is *fine*. Reverse DNS, HELO name and
 | **Intrusion** | successful SSH and Plesk panel logins, **new PHP files in `wp-content/uploads`**, **successful WordPress logins during a brute-force attack** | a login comes from a never-seen IP, a PHP file appears in an upload folder, or an IP logs in to WordPress after repeated failures |
 | **Geolocation** (optional) | country and network operator of every IP with a successful login (mailboxes, SSH, Plesk panel, WordPress) and of the top failed-login IPs, datacenter networks marked, from a **local** database, so no IP leaves the server | a mailbox sends mail, is read via IMAP/POP3, or someone logs in, from a country outside `ALLOWED_COUNTRIES` |
 | **System** | load, CPU per system user (= subscription), RAM, disks, failed systemd units, OOM killer | thresholds are exceeded |
+| **Backups** | time, age and status of the latest **Plesk backup** (errors from its `backup.log`), Acronis agent (if installed) | the latest backup is older than `WARN_BACKUP_HOURS` or finished with errors, or the Acronis agent is not running |
 | **Web** | requests, 5xx errors, WordPress login POSTs and busiest IP per domain, login-attack details (distinct IPs, wp-login vs. xmlrpc, successful logins, whether xmlrpc.php is blocked), PHP fatal errors with the first message, **attack patterns** per domain (SQL injection, path traversal, code execution, XSS) and how many were answered with 200, **probes for sensitive files** (`.env`, `.git`, dumps, backups, config copies), **traffic peaks** (busiest minute) and URLs requested by unusually many IPs, **ModSecurity** hits and top rules | a domain throws many 5xx/fatal errors, a sensitive file was served with 200 *and* exists on disk, a traffic peak exceeds `WARN_REQ_PER_MIN`, or one URL is hit by a botnet-sized number of IPs |
 
-**Once a day (first run after midnight):** pending (security) updates and reboot-required, TLS certificates of all Plesk domains and the panel (expiry < 14 days), age and status of the latest **Plesk backup**, Acronis agent (if installed), and **SPF, DKIM and DMARC of every domain with mail service**: does SPF allow this server (including `include:`, `a`, `mx`), does the DKIM key in DNS match the key Plesk signs with, is there a DMARC policy, and where are MX and DNS hosted. That last part is especially useful for domains whose DNS you don't manage yourself. SPF errors that make receivers reject mail outright are flagged too: several SPF records, more than 10 DNS lookups, or `+all`.
+**Once a day (first run after midnight):** pending (security) updates and reboot-required, TLS certificates of all Plesk domains and the panel (expiry < 14 days), and **SPF, DKIM and DMARC of every domain with mail service**: does SPF allow this server (including `include:`, `a`, `mx`), does the DKIM key in DNS match the key Plesk signs with, is there a DMARC policy, and where are MX and DNS hosted. That last part is especially useful for domains whose DNS you don't manage yourself. SPF errors that make receivers reject mail outright are flagged too: several SPF records, more than 10 DNS lookups, or `+all`.
 
 **Also once a day, server and domain DNS:**
 - **reverse DNS (PTR)** of the server IP, forward-confirmed, and whether Postfix's HELO name resolves to the server. Without a PTR record, Gmail, Microsoft and others reject mail from *all* domains on the server.
@@ -74,7 +75,7 @@ Just as useful: the reports confirmed what is *fine*. Reverse DNS, HELO name and
 ### Example report (fictional data)
 
 ```
-Server report host.example.com – 2026-10-26 10:05 UTC – plesk-server-report v1.3.0
+Server report host.example.com – 2026-10-26 10:05 UTC – plesk-server-report v1.3.1
 STATUS: WARNING (11)
  ! Mail: support@bank-secure.example sent to 700 recipients from this server (mailbox login or script)
  ! Mail: mailbox info@shop.example submitted 140 mails after logins from outside DE AT CH: 192.0.2.15 (BR, Example Cloud Ltd [datacenter]) 203.0.113.99 (VN, Example Telecom) – password compromised?
@@ -221,6 +222,10 @@ New since last run: 2
 Failed units: none
 OOM killer: none
 
+== BACKUPS ==
+Plesk backup: last run 2026-10-26 03:15 UTC (6 h ago, backup-2026-10-26-03-15-02-123), status: OK (exit code 0)
+Acronis agent: running
+
 == DAILY CHECKS ==
 As of: 2026-10-26 01:05 UTC
 Updates available: 11, security updates: 3
@@ -262,10 +267,6 @@ Mail authentication (SPF / DKIM / DMARC):
   a single missing/outdated record is a recommendation (DMARC passes if SPF or DKIM passes).
   DNS queried via 1.1.1.1
 
-Backups:
-  Plesk backup: last run 7 h ago (backup-2026-10-26-03-15-02-123), status: OK (exit code 0)
-  Acronis agent: running
-
 IP geolocation: DB-IP.com Lite databases (CC BY 4.0)
 ```
 
@@ -275,7 +276,7 @@ The report above is what a hijacked mailbox and a hacked WordPress site look lik
 <summary><b>Example <code>summary.txt</code></b> (the same day, condensed from all reports of the last 24 hours – 24 with the hourly cron job, 12 if it runs every 2 hours; fictional data, shortened)</summary>
 
 ```
-Server summary host.example.com – last 24 h: 24 report(s), 2026-10-25 11:05 UTC to 2026-10-26 10:05 UTC – plesk-server-report v1.3.0
+Server summary host.example.com – last 24 h: 24 report(s), 2026-10-25 11:05 UTC to 2026-10-26 10:05 UTC – plesk-server-report v1.3.1
 Built from the reports of this period. Daily checks and fail2ban: see latest.txt. Details of a run: report-<date>-<time>.txt
 
 == RUNS (time, status) ==
@@ -337,6 +338,9 @@ Failed mail logins: SMTP 1312 | IMAP/POP3 41 in total, most in one run: 118 (202
 == SYSTEM ==
 Highest 5-min load: 2.84 (2026-10-26 03:05 UTC) on 8 cores | lowest available RAM: 61 % (2026-10-26 03:05 UTC)
 …
+Backups (newest report):
+  Plesk backup: last run 2026-10-26 03:15 UTC (6 h ago, backup-2026-10-26-03-15-02-123), status: OK (exit code 0)
+  Acronis agent: running
 
 == WEBROOTS: PHP files in upload folders ==
 New in this period: 2
