@@ -2,6 +2,11 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
+## [Unreleased] (on `main`)
+
+### Changed
+- README: the example prompt for AI reviews also covers rejections by the big mail providers, watched recipient domains, IMAP/POP3 logins from new countries and customers banned by fail2ban (with the unban command); recommendations such as missing HSTS are mentioned once at the end instead of as issues. If you use the prompt, update your copy.
+
 ## [1.5.0] – 2026-11-06
 
 ### Added
