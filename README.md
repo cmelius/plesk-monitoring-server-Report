@@ -28,6 +28,8 @@ That's it: from now on a report is written every hour to `/var/lib/plesk-server-
 
 The sections below explain everything in detail; you don't need to read them to get started.
 
+**Contents:** [What it found so far](#what-it-found-so-far) · [What the report covers](#what-the-report-covers) · [Requirements](#requirements) · [Installation](#installation) · [Storage for the reports](#storage-for-the-reports) · [Reading the reports](#reading-the-reports) · [What the script remembers](#what-the-script-remembers) · [Configuration](#configuration) · [First run](#first-run) · [Notes and limitations](#notes-and-limitations) · [Security](#security) · [Using another CMS?](#using-another-cms-help-wanted) · [Updates](#updates) · [License](#license)
+
 ---
 
 ## What it found so far
