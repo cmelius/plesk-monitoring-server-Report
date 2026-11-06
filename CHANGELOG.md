@@ -2,6 +2,14 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
+## [1.5.0] – not yet released (on `main`)
+
+### Added
+- **Alert when fail2ban bans a customer:** the client IPs of successful IMAP/POP3 and SMTP logins are remembered for `KNOWN_MAIL_IP_DAYS` (new setting, default 30; the first run also reads the rotated mail logs). When a jail bans one of them – or an IP with earlier SSH/Plesk logins – the report lists it under FAIL2BAN and raises an alert with the mailbox and the unban command. Until now a banned customer disappeared from the failed-login figures, because their attempts no longer reach the server.
+
+### Fixed
+- **Log lines lost at rotation** when the rotated file isn't called `.1`: Plesk renames the mail log to `maillog.processed`, RHEL-based systems add a date (`maillog-20261106`). The lines between the last run and the rotation were never read. The rotated file is now found by its inode, whatever its name.
+
 ## [1.4.0] – 2026-11-06
 
 ### Added

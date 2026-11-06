@@ -57,7 +57,7 @@ Just as useful: the reports confirmed what is *fine*. Reverse DNS, HELO name and
 |---|---|---|
 | **Outgoing mail / spam** | recipients per sender, mails per authenticated mailbox, distinct client IPs per mailbox, **login ≠ sender domain**, mails injected by scripts (PHP `mail()`, per Plesk subscription), **mail sent through Roundcube webmail** (mailbox, real client IP, recipients), failed webmail logins, deferred/bounced, queue size | a mailbox suddenly sends a lot, is used from many IPs, sends with foreign `From` domains, a website's scripts send mass mail, or a webmail user sends after repeated failed logins |
 | **Reputation** | server IP against Spamhaus, SpamCop, Barracuda, PSBL; remote rejections mentioning blocklists, reputation, spam or rate limits (including the wording of Gmail, Microsoft, Apple iCloud, Yahoo, GMX/web.de and T-Online, e.g. "likely unsolicited", "unusual rate", "local policy" [CS01]/[HM08], "excessive volume", "policy restrictions", DMARC rejections), with examples; mails the spam filter skipped because of their size; **outgoing deliveries per provider** (sent / deferred / bounced for Microsoft, Google, Apple, GMX/web.de/IONOS, T-Online, …) and **watched recipient domains** | the server IP is listed, recipients reject or throttle mail because of reputation, or a delivery to a watched domain fails |
-| **Brute force** | failed SMTP/IMAP/POP3 logins, most attacked mailboxes, fail2ban jails | failures spike |
+| **Brute force** | failed SMTP/IMAP/POP3 logins, most attacked mailboxes, fail2ban jails | failures spike, or a jail bans an IP that logged in successfully before (a customer's device with an outdated password) |
 | **Intrusion** | successful SSH and Plesk panel logins, **new PHP files in `wp-content/uploads`**, **successful WordPress logins during a brute-force attack** | a login comes from a never-seen IP, a PHP file appears in an upload folder, or an IP logs in to WordPress after repeated failures |
 | **Geolocation** (optional) | country and network operator of every IP with a successful login (mailboxes, SSH, Plesk panel, WordPress) and of the top failed-login IPs, datacenter networks marked, from a **local** database, so no IP leaves the server | a mailbox sends mail, is read via IMAP/POP3, or someone logs in, from a country outside `ALLOWED_COUNTRIES` |
 | **System** | load, CPU per system user (= subscription), RAM, disks, failed systemd units, OOM killer | thresholds are exceeded |
@@ -75,14 +75,15 @@ Just as useful: the reports confirmed what is *fine*. Reverse DNS, HELO name and
 ### Example report (fictional data)
 
 ```
-Server report host.example.com – 2026-10-26 10:05 UTC – plesk-server-report v1.4.0
-STATUS: WARNING (11)
+Server report host.example.com – 2026-10-26 10:05 UTC – plesk-server-report v1.5.0
+STATUS: WARNING (12)
  ! Mail: support@bank-secure.example sent to 700 recipients from this server (mailbox login or script)
  ! Mail: mailbox info@shop.example submitted 140 mails after logins from outside DE AT CH: 192.0.2.15 (BR, Example Cloud Ltd [datacenter]) 203.0.113.99 (VN, Example Telecom) – password compromised?
  ! Mail: mailbox info@shop.example used from 12 different IPs – password compromised?
  ! Mail: mailbox info@shop.example sent 140 mails with a foreign sender domain – spam?
  ! Mail: 61 rejections by remote servers mentioning a blocklist, reputation, spam or rate limit – check the server IP and the examples
  ! Mail: mailbox info@shop.example logged in via IMAP/POP3 from a new country outside DE AT CH: 192.0.2.15 (BR, Example Cloud Ltd [datacenter]) – travelling, or password compromised?
+ ! fail2ban: jail plesk-courierimap bans 198.51.100.77 (DE, Example Kabel GmbH), which had successful logins before (mail logins of office@lawfirm.example (last 2026-10-25)) – a device with an outdated password? Unban: fail2ban-client set plesk-courierimap unbanip 198.51.100.77
  ! Web: blog.example logged 48 PHP fatal errors
  ! Web: shop.example served the sensitive file /.env (HTTP 200, file exists) – remove it or block access; assume it was downloaded
  ! Web: 2 new PHP file(s) in wp-content/uploads – possible malware
@@ -175,12 +176,15 @@ Filesystems:
     8%  /boot/efi
 
 == FAIL2BAN ==
+  plesk-courierimap            banned:   9 (total 87), currently failed: 136
   plesk-modsecurity            banned:  15 (total 612), currently failed: 31
   plesk-postfix                banned:   2 (total 221), currently failed: 174
   plesk-wordpress              banned:   0 (total 114), currently failed: 4
   recidive                     banned: 286 (total 561), currently failed: 242
   ssh                          banned:   5 (total 1251), currently failed: 20
   (jails without bans/failures hidden)
+  Banned IPs with earlier successful logins (customer or own device with an outdated password?):
+    plesk-courierimap: 198.51.100.77 (DE, Example Kabel GmbH) – earlier successful mail logins of office@lawfirm.example (last 2026-10-25)
 
 == WEB (since last run) ==
 requests | 5xx | login POSTs | domain | busiest IP
@@ -282,7 +286,7 @@ The report above is what a hijacked mailbox and a hacked WordPress site look lik
 <summary><b>Example <code>summary.txt</code></b> (the same day, condensed from all reports of the last 24 hours – 24 with the hourly cron job, 12 if it runs every 2 hours; fictional data, shortened)</summary>
 
 ```
-Server summary host.example.com – last 24 h: 24 report(s), 2026-10-25 11:05 UTC to 2026-10-26 10:05 UTC – plesk-server-report v1.4.0
+Server summary host.example.com – last 24 h: 24 report(s), 2026-10-25 11:05 UTC to 2026-10-26 10:05 UTC – plesk-server-report v1.5.0
 Built from the reports of this period. Daily checks and fail2ban: see latest.txt. Details of a run: report-<date>-<time>.txt
 
 == RUNS (time, status) ==
@@ -292,12 +296,13 @@ Built from the reports of this period. Daily checks and fail2ban: see latest.txt
   2026-10-26 00:05 UTC  STATUS: OK
   2026-10-26 01:05 UTC  STATUS: WARNING (2)
   …
-  2026-10-26 09:05 UTC  STATUS: WARNING (4)
-  2026-10-26 10:05 UTC  STATUS: WARNING (11)
+  2026-10-26 09:05 UTC  STATUS: WARNING (5)
+  2026-10-26 10:05 UTC  STATUS: WARNING (12)
 
 == ALERTS (times seen, first – last, text) ==
    10×  2026-10-26 01:05 UTC – 2026-10-26 10:05 UTC  Updates: 3 security update(s) pending
    10×  2026-10-26 01:05 UTC – 2026-10-26 10:05 UTC  Web: shop.example exposes /.env publicly (HTTP 200) – remove it from the document root or block access
+    6×  2026-10-26 05:05 UTC – 2026-10-26 10:05 UTC  fail2ban: jail plesk-courierimap bans 198.51.100.77 (DE, Example Kabel GmbH), which had successful logins before (mail logins of office@lawfirm.example (last 2026-10-25)) – a device with an outdated password? Unban: fail2ban-client set plesk-courierimap unbanip 198.51.100.77
     1×  2026-10-26 09:05 UTC – 2026-10-26 09:05 UTC  Mail: mailbox info@shop.example used from 5 different IPs – password compromised?
     1×  2026-10-26 09:05 UTC – 2026-10-26 09:05 UTC  Mail: mailbox info@shop.example sent 23 mails with a foreign sender domain – spam?
     1×  2026-10-26 09:05 UTC – 2026-10-26 09:05 UTC  Mail: mailbox info@shop.example logged in via IMAP/POP3 from a new country outside DE AT CH: 192.0.2.15 (BR, Example Cloud Ltd [datacenter]) – travelling, or password compromised?
@@ -599,6 +604,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 | `CMD_TIMEOUT` | 120 | seconds per external command that can hang (`plesk db`, `fail2ban-client`, `postqueue`, `journalctl`, `systemctl`, `apt-get`, `rclone`). A timeout raises an alert `Script: command timed out …` |
 | `FIND_TIMEOUT` | 600 | seconds per file-system scan of the web folders (`find`, `grep`), e.g. if a document root contains a dead network mount. After a timeout the scan is repeated next time instead of being marked as done |
 | `IMAP_COUNTRY_KEEP_DAYS` | 30 | days after which a mailbox's foreign country is forgotten if no IMAP/POP3 login came from there; the next login from that country alerts again (see [Notes](#notes-and-limitations)). 0 = never forget |
+| `KNOWN_MAIL_IP_DAYS` | 30 | days to remember client IPs of successful mail logins – alert when fail2ban bans one of them |
 | `MAX_LOG_MB` | 200 | read at most this many MB of new lines per log file and run, the newest part. Protects against huge logs after a long pause or a log that was truncated in place; the skipped part is mentioned in the report. 0 = no limit |
 | `STATE_DIR` | `/var/lib/plesk-server-report` | log offsets, known login IPs, daily cache, local reports |
 | `VHOST_LOGS` | `/var/www/vhosts/system` | Plesk per-domain log directories |
@@ -625,6 +631,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 - **Webmail is analysed from Roundcube's own logs** (`/var/log/plesk-roundcube/sendmail` and `errors`), because Roundcube talks to Postfix and the IMAP server (Dovecot or Courier) from `localhost`: in the mail log those mails carry neither the user's IP nor (on Plesk) the mailbox name. Without this section, a hijacked mailbox sending spam through webmail would be invisible. Roundcube does not log successful logins by default (`log_logins = false`). The script doesn't need them, since every sent mail is logged with mailbox and IP. Leave that Plesk-managed config alone.
 - **"Top senders" includes incoming mail** (e.g. newsletters from Amazon SES). The alert for that list only counts mail sent from this server, after a mailbox login or by a local script. The *authenticated mailboxes*, *login ≠ from* and *scripts* sections are the ones that show what your server sends on behalf of your users.
 - **Courier IMAP/POP3 and fail2ban:** Plesk's default jails cover Dovecot (`plesk-dovecot`), not Courier. If your server uses Courier, check whether the jail `plesk-courierimap` is switched on – if not, failed IMAP/POP3 logins are never banned. Switch it on in *Tools & Settings → IP Address Banning → Jails*. Before you do, check the *Failed mail logins* section for IPs of your customers: a device with an outdated password retries every few seconds and gets its whole connection banned.
+- **Banned customers:** once fail2ban bans an IP, its attempts no longer reach the server – so a customer with an outdated password disappears from the failed-login figures exactly when they can't fetch mail any more. The script remembers the client IPs of successful IMAP/POP3 and SMTP logins for `KNOWN_MAIL_IP_DAYS` (default 30; on the first run also from the rotated mail logs) and raises an alert when a jail bans one of them, with the mailbox and the unban command. The same goes for IPs with earlier SSH or Plesk logins. The alert repeats in every run while the ban lasts; correct the password on the device, then unban.
 - **Deliveries per provider:** the report lists outgoing deliveries grouped by the receiving provider, recognized by its MX host (Microsoft, Google, Apple iCloud, GMX/web.de/IONOS, T-Online, Yahoo/AOL, Strato; others by the MX domain, e.g. a company's spam gateway). A provider with many deferrals or bounces shows a delivery problem even when its rejection text isn't one the script knows. Deferrals are counted per delivery attempt, so one mail retried five times counts five times.
 - **Spam filter size limit:** SpamAssassin skips mails larger than its limit (Plesk default 256 KB, `SA_MAX_MAIL_SIZE` in `/etc/psa/psa.conf`). Spam waves with large image attachments use exactly that gap. The report counts the skipped mails (`Spam filter: N mail(s) not scanned`); if the number is high, raise the limit (e.g. to `3145728` = 3 MiB).
 - **Spamhaus** refuses queries coming through large public DNS resolvers. The report then shows `query-refused`, which means "unknown", not "listed". Use a local resolver for reliable results.

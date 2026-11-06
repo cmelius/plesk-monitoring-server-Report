@@ -46,7 +46,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.4.0
+VERSION=1.5.0
 
 set -uo pipefail
 export LC_ALL=C
@@ -66,6 +66,7 @@ MAX_RUNTIME=50                # minutes: an unattended (cron) run is stopped aft
 CMD_TIMEOUT=120               # seconds per external command (plesk db, fail2ban-client, postqueue, journalctl, apt-get, rclone)
 FIND_TIMEOUT=600              # seconds per file-system scan of the web folders (find, grep)
 IMAP_COUNTRY_KEEP_DAYS=30     # forget a mailbox's foreign country after x days without a login from there (0 = never)
+KNOWN_MAIL_IP_DAYS=30         # remember IPs with successful mail logins this long – alert when fail2ban bans one of them
 MAX_LOG_MB=200                # read at most x MB of new lines per log file and run, the newest part (0 = no limit)
 VHOST_LOGS=/var/www/vhosts/system        # Plesk per-domain log directories
 PLESK_PANEL_LOG=/var/log/plesk/httpsd_access_log   # access log of the Plesk panel (port 8443) – panel logins
@@ -266,11 +267,23 @@ site_domains() {
   printf '%s\n' "$SITE_DOMAINS_CACHE"
 }
 
+# rotated_file FILE INODE – the rotated copy of FILE that still has INODE (renaming keeps the inode):
+# FILE.1 (Debian logrotate), FILE.processed (Plesk's mail log), FILE-20261106 (dateext, RHEL)
+rotated_file() {
+  local c
+  for c in "$1".* "$1"-*; do
+    [[ -f $c && -r $c && $c != *.gz && $c != *.xz && $c != *.bz2 && $c != *.zst ]] || continue
+    [[ $(stat -c %i "$c" 2>/dev/null) == "$2" ]] && { printf '%s\n' "$c"; return 0; }
+  done
+  return 1
+}
+
 # Print only the lines appended to a log file since the previous run.
-# Handles logrotate (the remainder of the rotated file .1 is read as well).
+# Handles log rotation: the rest of the rotated file is read as well, found by its inode
+# whatever it is called now (FILE.1, FILE.processed, FILE-date).
 # At most MAX_LOG_MB are read (the newest part); more is reported as a note.
 new_lines() {
-  local f=$1 key st ino size off=0 oino="" ooff=0 rest=0 rsize max=$(( MAX_LOG_MB * 1048576 ))
+  local f=$1 key st ino size off=0 oino="" ooff=0 rest=0 rsize rf="" max=$(( MAX_LOG_MB * 1048576 ))
   [[ -r $f ]] || return 0
   key=$(printf '%s' "$f" | md5sum | cut -c1-16)
   st="$STATE_DIR/offsets/$key"
@@ -279,8 +292,8 @@ new_lines() {
     read -r oino ooff <"$st"
     if [[ $oino == "$ino" && $ooff -le $size ]]; then
       off=$ooff
-    elif [[ -r $f.1 && $(stat -c %i "$f.1") == "$oino" ]]; then
-      rsize=$(stat -c %s "$f.1"); (( rsize > ooff )) && rest=$(( rsize - ooff ))   # rest of the file before rotation
+    elif rf=$(rotated_file "$f" "$oino"); then
+      rsize=$(stat -c %s "$rf"); (( rsize > ooff )) && rest=$(( rsize - ooff ))   # rest of the file before rotation
     fi
   else
     # first run: only the last 20,000 lines to keep it fast
@@ -292,7 +305,7 @@ new_lines() {
     note "log $f: $(( (rest + size - off) / 1048576 )) MB new since the last run – only the newest $MAX_LOG_MB MB analysed (MAX_LOG_MB)"
     if (( size - off >= max )); then rest=0; off=$(( size - max )); else rest=$(( max - (size - off) )); fi
   fi
-  (( rest > 0 )) && tail -c "$rest" "$f.1"
+  (( rest > 0 )) && tail -c "$rest" "$rf"
   tail -c +"$((off + 1))" "$f" | head -c "$((size - off))"
   can_write_state && echo "$ino $size" >"$st"
   return 0
@@ -676,6 +689,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   for who in "${!IMF[@]}"; do
     alert "Mail: mailbox $who logged in via IMAP/POP3 from a new country outside $ALLOWED_COUNTRIES: ${IMF[$who]% } – travelling, or password compromised?"
   done
+  remember_mail_ips
 
   out ""; out "Mailboxes sending with a foreign sender domain (login ≠ from):"
   while IFS=$'\t' read -r _ n who ex; do
@@ -809,10 +823,55 @@ check_system() {   # load, CPU per system user, top processes, RAM, filesystems
   done < <(df -P -x tmpfs -x devtmpfs -x overlay -x squashfs 2>/dev/null | awk 'NR>1{print $5, $6}')
 }
 
+# known_mail_ips ("IP mailbox last-seen-epoch"): client IPs of successful IMAP/POP3 and SMTP
+# logins. check_fail2ban warns when a jail bans one of them – usually a customer's device with
+# an outdated password, which retries until its whole connection is banned. Once banned, its
+# attempts no longer reach the server, so the failed-login figures don't show it any more.
+remember_mail_ips() {
+  local f="$STATE_DIR/known_mail_ips" now tag who ip t
+  local -A M=()
+  can_write_state || return 0
+  now=$(date +%s)
+  if [[ -f $f ]]; then
+    while read -r ip who t; do
+      [[ -n $t ]] || continue
+      (( KNOWN_MAIL_IP_DAYS > 0 && now - t > KNOWN_MAIL_IP_DAYS * 86400 )) && continue
+      M["$ip $who"]=$t
+    done <"$f"
+  elif [[ -n ${MAILLOG:-} ]]; then
+    # first run: learn from the rotated mail logs too, so a customer banned before the
+    # update is recognized (the current run only sees logins since the previous run)
+    while read -r ip who; do M["$ip $who"]=$now; done < <(
+      for t in "$MAILLOG"*; do [[ -f $t && -r $t ]] && T "$CMD_TIMEOUT" zcat -f -- "$t" 2>/dev/null; done | awk '
+        /(imap|pop3)-login: Login: user=<[^>]+>.*rip=/ {
+          u=$0; sub(/.*user=</, "", u); sub(/>.*/, "", u); r=$0; sub(/.*rip=/, "", r); sub(/[, ].*/, "", r); k[r " " u]=1 }
+        /(imap|pop3)[ds](-ssl)?(\[[0-9]+\])?: LOGIN, user=[^,]+, ip=\[/ {
+          u=$0; sub(/.*LOGIN, user=/, "", u); sub(/,.*/, "", u); r=$0; sub(/.*ip=\[/, "", r); sub(/\].*/, "", r); sub(/^::ffff:/, "", r); k[r " " u]=1 }
+        /postfix\/.*smtpd.*sasl_username=/ && !/authentication failed/ && match($0, /client=[^ ,]*\[[0-9a-fA-F:.]+\]/) {
+          r=substr($0, RSTART, RLENGTH); sub(/.*\[/, "", r); sub(/\]$/, "", r); sub(/^::ffff:/, "", r); u=$0; sub(/.*sasl_username=/, "", u); sub(/[ ,].*/, "", u); k[r " " u]=1 }
+        END { for (x in k) print x }' | grep -vE '^(127\.0\.0\.1|::1) ')
+  fi
+  while IFS=$'\t' read -r tag _ who ip; do
+    [[ $tag == IMOK || $tag == SAIP ]] || continue
+    ip=${ip#::ffff:}
+    [[ -n $ip && -n $who && $ip != 127.0.0.1 && $ip != ::1 ]] || continue
+    M["$ip $who"]=$now
+  done < <(grep -E '^(IMOK|SAIP)' <<<"$MAILSTATS")
+  for t in "${!M[@]}"; do printf '%s %s\n' "$t" "${M[$t]}"; done | sort >"$f.new" && mv "$f.new" "$f"
+}
+
 check_fail2ban() {
-  local JAILS j s cb tb cf
+  local JAILS j s cb tb cf ip k who t ban="" KM="$STATE_DIR/known_mail_ips" KL="$STATE_DIR/known_login_ips"
+  local -A MW=() ML=()
   section "FAIL2BAN"
   if command -v fail2ban-client >/dev/null; then
+    # IPs with earlier successful logins: mail clients (mailbox, last seen) and SSH/panel
+    if [[ -r $KM ]]; then
+      while read -r ip who t; do
+        [[ -n $t ]] || continue
+        MW[$ip]+="$who, "; (( t > ${ML[$ip]:-0} )) && ML[$ip]=$t
+      done <"$KM"
+    fi
     JAILS=$(T "$CMD_TIMEOUT" fail2ban-client status 2>/dev/null | sed -n 's/.*Jail list:[[:space:]]*//p' | tr -d ' ' | tr ',' ' ')
     for j in $JAILS; do
       s=$(T "$CMD_TIMEOUT" fail2ban-client status "$j" 2>/dev/null)
@@ -820,8 +879,22 @@ check_fail2ban() {
       tb=$(sed -n 's/.*Total banned:[[:space:]]*//p' <<<"$s")
       cf=$(sed -n 's/.*Currently failed:[[:space:]]*//p' <<<"$s")
       [[ ${cb:-0} -gt 0 || ${cf:-0} -gt 0 ]] && printf '  %-28s banned: %3s (total %s), currently failed: %s\n' "$j" "$cb" "$tb" "$cf" >>"$BODY"
+      # banned IPs that logged in successfully before – a device with an outdated password?
+      for ip in $(sed -n 's/.*Banned IP list:[[:space:]]*//p' <<<"$s"); do
+        k=""
+        [[ -n ${MW[$ip]:-} ]] && k="mail logins of ${MW[$ip]%, } (last $(date -d "@${ML[$ip]}" '+%Y-%m-%d'))"
+        [[ -r $KL ]] && grep -qxF "$ip" "$KL" && k="${k:+$k; }SSH/Plesk logins"
+        [[ -n $k ]] || continue
+        geo "$ip"
+        ban+="    $j: $ip${GEO_LABEL:+ ($GEO_LABEL)} – earlier successful $k"$'\n'
+        alert "fail2ban: jail $j bans $ip${GEO_LABEL:+ ($GEO_LABEL)}, which had successful logins before ($k) – a device with an outdated password? Unban: fail2ban-client set $j unbanip $ip"
+      done
     done
     out "  (jails without bans/failures hidden)"
+    if [[ -n $ban ]]; then
+      out "  Banned IPs with earlier successful logins (customer or own device with an outdated password?):"
+      printf '%s' "$ban" >>"$BODY"
+    fi
   else
     out "fail2ban not installed"; alert "fail2ban is not running"
   fi
