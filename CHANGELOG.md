@@ -2,7 +2,7 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [1.3.0] – not yet released (on `main`)
+## [1.3.0] – 2026-11-06
 
 ### Added
 - **Country check for IMAP/POP3 logins** (Dovecot and Courier). Logins from outside `ALLOWED_COUNTRIES` are listed in the report and in `summary.txt`. The alert (`mailbox … logged in via IMAP/POP3 from a new country …`) is raised only once per mailbox and country, so holidays don't cause an alert in every run. A country not seen for a mailbox for `IMAP_COUNTRY_KEEP_DAYS` (new setting, default 30) is forgotten, so the next trip alerts again.
