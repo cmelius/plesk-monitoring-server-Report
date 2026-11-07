@@ -694,6 +694,8 @@ plesk-server-report.sh --decode mbx-4f2a91@example.com
 plesk-server-report.sh --decode < review.txt     # a whole review, every pseudonym replaced
 ```
 
+To see what the AI would get before you switch it on – nothing is uploaded: `plesk-server-report.sh --pseudonymise /var/lib/plesk-server-report/out/summary.txt | less`
+
 Limits: pseudonymised data is still personal data (GDPR Art. 4(5)) – it lowers the risk, the agreements above are still needed. The domain stays visible (needed to tell which customer is affected), and a one-person domain still points to that person. IP addresses are not masked, because the reports need them to tell a customer from an attacker. Bare user names without a domain (attackers often try `peter` instead of `peter@…`) stay as they are. If your AI prompt lists known exceptions by mailbox, use the pseudonyms there.
 
 ---

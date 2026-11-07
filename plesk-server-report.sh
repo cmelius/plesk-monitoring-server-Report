@@ -33,6 +33,8 @@
 #                     in readable form; changes nothing
 #   --state-readme    print the description of the state files (also kept as README.txt
 #                     in the state directory)
+#   --pseudonymise FILE  print FILE (e.g. a local report) with the mail addresses
+#                     pseudonymised as MASK_MAILBOXES=1 would upload it; uploads nothing
 #   --decode [PSEUDONYM ...]  with MASK_MAILBOXES=1: the real address of a pseudonym
 #                     (mbx-…@domain); without arguments it reads a text from stdin, e.g. an
 #                     AI review, and prints it with the real addresses
@@ -2144,6 +2146,9 @@ parse_args() {
       --state-readme) state_readme; exit 0 ;;
       --show-state) SHOW_STATE=1 ;;
       --decode) shift; DECODE=1; DECODE_ARGS=("$@"); break ;;
+      --pseudonymise|--pseudonymize)
+              [[ -r ${2:-} ]] || { echo "--pseudonymise needs a readable file, e.g. $STATE_DIR/out/summary.txt" >&2; exit 2; }
+              PSEUDO_FILE=$2; shift ;;
       -h|--help) usage; exit 0 ;;
       *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
     esac
@@ -2268,6 +2273,12 @@ main() {
     if (( SHOW_STATE )); then show_state; else decode_pseudonyms "${DECODE_ARGS[@]}"; fi
     return
   fi
+  if [[ -n $PSEUDO_FILE ]]; then        # preview: creates mask_key and stores the pseudonyms, so --decode works
+    [[ -r $CONF ]] && . "$CONF"
+    TMPD=$(mktemp -d) || return 1
+    MASK_MAILBOXES=1 upload_copy "$PSEUDO_FILE" | xargs cat
+    rm -rf "$TMPD"; return 0
+  fi
   init
   if (( LOCKED_OUT )); then          # previous run stuck: report that instead of staying silent
     alert "$LOCK_ALERT"
@@ -2313,6 +2324,6 @@ main() {
   echo "$RUN_START" >"$STATE_DIR/last_run"
 }
 
-LOCKED_OUT=0; DONE=0; STEP=""; RUNFILE=""; SUMMARY_ONLY=0; ONLY_MODE=0; SHOW_STATE=0; DECODE=0; DECODE_ARGS=()
+LOCKED_OUT=0; DONE=0; STEP=""; RUNFILE=""; SUMMARY_ONLY=0; ONLY_MODE=0; SHOW_STATE=0; DECODE=0; DECODE_ARGS=(); PSEUDO_FILE=""
 main "$@"
 DONE=1
