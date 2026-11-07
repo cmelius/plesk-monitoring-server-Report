@@ -692,6 +692,10 @@ What the script does to keep it small:
 ```bash
 plesk-server-report.sh --decode mbx-4f2a91@example.com
 plesk-server-report.sh --decode < review.txt     # a whole review, every pseudonym replaced
+# an uploaded report, read straight from the upload target (REMOTE) – the local copies in
+# /var/lib/plesk-server-report/out are not pseudonymised, they need no decoding
+rclone cat reports:server-reports/HOSTNAME/summary.txt | plesk-server-report.sh --decode
+rclone cat reports:server-reports/HOSTNAME/report-YYYYMMDD-HHMM.txt | plesk-server-report.sh --decode
 ```
 
 To see what the AI would get before you switch it on – nothing is uploaded: `plesk-server-report.sh --pseudonymise /var/lib/plesk-server-report/out/summary.txt | less`
