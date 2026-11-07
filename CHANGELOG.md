@@ -6,6 +6,8 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 
 ### Added
 - **Pseudonymised mailboxes** (`MASK_MAILBOXES`, new setting, default off): the uploaded reports show every mail address as a stable pseudonym (`mbx-4f2a91@example.com`), computed with a secret key that stays on the server; the local reports stay complete. `--decode` translates a pseudonym – or a whole pasted AI review – back to the real addresses. `--pseudonymise FILE` shows a local report as it would be uploaded, without uploading anything. Key and pseudonym list are described in [STATE-FILES.md](STATE-FILES.md).
+- **Update check** (`UPDATE_CHECK`, new setting, default on): once a day the script asks the GitHub API for its latest release and shows `Script version: … – version … is available` in the daily checks. Info only, no alert, nothing is installed. One HTTPS request a day; `UPDATE_CHECK=0` switches it off.
+- README: a note in the quick start that the project is young and updated often.
 - README: section **Privacy (GDPR)** – which personal data the reports and the state directory contain, how long it is kept, and what to consider when the reports are uploaded or read by an AI.
 
 ### Changed

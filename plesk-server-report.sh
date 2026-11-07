@@ -67,6 +67,7 @@ HOST=$(hostname -f 2>/dev/null || hostname)
 STATE_DIR=/var/lib/plesk-server-report   # a new or changed state file must be described in state_readme()
 REMOTE="reports:server-reports/${HOST}"  # rclone remote:path – empty = local only
 RETENTION_DAYS=7                         # delete remote reports older than x days (0 = never)
+UPDATE_CHECK=1                           # daily: ask GitHub for the latest release of this script (one HTTPS request; 0 = off)
 MASK_MAILBOXES=0                         # 1 = uploaded reports show mail addresses pseudonymised (mbx-4f2a91@example.com); local reports stay complete, decode with --decode
 LOCAL_KEEP_DAYS=7                        # keep local reports x days (0 = never delete; summary.txt needs at least SUMMARY_HOURS)
 SUMMARY=1                                # write summary.txt (all reports of the last SUMMARY_HOURS condensed) and upload it
@@ -1229,7 +1230,31 @@ check_updates() {   # pending (security) updates, reboot required
       echo "Reboot required"; dalert "System: reboot required after updates"
     fi
   fi
+  (( UPDATE_CHECK )) && script_update_check
   return 0
+}
+
+# Is there a newer release of this script? One request to the GitHub API, once a day. Info only,
+# no alert: the update is never installed automatically.
+SCRIPT_REPO=cmelius/plesk-monitoring-server-Report
+script_update_check() {
+  local latest newest
+  command -v curl >/dev/null || return 0
+  latest=$(T 20 curl -fsS --connect-timeout 5 --max-time 15 -H 'Accept: application/vnd.github+json' \
+             "https://api.github.com/repos/$SCRIPT_REPO/releases/latest" 2>/dev/null |
+           sed -n 's/.*"tag_name": *"v\{0,1\}\.\{0,1\}\([0-9][0-9.]*\)".*/\1/p' | head -1)
+  if [[ -z $latest ]]; then
+    echo "Script version: $VERSION (update check failed – no answer from GitHub; UPDATE_CHECK=0 switches it off)"
+  elif [[ $latest == "$VERSION" ]]; then
+    echo "Script version: $VERSION (latest release)"
+  else
+    newest=$(printf '%s\n%s\n' "$VERSION" "$latest" | sort -V | tail -1)
+    if [[ $newest == "$latest" ]]; then
+      echo "Script version: $VERSION – version $latest is available: https://github.com/$SCRIPT_REPO/releases/latest"
+    else
+      echo "Script version: $VERSION (newer than the latest release $latest – development version from main)"
+    fi
+  fi
 }
 
 # Certificates of all sites, fetched live from the server's public IP (cached for this run):
