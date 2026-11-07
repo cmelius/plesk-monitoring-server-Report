@@ -2,7 +2,7 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [1.6.0] – not yet released (on `main`)
+## [1.6.0] – 2026-11-07
 
 ### Added
 - **Description of the state directory:** every normal run keeps a `README.txt` in `/var/lib/plesk-server-report` that explains each file – what it contains, what it is used for and what happens if you delete it. The same text is in [STATE-FILES.md](STATE-FILES.md) and is printed by `--state-readme`; it comes with the script, so it always matches the installed version.
