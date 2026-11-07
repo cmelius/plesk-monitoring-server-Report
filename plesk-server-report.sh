@@ -33,6 +33,9 @@
 #                     in readable form; changes nothing
 #   --state-readme    print the description of the state files (also kept as README.txt
 #                     in the state directory)
+#   --decode [PSEUDONYM ...]  with MASK_MAILBOXES=1: the real address of a pseudonym
+#                     (mbx-…@domain); without arguments it reads a text from stdin, e.g. an
+#                     AI review, and prints it with the real addresses
 #   --version         print the version
 #   --help            show this help
 #
@@ -62,7 +65,7 @@ HOST=$(hostname -f 2>/dev/null || hostname)
 STATE_DIR=/var/lib/plesk-server-report   # a new or changed state file must be described in state_readme()
 REMOTE="reports:server-reports/${HOST}"  # rclone remote:path – empty = local only
 RETENTION_DAYS=7                         # delete remote reports older than x days (0 = never)
-MASK_MAILBOXES=0                         # 1 = uploaded reports show mailboxes shortened (p***@example.com); local reports stay complete
+MASK_MAILBOXES=0                         # 1 = uploaded reports show mail addresses pseudonymised (mbx-4f2a91@example.com); local reports stay complete, decode with --decode
 LOCAL_KEEP_DAYS=7                        # keep local reports x days (0 = never delete; summary.txt needs at least SUMMARY_HOURS)
 SUMMARY=1                                # write summary.txt (all reports of the last SUMMARY_HOURS condensed) and upload it
 SUMMARY_HOURS=24
@@ -1922,13 +1925,63 @@ replace_remote() {
 # handles by waiting and retrying
 rcl() { T "$CMD_TIMEOUT" rclone --contimeout 30s --timeout 60s "$@"; }
 
-# upload_copy FILE – the file to upload: FILE itself, or with MASK_MAILBOXES=1 a copy in which
-# the local part of every mail address is shortened to its first character (peter@x.de → p***@x.de)
+# Pseudonymised mailboxes (MASK_MAILBOXES=1): the uploaded copies show every mail address as
+# mbx-<6 hex>@<domain>. The token is a hash of the address with a secret key that never leaves
+# this server ($STATE_DIR/mask_key), so the same mailbox gets the same token in every report and
+# on every day. $STATE_DIR/mailbox_pseudonyms keeps "pseudonym address last-seen" for --decode.
+MAIL_RE='[A-Za-z0-9._%+=-]+@([A-Za-z0-9-]+\.)+[A-Za-z][A-Za-z]+'
+mask_key() {
+  local k="$STATE_DIR/mask_key"
+  if [[ ! -s $k ]]; then
+    ( umask 077; head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$k" ) || return 1
+  fi
+  cat "$k"
+}
+# upload_copy FILE – the file to upload: FILE itself, or with MASK_MAILBOXES=1 a pseudonymised copy
 upload_copy() {
   (( MASK_MAILBOXES )) || { printf '%s\n' "$1"; return 0; }
-  local c="$TMPD/upload-$(basename "$1")"
-  sed -E 's/(^|[^A-Za-z0-9._%+=-])([A-Za-z0-9])[A-Za-z0-9._%+=-]*@(([A-Za-z0-9-]+\.)+[A-Za-z]{2,})/\1\2***@\3/g' "$1" >"$c" &&
-    printf '%s\n' "$c" || printf '%s\n' "$1"
+  local c="$TMPD/upload-$(basename "$1")" map="$TMPD/pseudonyms" key a t now f="$STATE_DIR/mailbox_pseudonyms"
+  key=$(mask_key) || { printf '%s\n' "$1"; return 0; }
+  now=$(date +%s)
+  # one token per distinct address (lower case: Rika@ and rika@ are the same mailbox)
+  : >"$map"
+  while read -r a; do
+    t=$(printf '%s:%s' "$key" "$a" | sha256sum | cut -c1-6)
+    printf '%s mbx-%s@%s\n' "$a" "$t" "${a#*@}" >>"$map"
+  done < <(grep -oE "$MAIL_RE" "$1" | tr 'A-Z' 'a-z' | sort -u)
+  awk -v re="$MAIL_RE" -v note="Mailbox addresses are pseudonymised (MASK_MAILBOXES=1) – decode on the server: plesk-server-report.sh --decode" '
+    NR == FNR { m[$1] = $2; next }
+    { out = ""; rest = $0
+      while (match(rest, re)) { a = substr(rest, RSTART, RLENGTH)
+        out = out substr(rest, 1, RSTART - 1) ((tolower(a) in m) ? m[tolower(a)] : a); rest = substr(rest, RSTART + RLENGTH) }
+      print out rest
+      if (!done && (FNR == 1 && $0 !~ /^Server report/ || $0 ~ /^STATUS:/)) { print note; done = 1 } }' "$map" "$1" >"$c" ||
+    { printf '%s\n' "$1"; return 0; }
+  # remember the pseudonyms for --decode, as long as the uploaded reports may exist (at least 30 days)
+  if can_write_state; then
+    { [[ -f $f ]] && cat "$f"; awk -v now="$now" '{ print $2, $1, now }' "$map"; } |
+      awk -v now="$now" -v keep=$(( (RETENTION_DAYS > 30 ? RETENTION_DAYS : 30) * 86400 )) '
+        { if ($3 > t[$1]) { t[$1] = $3; a[$1] = $2 } }
+        END { for (p in t) if (now - t[p] <= keep) print p, a[p], t[p] }' | sort >"$f.new" && mv "$f.new" "$f"
+  fi
+  printf '%s\n' "$c"
+}
+# --decode [PSEUDONYM ...]: the real address of each pseudonym, or – without arguments – stdin
+# with every pseudonym replaced (paste an AI review to get it back with real addresses)
+decode_pseudonyms() {
+  local f="$STATE_DIR/mailbox_pseudonyms"
+  [[ -r $f ]] || { echo "no pseudonyms stored ($f) – MASK_MAILBOXES was never active, or the file was deleted" >&2; return 1; }
+  if (( $# )); then
+    local p
+    for p in "$@"; do awk -v p="${p,,}" '$1 == p || $1 ~ "^" p "@" { print $1, "=", $2; f = 1 } END { if (!f) print p, "= (unknown)" }' "$f"; done
+  else
+    awk 'NR == FNR { m[$1] = $2; next }
+      { out = ""; rest = $0
+        while (match(rest, /mbx-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]@([A-Za-z0-9-]+\.)+[A-Za-z][A-Za-z]+/)) {
+          p = substr(rest, RSTART, RLENGTH)
+          out = out substr(rest, 1, RSTART - 1) ((p in m) ? m[p] : p); rest = substr(rest, RSTART + RLENGTH) }
+        print out rest }' "$f" -
+  fi
 }
 upload_report() {
   if (( ! UPLOAD )); then
@@ -1984,6 +2037,13 @@ Timestamps are Unix time (seconds since 1970, UTC): `date -d @1793684400`.
 | `known_login_ips` | `IP last-seen` | SSH and Plesk panel logins: an IP not in this list raises "login … from previously unknown IP". The first run fills it without alerts. An IP not seen for `KNOWN_LOGIN_IP_DAYS` is dropped. |
 | `known_mail_ips` | `IP mailbox last-seen` | client IPs of successful IMAP/POP3 and SMTP logins, kept for `KNOWN_MAIL_IP_DAYS`. When fail2ban bans one of them, the report raises "fail2ban: jail … bans … which had successful logins before". |
 | `known_imap_countries` | `mailbox country last-seen` | countries outside `ALLOWED_COUNTRIES` a mailbox has fetched mail from. The alert "logged in via IMAP/POP3 from a new country" comes once per mailbox and country; an entry not seen for `IMAP_COUNTRY_KEEP_DAYS` is dropped, so the next trip alerts again. |
+
+## Pseudonyms (only with `MASK_MAILBOXES=1`)
+
+| File | Content | Used for |
+|---|---|---|
+| `mask_key` | a random secret (mode 600), created on first use | the pseudonym of a mail address is a hash of the address with this key, so the same mailbox always gets the same pseudonym (`mbx-4f2a91@example.com`) and nobody without the key can compute it back. It never leaves the server. Delete it and all mailboxes get new pseudonyms. |
+| `mailbox_pseudonyms` | `pseudonym address last-seen` | `--decode` turns pseudonyms in a report or an AI review back into real addresses. Entries are kept for 30 days (or `RETENTION_DAYS`, if longer), as long as uploaded reports may contain them. |
 
 ## Where reading stopped
 
@@ -2052,6 +2112,8 @@ show_state() {
     while read -r who cc t; do printf '  %-40s %-3s %s\n' "$who" "$cc" "$(d "$t")"; done <"$f"
   else echo "  (none)"; fi
   echo ""
+  f=$STATE_DIR/mailbox_pseudonyms
+  [[ -s $f ]] && { echo "Mailbox pseudonyms for MASK_MAILBOXES: $(wc -l <"$f") ($f, decode with --decode)"; echo ""; }
   echo "Log positions – bytes read, inode, log ($STATE_DIR/offsets):"
   for f in "$STATE_DIR"/offsets/*; do
     [[ -f $f ]] || continue
@@ -2081,6 +2143,7 @@ parse_args() {
       --version) echo "plesk-server-report $VERSION"; exit 0 ;;
       --state-readme) state_readme; exit 0 ;;
       --show-state) SHOW_STATE=1 ;;
+      --decode) shift; DECODE=1; DECODE_ARGS=("$@"); break ;;
       -h|--help) usage; exit 0 ;;
       *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
     esac
@@ -2200,9 +2263,10 @@ init() {
 main() {
   ARGS=("$@")
   parse_args "$@"
-  if (( SHOW_STATE )); then           # read-only: no lock, no state written
+  if (( SHOW_STATE || DECODE )); then  # read-only: no lock, no state written
     [[ -r $CONF ]] && . "$CONF"
-    show_state; return 0
+    if (( SHOW_STATE )); then show_state; else decode_pseudonyms "${DECODE_ARGS[@]}"; fi
+    return
   fi
   init
   if (( LOCKED_OUT )); then          # previous run stuck: report that instead of staying silent
@@ -2249,6 +2313,6 @@ main() {
   echo "$RUN_START" >"$STATE_DIR/last_run"
 }
 
-LOCKED_OUT=0; DONE=0; STEP=""; RUNFILE=""; SUMMARY_ONLY=0; ONLY_MODE=0; SHOW_STATE=0
+LOCKED_OUT=0; DONE=0; STEP=""; RUNFILE=""; SUMMARY_ONLY=0; ONLY_MODE=0; SHOW_STATE=0; DECODE=0; DECODE_ARGS=()
 main "$@"
 DONE=1

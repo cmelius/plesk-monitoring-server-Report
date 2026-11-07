@@ -614,7 +614,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 | `IMAP_COUNTRY_KEEP_DAYS` | 30 | days after which a mailbox's foreign country is forgotten if no IMAP/POP3 login came from there; the next login from that country alerts again (see [Notes](#notes-and-limitations)). 0 = never forget |
 | `KNOWN_MAIL_IP_DAYS` | 30 | days to remember client IPs of successful mail logins – alert when fail2ban bans one of them |
 | `KNOWN_LOGIN_IP_DAYS` | 90 | days to remember an SSH/Plesk login IP without a login from it (0 = never). After that, the next login from it raises "unknown IP" again |
-| `MASK_MAILBOXES` | 0 | 1 = the uploaded reports show mailboxes shortened (`p***@example.com`); the local reports stay complete. See [Privacy](#privacy-gdpr) |
+| `MASK_MAILBOXES` | 0 | 1 = the uploaded reports show mail addresses pseudonymised (`mbx-4f2a91@example.com`); the local reports stay complete, `--decode` translates back. See [Privacy](#privacy-gdpr) |
 | `MAX_LOG_MB` | 200 | read at most this many MB of new lines per log file and run, the newest part. Protects against huge logs after a long pause or a log that was truncated in place; the skipped part is mentioned in the report. 0 = no limit |
 | `STATE_DIR` | `/var/lib/plesk-server-report` | log offsets, known login IPs, daily cache, local reports |
 | `VHOST_LOGS` | `/var/www/vhosts/system` | Plesk per-domain log directories |
@@ -687,7 +687,14 @@ What the script does to keep it small:
 - **Limited retention:** reports `RETENTION_DAYS` / `LOCAL_KEEP_DAYS` (7 days), client IPs of mail logins `KNOWN_MAIL_IP_DAYS` (30), foreign countries per mailbox `IMAP_COUNTRY_KEEP_DAYS` (30), SSH/Plesk login IPs `KNOWN_LOGIN_IP_DAYS` (90).
 - It only reads logs the server writes anyway; it creates no new raw data.
 
-**If you upload the reports or let an AI read them**, the storage and the AI provider receive this data. If you host mail or websites for customers, they are typically sub-processors: name them in your data processing agreements with your customers and in your record of processing activities, and use providers that offer a data processing agreement (and, outside the EU, a valid transfer mechanism). `MASK_MAILBOXES=1` shortens mailbox addresses in the uploaded copies (`p***@example.com`) while the local reports stay complete – the AI can still tell mailboxes apart by domain and first letter, but less precisely. IP addresses are not masked: the reports need them to tell a customer from an attacker.
+**If you upload the reports or let an AI read them**, the storage and the AI provider receive this data. If you host mail or websites for customers, they are typically sub-processors: name them in your data processing agreements with your customers and in your record of processing activities, and use providers that offer a data processing agreement (and, outside the EU, a valid transfer mechanism). **Pseudonymised mailboxes:** with `MASK_MAILBOXES=1` the uploaded reports show every mail address as a pseudonym such as `mbx-4f2a91@example.com`, while the local reports stay complete. The same mailbox always gets the same pseudonym, so the AI can still follow a mailbox across reports and days; the key to compute it stays on your server ([state files](STATE-FILES.md)). When a review names a pseudonym, translate it back on the server:
+
+```bash
+plesk-server-report.sh --decode mbx-4f2a91@example.com
+plesk-server-report.sh --decode < review.txt     # a whole review, every pseudonym replaced
+```
+
+Limits: pseudonymised data is still personal data (GDPR Art. 4(5)) – it lowers the risk, the agreements above are still needed. The domain stays visible (needed to tell which customer is affected), and a one-person domain still points to that person. IP addresses are not masked, because the reports need them to tell a customer from an attacker. Bare user names without a domain (attackers often try `peter` instead of `peter@…`) stay as they are. If your AI prompt lists known exceptions by mailbox, use the pseudonyms there.
 
 ---
 

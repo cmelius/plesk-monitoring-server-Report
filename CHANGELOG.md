@@ -5,7 +5,7 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 ## [1.7.0] – not yet released (on `main`)
 
 ### Added
-- **`MASK_MAILBOXES`** (new setting, default off): the uploaded reports show mailbox addresses shortened (`p***@example.com`); the local reports stay complete.
+- **Pseudonymised mailboxes** (`MASK_MAILBOXES`, new setting, default off): the uploaded reports show every mail address as a stable pseudonym (`mbx-4f2a91@example.com`), computed with a secret key that stays on the server; the local reports stay complete. `--decode` translates a pseudonym – or a whole pasted AI review – back to the real addresses. Key and pseudonym list are described in [STATE-FILES.md](STATE-FILES.md).
 - README: section **Privacy (GDPR)** – which personal data the reports and the state directory contain, how long it is kept, and what to consider when the reports are uploaded or read by an AI.
 
 ### Changed
