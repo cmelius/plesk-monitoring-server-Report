@@ -21,7 +21,7 @@ Timestamps are Unix time (seconds since 1970, UTC): `date -d @1793684400`.
 
 | File | Content (one entry per line) | Used for |
 |---|---|---|
-| `known_login_ips` | `IP` | SSH and Plesk panel logins: an IP not in this list raises "login … from previously unknown IP". The first run fills it without alerts. |
+| `known_login_ips` | `IP last-seen` | SSH and Plesk panel logins: an IP not in this list raises "login … from previously unknown IP". The first run fills it without alerts. An IP not seen for `KNOWN_LOGIN_IP_DAYS` is dropped. |
 | `known_mail_ips` | `IP mailbox last-seen` | client IPs of successful IMAP/POP3 and SMTP logins, kept for `KNOWN_MAIL_IP_DAYS`. When fail2ban bans one of them, the report raises "fail2ban: jail … bans … which had successful logins before". |
 | `known_imap_countries` | `mailbox country last-seen` | countries outside `ALLOWED_COUNTRIES` a mailbox has fetched mail from. The alert "logged in via IMAP/POP3 from a new country" comes once per mailbox and country; an entry not seen for `IMAP_COUNTRY_KEEP_DAYS` is dropped, so the next trip alerts again. |
 

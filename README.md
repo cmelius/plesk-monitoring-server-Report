@@ -28,7 +28,7 @@ That's it: from now on a report is written every hour to `/var/lib/plesk-server-
 
 The sections below explain everything in detail; you don't need to read them to get started.
 
-**Contents:** [What it found so far](#what-it-found-so-far) · [What the report covers](#what-the-report-covers) · [Requirements](#requirements) · [Installation](#installation) · [Storage for the reports](#storage-for-the-reports) · [Reading the reports](#reading-the-reports) · [What the script remembers](#what-the-script-remembers) · [Configuration](#configuration) · [First run](#first-run) · [Notes and limitations](#notes-and-limitations) · [Security](#security) · [Using another CMS?](#using-another-cms-help-wanted) · [Updates](#updates) · [License](#license)
+**Contents:** [What it found so far](#what-it-found-so-far) · [What the report covers](#what-the-report-covers) · [Requirements](#requirements) · [Installation](#installation) · [Storage for the reports](#storage-for-the-reports) · [Reading the reports](#reading-the-reports) · [What the script remembers](#what-the-script-remembers) · [Configuration](#configuration) · [First run](#first-run) · [Notes and limitations](#notes-and-limitations) · [Security](#security) · [Privacy](#privacy-gdpr) · [Using another CMS?](#using-another-cms-help-wanted) · [Updates](#updates) · [License](#license)
 
 ---
 
@@ -613,6 +613,8 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 | `FIND_TIMEOUT` | 600 | seconds per file-system scan of the web folders (`find`, `grep`), e.g. if a document root contains a dead network mount. After a timeout the scan is repeated next time instead of being marked as done |
 | `IMAP_COUNTRY_KEEP_DAYS` | 30 | days after which a mailbox's foreign country is forgotten if no IMAP/POP3 login came from there; the next login from that country alerts again (see [Notes](#notes-and-limitations)). 0 = never forget |
 | `KNOWN_MAIL_IP_DAYS` | 30 | days to remember client IPs of successful mail logins – alert when fail2ban bans one of them |
+| `KNOWN_LOGIN_IP_DAYS` | 90 | days to remember an SSH/Plesk login IP without a login from it (0 = never). After that, the next login from it raises "unknown IP" again |
+| `MASK_MAILBOXES` | 0 | 1 = the uploaded reports show mailboxes shortened (`p***@example.com`); the local reports stay complete. See [Privacy](#privacy-gdpr) |
 | `MAX_LOG_MB` | 200 | read at most this many MB of new lines per log file and run, the newest part. Protects against huge logs after a long pause or a log that was truncated in place; the skipped part is mentioned in the report. 0 = no limit |
 | `STATE_DIR` | `/var/lib/plesk-server-report` | log offsets, known login IPs, daily cache, local reports |
 | `VHOST_LOGS` | `/var/www/vhosts/system` | Plesk per-domain log directories |
@@ -673,6 +675,19 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 - Runs as root because it needs to read all logs. It writes only to `/var/lib/plesk-server-report` (mode 700) and to the configured rclone remote.
 - No external calls apart from DNS blocklist lookups and the rclone upload.
 - The rclone config (`/root/.config/rclone/rclone.conf`) contains the token for the storage account. That is another reason to use a dedicated account with the narrowest possible scope (`drive.file`, bucket-limited keys, chrooted SFTP user).
+
+---
+
+## Privacy (GDPR)
+
+The reports and the [state directory](STATE-FILES.md) contain personal data: IP addresses, mailbox addresses, login times, and the country and network operator of an IP. They concern your customers' users, website visitors and attackers. Processing logs to protect a server is usually covered by legitimate interest (Art. 6(1)(f) GDPR; recital 49 names network and information security), but what applies to you depends on your setup. This is not legal advice.
+
+What the script does to keep it small:
+- **GeoIP runs locally** (DB-IP Lite database) – no IP is sent anywhere for it.
+- **Limited retention:** reports `RETENTION_DAYS` / `LOCAL_KEEP_DAYS` (7 days), client IPs of mail logins `KNOWN_MAIL_IP_DAYS` (30), foreign countries per mailbox `IMAP_COUNTRY_KEEP_DAYS` (30), SSH/Plesk login IPs `KNOWN_LOGIN_IP_DAYS` (90).
+- It only reads logs the server writes anyway; it creates no new raw data.
+
+**If you upload the reports or let an AI read them**, the storage and the AI provider receive this data. If you host mail or websites for customers, they are typically sub-processors: name them in your data processing agreements with your customers and in your record of processing activities, and use providers that offer a data processing agreement (and, outside the EU, a valid transfer mechanism). `MASK_MAILBOXES=1` shortens mailbox addresses in the uploaded copies (`p***@example.com`) while the local reports stay complete – the AI can still tell mailboxes apart by domain and first letter, but less precisely. IP addresses are not masked: the reports need them to tell a customer from an attacker.
 
 ---
 

@@ -50,7 +50,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.6.0
+VERSION=1.7.0
 
 set -uo pipefail
 export LC_ALL=C
@@ -62,6 +62,7 @@ HOST=$(hostname -f 2>/dev/null || hostname)
 STATE_DIR=/var/lib/plesk-server-report   # a new or changed state file must be described in state_readme()
 REMOTE="reports:server-reports/${HOST}"  # rclone remote:path – empty = local only
 RETENTION_DAYS=7                         # delete remote reports older than x days (0 = never)
+MASK_MAILBOXES=0                         # 1 = uploaded reports show mailboxes shortened (p***@example.com); local reports stay complete
 LOCAL_KEEP_DAYS=7                        # keep local reports x days (0 = never delete; summary.txt needs at least SUMMARY_HOURS)
 SUMMARY=1                                # write summary.txt (all reports of the last SUMMARY_HOURS condensed) and upload it
 SUMMARY_HOURS=24
@@ -71,6 +72,7 @@ CMD_TIMEOUT=120               # seconds per external command (plesk db, fail2ban
 FIND_TIMEOUT=600              # seconds per file-system scan of the web folders (find, grep)
 IMAP_COUNTRY_KEEP_DAYS=30     # forget a mailbox's foreign country after x days without a login from there (0 = never)
 KNOWN_MAIL_IP_DAYS=30         # remember IPs with successful mail logins this long – alert when fail2ban bans one of them
+KNOWN_LOGIN_IP_DAYS=90        # forget an SSH/Plesk login IP after x days without a login from it (0 = never)
 MAX_LOG_MB=200                # read at most x MB of new lines per log file and run, the newest part (0 = no limit)
 VHOST_LOGS=/var/www/vhosts/system        # Plesk per-domain log directories
 PLESK_PANEL_LOG=/var/log/plesk/httpsd_access_log   # access log of the Plesk panel (port 8443) – panel logins
@@ -887,7 +889,7 @@ check_fail2ban() {
       for ip in $(sed -n 's/.*Banned IP list:[[:space:]]*//p' <<<"$s"); do
         k=""
         [[ -n ${MW[$ip]:-} ]] && k="mail logins of ${MW[$ip]%, } (last $(date -d "@${ML[$ip]}" '+%Y-%m-%d'))"
-        [[ -r $KL ]] && grep -qxF "$ip" "$KL" && k="${k:+$k; }SSH/Plesk logins"
+        known_login_ip "$ip" "$KL" && k="${k:+$k; }SSH/Plesk logins"
         [[ -n $k ]] || continue
         geo "$ip"
         ban+="    $j: $ip${GEO_LABEL:+ ($GEO_LABEL)} – earlier successful $k"$'\n'
@@ -1080,6 +1082,20 @@ check_uploads() {   # new PHP files in wp-content/uploads
   return 0
 }
 
+# known_login_ips: "IP last-seen-epoch" per line (older versions wrote only "IP").
+known_login_ip() { [[ -r $2 ]] && awk -v ip="$1" '$1 == ip { f = 1; exit } END { exit !f }' "$2"; }
+# keep the newest line per IP, drop IPs not seen for KNOWN_LOGIN_IP_DAYS; old lines without a
+# date count as seen now, so an update doesn't forget them at once
+compact_login_ips() {
+  local f=$1 now
+  can_write_state && [[ -f $f ]] || return 0
+  now=$(date +%s)
+  awk -v now="$now" -v keep=$(( KNOWN_LOGIN_IP_DAYS * 86400 )) '
+    NF { t = ($2 ~ /^[0-9]+$/) ? $2 : now; if (t > last[$1]) last[$1] = t }
+    END { for (ip in last) if (keep == 0 || now - last[ip] <= keep) print ip, last[ip] }' "$f" | sort >"$f.new" &&
+    mv "$f.new" "$f"
+}
+
 check_logins() {   # successful SSH and Plesk panel logins, alert for previously unknown IPs
   local KNOWN NEWLOGINS FIRST_LOGIN_RUN cnt rest kind user ip meth fnote a
   section "SUCCESSFUL LOGINS (SSH, Plesk panel)"
@@ -1112,12 +1128,15 @@ check_logins() {   # successful SSH and Plesk panel logins, alert for previously
     IFS=$'\t' read -r kind user ip meth <<<"$rest"
     geo "$ip"
     printf '  %4d× %-5s %-14s from %-16s (%s)%s\n' "$cnt" "$kind" "$user" "$ip" "$meth" "${GEO_LABEL:+  $GEO_LABEL}" >>"$BODY"
-    if ! grep -qxF "$ip" "$KNOWN" 2>/dev/null; then
-      can_write_state && echo "$ip" >>"$KNOWN"
+    if known_login_ip "$ip" "$KNOWN"; then
+      can_write_state && echo "$ip $(date +%s)" >>"$KNOWN"      # last seen; compacted below
+    else
+      can_write_state && echo "$ip $(date +%s)" >>"$KNOWN"
       fnote=""; geo_foreign && fnote=" – OUTSIDE $ALLOWED_COUNTRIES"
       (( FIRST_LOGIN_RUN )) || echo "$( [[ $kind == Plesk ]] && echo "Plesk panel login" || echo "$kind login as $user") from previously unknown IP $ip${GEO_LABEL:+ ($GEO_LABEL)}$fnote" >>"$NEWLOGINS"
     fi
   done
+  compact_login_ips "$KNOWN"
   if [[ -s $NEWLOGINS ]]; then
     while IFS= read -r a; do alert "Login: $a"; done <"$NEWLOGINS"
   fi
@@ -1903,15 +1922,26 @@ replace_remote() {
 # handles by waiting and retrying
 rcl() { T "$CMD_TIMEOUT" rclone --contimeout 30s --timeout 60s "$@"; }
 
+# upload_copy FILE – the file to upload: FILE itself, or with MASK_MAILBOXES=1 a copy in which
+# the local part of every mail address is shortened to its first character (peter@x.de → p***@x.de)
+upload_copy() {
+  (( MASK_MAILBOXES )) || { printf '%s\n' "$1"; return 0; }
+  local c="$TMPD/upload-$(basename "$1")"
+  sed -E 's/(^|[^A-Za-z0-9._%+=-])([A-Za-z0-9])[A-Za-z0-9._%+=-]*@(([A-Za-z0-9-]+\.)+[A-Za-z]{2,})/\1\2***@\3/g' "$1" >"$c" &&
+    printf '%s\n' "$c" || printf '%s\n' "$1"
+}
 upload_report() {
   if (( ! UPLOAD )); then
     cat "$REPORT"
   elif [[ -n $REMOTE ]] && command -v rclone >/dev/null; then
-    rcl copyto "$REPORT" "$REMOTE/$(basename "$REPORT")" --quiet &&
-    replace_remote "$REPORT" latest.txt ||
+    local up sm
+    up=$(upload_copy "$REPORT")
+    rcl copyto "$up" "$REMOTE/$(basename "$REPORT")" --quiet &&
+    replace_remote "$up" latest.txt ||
       logger -t plesk-server-report "upload to $REMOTE failed"
     if (( SUMMARY )) && [[ -s $OUT_DIR/summary.txt ]]; then
-      replace_remote "$OUT_DIR/summary.txt" summary.txt ||
+      sm=$(upload_copy "$OUT_DIR/summary.txt")
+      replace_remote "$sm" summary.txt ||
         logger -t plesk-server-report "upload of summary.txt to $REMOTE failed"
     fi
     if (( RETENTION_DAYS > 0 )); then
@@ -1951,7 +1981,7 @@ Timestamps are Unix time (seconds since 1970, UTC): `date -d @1793684400`.
 
 | File | Content (one entry per line) | Used for |
 |---|---|---|
-| `known_login_ips` | `IP` | SSH and Plesk panel logins: an IP not in this list raises "login … from previously unknown IP". The first run fills it without alerts. |
+| `known_login_ips` | `IP last-seen` | SSH and Plesk panel logins: an IP not in this list raises "login … from previously unknown IP". The first run fills it without alerts. An IP not seen for `KNOWN_LOGIN_IP_DAYS` is dropped. |
 | `known_mail_ips` | `IP mailbox last-seen` | client IPs of successful IMAP/POP3 and SMTP logins, kept for `KNOWN_MAIL_IP_DAYS`. When fail2ban bans one of them, the report raises "fail2ban: jail … bans … which had successful logins before". |
 | `known_imap_countries` | `mailbox country last-seen` | countries outside `ALLOWED_COUNTRIES` a mailbox has fetched mail from. The alert "logged in via IMAP/POP3 from a new country" comes once per mailbox and country; an entry not seen for `IMAP_COUNTRY_KEEP_DAYS` is dropped, so the next trip alerts again. |
 
@@ -2004,9 +2034,11 @@ show_state() {
   done
   f=$STATE_DIR/running; [[ -f $f ]] && echo "Run in progress or not finished: $(tr '\t' ' ' <"$f")"
   echo ""
-  echo "Known SSH/Plesk login IPs ($STATE_DIR/known_login_ips):"
+  echo "Known SSH/Plesk login IPs – IP, last seen ($STATE_DIR/known_login_ips):"
   f=$STATE_DIR/known_login_ips
-  if [[ -s $f ]]; then sed 's/^/  /' "$f"; else echo "  (none)"; fi
+  if [[ -s $f ]]; then
+    while read -r ip t; do printf '  %-40s %s\n' "$ip" "${t:+$(d "$t")}"; done <"$f"
+  else echo "  (none)"; fi
   echo ""
   echo "Known client IPs of successful mail logins – IP, mailbox, last seen ($STATE_DIR/known_mail_ips):"
   f=$STATE_DIR/known_mail_ips

@@ -2,6 +2,15 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
+## [1.7.0] – not yet released (on `main`)
+
+### Added
+- **`MASK_MAILBOXES`** (new setting, default off): the uploaded reports show mailbox addresses shortened (`p***@example.com`); the local reports stay complete.
+- README: section **Privacy (GDPR)** – which personal data the reports and the state directory contain, how long it is kept, and what to consider when the reports are uploaded or read by an AI.
+
+### Changed
+- **SSH/Plesk login IPs are forgotten** after `KNOWN_LOGIN_IP_DAYS` (new setting, default 90) without a login from them – until now `known_login_ips` was never cleaned up. The file now stores the last login time per IP; existing entries count as seen at the update.
+
 ## [1.6.0] – 2026-11-07
 
 ### Added
