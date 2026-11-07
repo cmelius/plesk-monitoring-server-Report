@@ -9,6 +9,7 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 - README: section **Privacy (GDPR)** – which personal data the reports and the state directory contain, how long it is kept, and what to consider when the reports are uploaded or read by an AI.
 
 ### Changed
+- **Failed logins are counted per mailbox regardless of upper/lower case:** attackers try `Rika@example.com` and `rika@example.com` separately – that is the same mailbox and now one line under "Most attacked mailboxes" (mail and webmail, also in `summary.txt`).
 - **SSH/Plesk login IPs are forgotten** after `KNOWN_LOGIN_IP_DAYS` (new setting, default 90) without a login from them – until now `known_login_ips` was never cleaned up. The file now stores the last login time per IP; existing entries count as seen at the update.
 
 ## [1.6.0] – 2026-11-07

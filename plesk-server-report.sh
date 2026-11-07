@@ -529,7 +529,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     }
     /SASL (LOGIN|PLAIN|CRAM-MD5) authentication failed/ {
       sf++; sip[ipof($0)]++
-      if (match($0, /sasl_username=[^ ,]+/)) fu[substr($0, RSTART+14, RLENGTH-14)]++
+      if (match($0, /sasl_username=[^ ,]+/)) fu[tolower(substr($0, RSTART+14, RLENGTH-14))]++   # Rika@ = rika@
     }
     # plausibility check: lines of the IMAP/POP3 server vs. login lines recognized (ok or failed)
     /(dovecot|imap-login|pop3-login|imap[ds]|pop3[ds])/ { imapl++ }
@@ -545,14 +545,14 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     # IMAP/POP3 – Dovecot: "imap-login: Disconnected (auth failed, …): user=<x>, …, rip=1.2.3.4"
     /(imap|pop3)-login: .*(auth failed|Authentication failed)/ {
       df++; r=$0; if (match(r, /rip=[0-9a-fA-F:.]+/)) dip[substr(r, RSTART+4, RLENGTH-4)]++
-      if (match($0, /user=<[^>]+>/)) fu[substr($0, RSTART+6, RLENGTH-7)]++
+      if (match($0, /user=<[^>]+>/)) fu[tolower(substr($0, RSTART+6, RLENGTH-7))]++
     }
     # IMAP/POP3 – Courier (Plesk alternative): one line per failed attempt,
     # "imapd: LOGIN FAILED, user=x, ip=[::ffff:1.2.3.4], port=[…]" (user= is not always logged)
     /(imap|pop3)[ds](-ssl)?(\[[0-9]+\])?: LOGIN FAILED/ {
       df++
       if (match($0, /ip=\[[^]]+\]/)) { r=substr($0, RSTART+4, RLENGTH-5); sub(/^::ffff:/, "", r); dip[r]++ }
-      if (match($0, /user=[^,]+/)) fu[substr($0, RSTART+5, RLENGTH-5)]++
+      if (match($0, /user=[^,]+/)) fu[tolower(substr($0, RSTART+5, RLENGTH-5))]++
     }
     END {
       printf "TOT\t%d\t%d\t%d\t%d\t%d\t%d\n", sent, def, bou, bl, sf, df
@@ -749,7 +749,7 @@ check_webmail() {   # Roundcube: mails sent per mailbox with real client IP, fai
         ms[u]++; rcp[u]+=nr; mip[u SUBSEP ip]++
       }
       $1 == "E" && /Login failed for .* from / {
-        u=$0; sub(/.*Login failed for /, "", u); sub(/ against .*/, "", u)
+        u=$0; sub(/.*Login failed for /, "", u); sub(/ against .*/, "", u); u=tolower(u)
         ip=$0; sub(/.* from /, "", ip); sub(/ .*/, "", ip); sub(/\.$/, "", ip)
         fl++; fip[ip]++; fu[u]++; fui[u SUBSEP ip]++
       }
@@ -1716,10 +1716,10 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       if (sub_ == "script" && $0 ~ /^ +[0-9]+ +uid /) { l = $0; sub(/^ +[0-9]+ +/, "", l); sc[l] += $1; next }
       if (sub_ == "top" && $0 ~ /^ +[0-9]+  /) { l = $0; sub(/^ +[0-9]+  /, "", l); ts[l] += $1; next }
       if (sub_ == "fip" && $0 ~ /^ +[0-9]+  /) { l = $0; sub(/^ +[0-9]+  /, "", l); fi[l] += $1; next }
-      if (sub_ == "fusr" && $0 ~ /^ +[0-9]+ /) { fu[$2] += $1; next }
+      if (sub_ == "fusr" && $0 ~ /^ +[0-9]+ /) { fu[tolower($2)] += $1; next }
       if (sub_ == "wsend" && $0 ~ / rcpt /) { l = $0; sub(/^ +/, "", l); print "WSEND\t" tm "\t" t(l); next }
       if (sub_ == "wsend" && $0 ~ /^          [^ ]/) { l = $0; sub(/^ +/, "", l); print "WSEND\t" tm "\t    " t(l); next }
-      if (sub_ == "wfusr" && $0 ~ /^ +[0-9]+ /) { wu[$2] += $1; next }
+      if (sub_ == "wfusr" && $0 ~ /^ +[0-9]+ /) { wu[tolower($2)] += $1; next }
       next
     }
     # ---------------- SYSTEM
