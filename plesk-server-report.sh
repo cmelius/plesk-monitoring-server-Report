@@ -1931,7 +1931,7 @@ rcl() { T "$CMD_TIMEOUT" rclone --contimeout 30s --timeout 60s "$@"; }
 # mbx-<6 hex>@<domain>. The token is a hash of the address with a secret key that never leaves
 # this server ($STATE_DIR/mask_key), so the same mailbox gets the same token in every report and
 # on every day. $STATE_DIR/mailbox_pseudonyms keeps "pseudonym address last-seen" for --decode.
-MAIL_RE='[A-Za-z0-9._%+=-]+@([A-Za-z0-9-]+\.)+[A-Za-z][A-Za-z]+'
+MAIL_RE='[A-Za-z0-9._%+=-]+@([A-Za-z0-9-]+[.])+[A-Za-z][A-Za-z]+'
 mask_key() {
   local k="$STATE_DIR/mask_key"
   if [[ ! -s $k ]]; then
