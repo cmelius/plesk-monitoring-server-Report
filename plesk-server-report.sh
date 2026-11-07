@@ -530,7 +530,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     }
     /SASL (LOGIN|PLAIN|CRAM-MD5) authentication failed/ {
       sf++; sip[ipof($0)]++
-      if (match($0, /sasl_username=[^ ,]+/)) fu[tolower(substr($0, RSTART+14, RLENGTH-14))]++   # Rika@ = rika@
+      if (match($0, /sasl_username=[^ ,]+/)) fu[tolower(substr($0, RSTART+14, RLENGTH-14))]++   # Office@ = office@
     }
     # plausibility check: lines of the IMAP/POP3 server vs. login lines recognized (ok or failed)
     /(dovecot|imap-login|pop3-login|imap[ds]|pop3[ds])/ { imapl++ }
@@ -1970,7 +1970,7 @@ upload_copy() {
   local c="$TMPD/upload-$(basename "$1")" map="$TMPD/pseudonyms" key a t now f="$STATE_DIR/mailbox_pseudonyms"
   key=$(mask_key) || { printf '%s\n' "$1"; return 0; }
   now=$(date +%s)
-  # one token per distinct address (lower case: Rika@ and rika@ are the same mailbox)
+  # one token per distinct address (lower case: Office@ and office@ are the same mailbox)
   : >"$map"
   while read -r a; do
     t=$(printf '%s:%s' "$key" "$a" | sha256sum | cut -c1-6)
