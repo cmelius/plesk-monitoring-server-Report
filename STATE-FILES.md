@@ -32,6 +32,13 @@ Timestamps are Unix time (seconds since 1970, UTC): `date -d @1793684400`.
 | `mask_key` | a random secret (mode 600), created on first use | the pseudonym of a mail address is a hash of the address with this key, so the same mailbox always gets the same pseudonym (`mbx-4f2a91@example.com`) and nobody without the key can compute it back. It never leaves the server. Delete it and all mailboxes get new pseudonyms. |
 | `mailbox_pseudonyms` | `pseudonym address last-seen` | `--decode` turns pseudonyms in a report or an AI review back into real addresses. Entries are kept for 30 days (or `RETENTION_DAYS`, if longer), as long as uploaded reports may contain them. |
 
+## Mails (only with `REPORT_MAIL_TO`)
+
+| File | Content | Used for |
+|---|---|---|
+| `mailed_alerts` | `key mailed-at` – a hash of each mailed alert without its figures | a report is mailed right away only for an alert that was not mailed in the last 24 hours, so a lasting problem doesn't send a mail every run. Delete it and the next alert is mailed again. |
+| `mail_summary_date` | the day (YYYY-MM-DD) the summary was last mailed | the summary goes out once a day, with the first run from `REPORT_MAIL_HOUR` on. |
+
 ## Where reading stopped
 
 | File | Content | Used for |

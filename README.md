@@ -1,6 +1,6 @@
 # plesk-server-report
 
-A single bash script that writes an **hourly health and security report** for a Plesk server on Linux and (optionally) uploads it to cloud storage with [rclone](https://rclone.org/).
+A single bash script that writes an **hourly health and security report** for a Plesk server on Linux and (optionally) uploads it to cloud storage with [rclone](https://rclone.org/) or mails it to you – to a mailbox on the same server, if you like, so the reports never leave it.
 
 It is built around the most common way a shared Plesk server gets into trouble: **a compromised mailbox or a hacked website starts sending spam**, the server IP ends up on a blocklist, and every customer's mail bounces. The report is short plain text you can read yourself – but where it really shines is a daily review by an AI assistant: it reads the latest report and a 24-hour summary every morning and tells you in a few lines whether anything needs your attention. The reports are written for exactly that; see [Reading the reports](#reading-the-reports) for an example prompt.
 
@@ -25,12 +25,13 @@ That's it: from now on a report is written every hour to `/var/lib/plesk-server-
 1. **Upload** the reports to cloud storage, so you (or an AI assistant) can read them anywhere – [Storage for the reports](#storage-for-the-reports). Without it, the reports stay on the server.
 2. **Geolocation** of login IPs: `apt install mmdb-bin` – no configuration needed.
 3. **Country alerts:** `echo 'ALLOWED_COUNTRIES="DE AT CH"' >> /etc/plesk-server-report.conf` (your customers' countries).
+4. **Mail** instead of (or besides) the upload: `echo 'REPORT_MAIL_TO="admin@example.com"' >> /etc/plesk-server-report.conf` – a daily summary and a mail as soon as something new is wrong, see [Reports by mail](#reports-by-mail).
 
 The sections below explain everything in detail; you don't need to read them to get started.
 
 **Young project, frequent updates:** new checks and fixes come out every few days at the moment. The daily report tells you when a newer release is available; *Watch → Custom → Releases* on GitHub notifies you as well. See [Updates](#updates).
 
-**Contents:** [What it found so far](#what-it-found-so-far) · [What the report covers](#what-the-report-covers) · [Requirements](#requirements) · [Installation](#installation) · [Storage for the reports](#storage-for-the-reports) · [Reading the reports](#reading-the-reports) · [What the script remembers](#what-the-script-remembers) · [Configuration](#configuration) · [First run](#first-run) · [Notes and limitations](#notes-and-limitations) · [Security](#security) · [Privacy](#privacy-gdpr) · [Using another CMS?](#using-another-cms-help-wanted) · [Updates](#updates) · [License](#license)
+**Contents:** [What it found so far](#what-it-found-so-far) · [What the report covers](#what-the-report-covers) · [Requirements](#requirements) · [Installation](#installation) · [Storage for the reports](#storage-for-the-reports) · [Reports by mail](#reports-by-mail) · [Reading the reports](#reading-the-reports) · [What the script remembers](#what-the-script-remembers) · [Configuration](#configuration) · [First run](#first-run) · [Notes and limitations](#notes-and-limitations) · [Security](#security) · [Privacy](#privacy-gdpr) · [Using another CMS?](#using-another-cms-help-wanted) · [Updates](#updates) · [License](#license)
 
 ---
 
@@ -396,7 +397,7 @@ less /usr/local/sbin/plesk-server-report.sh
 # optional, recommended: geolocation of login IPs
 apt install mmdb-bin            # RHEL-based: dnf install libmaxminddb (EPEL)
 
-# first test run: prints the report, uploads nothing
+# first test run: prints the report, uploads and mails nothing
 /usr/local/sbin/plesk-server-report.sh --no-upload
 ```
 
@@ -518,6 +519,33 @@ Use a dedicated Nextcloud user and an app password (*Personal settings → Secur
 
 ---
 
+## Reports by mail
+
+Instead of – or in addition to – the upload, the script can mail the reports. Set an address in `/etc/plesk-server-report.conf`:
+
+```bash
+REPORT_MAIL_TO="admin@example.com"       # several: space-separated
+REMOTE=""                                # only if you want no upload at all
+```
+
+What is mailed (`REPORT_MAIL`, default `"alerts summary"`):
+
+| Word | Mail |
+|---|---|
+| `alerts` | the full report as soon as a run has an alert that was not mailed in the last 24 hours. An alert that stays (the same mailbox sending too much in the next run, only with other figures) is not mailed again every run; the daily summary still lists it. Subject: `<host>: WARNING (n, new: m) – <first new alert>` |
+| `summary` | `summary.txt` once a day, with the first run from `REPORT_MAIL_HOUR` on (default 6, server time) – also on quiet days, so a missing mail is a sign that something is wrong |
+| `all` | every report (with an hourly cron job: 24 mails a day) |
+
+**Use a mailbox on this server** (e.g. one of your own domains hosted here): Postfix delivers the mail locally, the reports don't leave the server and no cloud storage or other provider is involved (see [Privacy](#privacy-gdpr)). You read them like any other mail, encrypted over IMAP. An address at another provider works too, but then the reports are sent over the internet and stored there.
+
+- The mails are sent with the local `sendmail` (Postfix or qmail, both part of Plesk) from `plesk-server-report@<host name>` (`REPORT_MAIL_FROM`). The script leaves its own mails out of the mail figures of the next report.
+- `MASK_MAILBOXES=1` pseudonymises the mails like the uploads.
+- **The report watches the mail server it is sent through.** If Postfix hangs, the disk is full or the server is down, no mail arrives – and no mail says so. Notice when the daily summary is missing. With the upload and a daily AI review this gap doesn't exist: the review reports a missing `summary.txt`.
+- The mails pile up in the mailbox and are part of the Plesk backup. Delete old ones, e.g. after 30 days, in line with the other retention periods.
+- Test runs (`--no-upload`, `--only`) send no mails.
+
+---
+
 ## Reading the reports
 
 Every run uploads three kinds of files:
@@ -618,7 +646,11 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 | `KNOWN_MAIL_IP_DAYS` | 30 | days to remember client IPs of successful mail logins – alert when fail2ban bans one of them |
 | `KNOWN_LOGIN_IP_DAYS` | 90 | days to remember an SSH/Plesk login IP without a login from it (0 = never). After that, the next login from it raises "unknown IP" again |
 | `UPDATE_CHECK` | 1 | once a day, ask GitHub whether a newer release of the script exists and say so in the daily checks (info only, nothing is installed); 0 = no request |
-| `MASK_MAILBOXES` | 0 | 1 = the uploaded reports show mail addresses pseudonymised (`mbx-4f2a91@example.com`); the local reports stay complete, `--decode` translates back. See [Privacy](#privacy-gdpr) |
+| `REPORT_MAIL_TO` | empty | mail the reports to this address (several: space-separated), see [Reports by mail](#reports-by-mail). Empty = no mails |
+| `REPORT_MAIL` | `alerts summary` | what is mailed: `alerts` = the report when it has a new alert, `summary` = `summary.txt` once a day, `all` = every report |
+| `REPORT_MAIL_HOUR` | 6 | the summary mail goes out with the first run from this hour on (server time, 0–23) |
+| `REPORT_MAIL_FROM` | `plesk-server-report@<host>` | sender address of the mails |
+| `MASK_MAILBOXES` | 0 | 1 = the uploaded and mailed reports show mail addresses pseudonymised (`mbx-4f2a91@example.com`); the local reports stay complete, `--decode` translates back. See [Privacy](#privacy-gdpr) |
 | `MAX_LOG_MB` | 200 | read at most this many MB of new lines per log file and run, the newest part. Protects against huge logs after a long pause or a log that was truncated in place; the skipped part is mentioned in the report. 0 = no limit |
 | `STATE_DIR` | `/var/lib/plesk-server-report` | log offsets, known login IPs, daily cache, local reports |
 | `VHOST_LOGS` | `/var/www/vhosts/system` | Plesk per-domain log directories |
@@ -677,8 +709,8 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 
 ## Security
 
-- Runs as root because it needs to read all logs. It writes only to `/var/lib/plesk-server-report` (mode 700) and to the configured rclone remote.
-- External connections: DNS lookups (blocklists, SPF/DKIM, domain DNS), the rclone upload, the daily HTTPS check of your own domains (to this server's IP), the monthly download of the DB-IP Lite database (only with geolocation), and once a day one request to the GitHub API for the latest release of the script (`UPDATE_CHECK=0` switches it off). Nothing about your server is sent; the script never updates itself.
+- Runs as root because it needs to read all logs. It writes only to `/var/lib/plesk-server-report` (mode 700), to the configured rclone remote and – with `REPORT_MAIL_TO` – hands mails to the local `sendmail`.
+- External connections: DNS lookups (blocklists, SPF/DKIM, domain DNS), the rclone upload, the report mails (only if `REPORT_MAIL_TO` is at another provider), the daily HTTPS check of your own domains (to this server's IP), the monthly download of the DB-IP Lite database (only with geolocation), and once a day one request to the GitHub API for the latest release of the script (`UPDATE_CHECK=0` switches it off). Nothing about your server is sent; the script never updates itself.
 - The rclone config (`/root/.config/rclone/rclone.conf`) contains the token for the storage account. That is another reason to use a dedicated account with the narrowest possible scope (`drive.file`, bucket-limited keys, chrooted SFTP user).
 
 ---
@@ -691,6 +723,8 @@ What the script does to keep it small:
 - **GeoIP runs locally** (DB-IP Lite database) – no IP is sent anywhere for it.
 - **Limited retention:** reports `RETENTION_DAYS` / `LOCAL_KEEP_DAYS` (7 days), client IPs of mail logins `KNOWN_MAIL_IP_DAYS` (30), foreign countries per mailbox `IMAP_COUNTRY_KEEP_DAYS` (30), SSH/Plesk login IPs `KNOWN_LOGIN_IP_DAYS` (90).
 - It only reads logs the server writes anyway; it creates no new raw data.
+
+**No cloud at all:** set `REMOTE=""` and mail the reports to a mailbox on the same server ([Reports by mail](#reports-by-mail)). They never leave the server, and no storage or AI provider is involved – the simplest setup in terms of GDPR. The price: no AI review, and you have to notice yourself when the daily summary doesn't arrive.
 
 **If you upload the reports or let an AI read them**, the storage and the AI provider receive this data. If you host mail or websites for customers, they are typically sub-processors: name them in your data processing agreements with your customers and in your record of processing activities, and use providers that offer a data processing agreement (and, outside the EU, a valid transfer mechanism). **Pseudonymised mailboxes:** with `MASK_MAILBOXES=1` the uploaded reports show every mail address as a pseudonym such as `mbx-4f2a91@example.com`, while the local reports stay complete. The same mailbox always gets the same pseudonym, so the AI can still follow a mailbox across reports and days; the key to compute it stays on your server ([state files](STATE-FILES.md)). When a review names a pseudonym, translate it back on the server:
 

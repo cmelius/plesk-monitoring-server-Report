@@ -18,13 +18,14 @@
 #
 # Only log lines written since the previous run are analysed. The resulting
 # plain-text report is stored locally and (optionally) uploaded with rclone to
-# any storage backend rclone supports (Google Drive, OneDrive, S3, SFTP, ...).
+# any storage backend rclone supports (Google Drive, OneDrive, S3, SFTP, ...)
+# and/or mailed to an address – ideally a mailbox on this server (REPORT_MAIL_TO).
 #
 # Run as root from cron, e.g. hourly:
 #   5 * * * * root /usr/local/sbin/plesk-server-report.sh
 #
 # Options:
-#   --no-upload       print the report to stdout and skip the rclone upload
+#   --no-upload       print the report to stdout; nothing is uploaded or mailed
 #   --only CHECK,...  run only these checks right now and print the result; nothing
 #                     is uploaded and no state is changed (log offsets, known IPs, …)
 #   --list            list the check names for --only
@@ -68,7 +69,11 @@ STATE_DIR=/var/lib/plesk-server-report   # a new or changed state file must be d
 REMOTE="reports:server-reports/${HOST}"  # rclone remote:path – empty = local only
 RETENTION_DAYS=7                         # delete remote reports older than x days (0 = never)
 UPDATE_CHECK=1                           # daily: ask GitHub for the latest release of this script (one HTTPS request; 0 = off)
-MASK_MAILBOXES=0                         # 1 = uploaded reports show mail addresses pseudonymised (mbx-4f2a91@example.com); local reports stay complete, decode with --decode
+MASK_MAILBOXES=0                         # 1 = uploaded and mailed reports show mail addresses pseudonymised (mbx-4f2a91@example.com); local reports stay complete, decode with --decode
+REPORT_MAIL_TO=""                        # mail reports to this address (several: space-separated); "" = no mails. A mailbox on this server: the reports never leave it
+REPORT_MAIL="alerts summary"             # what is mailed: alerts = a report with a new alert right away, summary = summary.txt once a day, all = every report
+REPORT_MAIL_HOUR=6                       # the summary mail goes out with the first run from this hour on (server time, 0-23)
+REPORT_MAIL_FROM=""                      # sender address of the mails (default: plesk-server-report@<host name>)
 LOCAL_KEEP_DAYS=7                        # keep local reports x days (0 = never delete; summary.txt needs at least SUMMARY_HOURS)
 SUMMARY=1                                # write summary.txt (all reports of the last SUMMARY_HOURS condensed) and upload it
 SUMMARY_HOURS=24
@@ -454,7 +459,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   fi
   out "Source: $MAILLOG, $(wc -l <"$TMP") new lines"
 
-  MAILSTATS=$(awk -v watch="$WATCH_RECIPIENT_DOMAINS" '
+  MAILSTATS=$(awk -v watch="$WATCH_RECIPIENT_DOMAINS" -v self="$REPORT_MAIL_FROM" '
     # provider of a delivery: the big mail services by their MX host, others by the MX base domain
     function prov(line,   h, r, n, x) {
       h = ""; if (match(line, /relay=[^[, ]+/)) h = tolower(substr(line, RSTART+6, RLENGTH-6))
@@ -473,6 +478,10 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     function qid(s) { if (match(s, /\]: [0-9A-Za-z]+: /)) return substr(s, RSTART+3, RLENGTH-5); return "" }
     function dom(a) { a=tolower(a); sub(/.*@/, "", a); return a }
     function ipof(s) { if (match(s, /\[[0-9a-fA-F]*[.:][0-9a-fA-F:.]*\]/)) return substr(s, RSTART+1, RLENGTH-2); return "?" }
+    # the reports this script mails (REPORT_MAIL_TO) are left out of all mail figures:
+    # pickup logs the sender, every later line of that message carries its queue ID
+    self != "" && /postfix\/pickup/ && index($0, "from=<" self ">") { q0 = qid($0); if (q0 != "") own[q0] = 1 }
+    self != "" { q0 = qid($0); if (q0 != "" && (q0 in own)) next }
     # Successfully authenticated submissions (one line per mail with sasl_username).
     # Note: recent Postfix versions also append sasl_username to FAILED auth warnings.
     /postfix\/.*smtpd.*sasl_username=/ && !/authentication failed/ {
@@ -1872,6 +1881,7 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
   recs=$(summary_records $files)
   rec() { grep "^$1"$'\t' <<<"$recs" | cut -f2-; }
   n=$(rec NRUN)
+  SUM_NALERTS=$(rec ALERT | grep -c .)   # for the subject of the summary mail
   {
     echo "Server summary $HOST – last $SUMMARY_HOURS h: $n report(s), $(rec RUN | head -1 | cut -f1) to $(rec RUN | tail -1 | cut -f1) – plesk-server-report v$VERSION"
     echo "Built from the reports of this period. Daily checks and fail2ban: see latest.txt. Details of a run: report-<date>-<time>.txt"
@@ -2065,6 +2075,81 @@ upload_report() {
   fi
 }
 
+# ---------------------------------------------------------------- reports by mail
+# send_mail SUBJECT FILE – hands the mail to the local mail server (sendmail of Postfix or qmail).
+# For a mailbox on this server it is delivered locally and never leaves the server. The text
+# follows MASK_MAILBOXES like an upload. The script leaves these mails out of its mail figures.
+send_mail() {
+  local body rcpt to
+  if ! command -v sendmail >/dev/null; then
+    logger -t plesk-server-report "REPORT_MAIL_TO is set, but there is no sendmail command – no mail sent"
+    return 1
+  fi
+  body=$(upload_copy "$2")
+  read -ra rcpt <<<"${REPORT_MAIL_TO//,/ }"
+  to=$(printf '%s, ' "${rcpt[@]}"); to=${to%, }
+  {
+    printf 'From: plesk-server-report <%s>\n' "$REPORT_MAIL_FROM"
+    printf 'To: %s\n' "$to"
+    # the subject may contain non-ASCII characters (–, ≠): MIME encoded word
+    printf 'Subject: =?UTF-8?B?%s?=\n' "$(printf '%s' "$1" | base64 -w0)"
+    printf 'Date: %s\n' "$(LC_ALL=C date -R)"
+    printf 'MIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n'
+    printf 'Auto-Submitted: auto-generated\n\n'
+    cat "$body"
+  } | T "$CMD_TIMEOUT" sendmail -oi -f "$REPORT_MAIL_FROM" -- "${rcpt[@]}" ||
+    { logger -t plesk-server-report "mailing the report to $REPORT_MAIL_TO failed"; return 1; }
+}
+# alert_key – an alert without its changing figures ("sent 163 mails" = "sent 170 mails"), so
+# that the same problem in the next run is not mailed again; IPs and names stay
+alert_key() {
+  awk '{ n = split($0, w, " "); s = ""
+         for (i = 1; i <= n; i++) { t = w[i]; gsub(/^[(\[]+|[),;:\]]+$/, "", t)
+           s = s " " (t ~ /^[0-9]+([.,][0-9]+)?%?$/ ? "#" : w[i]) }
+         print s }' <<<"$1" | md5sum | cut -c1-16
+}
+# mail_reports – what REPORT_MAIL asks for: the report when it has an alert that was not mailed in
+# the last 24 hours (alerts), every report (all), summary.txt once a day from REPORT_MAIL_HOUR on
+mail_reports() {
+  [[ -n $REPORT_MAIL_TO ]] && (( UPLOAD )) || return 0
+  local m=" $REPORT_MAIL " f="$STATE_DIR/mailed_alerts" now a k first="" n=0 today hour subj
+  now=$(date +%s)
+  if [[ $m == *" all "* ]]; then
+    if (( ${#ALERTS[@]} )); then subj="$HOST: WARNING (${#ALERTS[@]}) – ${ALERTS[0]}"
+    else subj="$HOST: report OK"; fi
+    send_mail "${subj:0:200}" "$REPORT"
+  elif [[ $m == *" alerts "* ]] && (( ${#ALERTS[@]} )) && ! can_write_state; then
+    # the previous run is stuck and holds the state: mail the alert every time
+    subj="$HOST: WARNING (${#ALERTS[@]}) – ${ALERTS[0]}"
+    send_mail "${subj:0:200}" "$REPORT"
+  elif [[ $m == *" alerts "* ]] && (( ${#ALERTS[@]} )); then
+    # mailed_alerts: "key epoch" of every alert mailed in the last 24 hours
+    touch "$f"
+    for a in "${ALERTS[@]}"; do
+      k=$(alert_key "$a")
+      if ! awk -v k="$k" -v now="$now" '$1 == k && now - $2 < 86400 { f = 1 } END { exit !f }' "$f"; then
+        (( n++ )); [[ -z $first ]] && first=$a
+        echo "$k $now" >>"$f"
+      fi
+    done
+    awk -v now="$now" 'now - $2 < 86400' "$f" >"$f.new" && mv "$f.new" "$f"
+    if (( n )); then
+      subj="$HOST: WARNING (${#ALERTS[@]}, new: $n) – $first"
+      send_mail "${subj:0:200}" "$REPORT"
+    fi
+  fi
+  if [[ $m == *" summary "* ]] && (( SUMMARY )) && can_write_state && [[ -s $OUT_DIR/summary.txt ]]; then
+    today=$(date +%F); hour=$(date +%-H)
+    if (( hour >= REPORT_MAIL_HOUR )) && [[ $(cat "$STATE_DIR/mail_summary_date" 2>/dev/null) != "$today" ]]; then
+      echo "$today" >"$STATE_DIR/mail_summary_date"
+      if (( ${SUM_NALERTS:-0} )); then subj="$HOST: daily summary – ${SUM_NALERTS} alert(s) in the last $SUMMARY_HOURS h"
+      else subj="$HOST: daily summary – no alerts in the last $SUMMARY_HOURS h"; fi
+      send_mail "$subj" "$OUT_DIR/summary.txt"
+    fi
+  fi
+  return 0
+}
+
 # Description of the state directory. Written to $STATE_DIR/README.txt in every normal run
 # (only when it changed) and published in the repository as STATE-FILES.md
 # (generated with --state-readme), so it always matches the installed version.
@@ -2103,6 +2188,13 @@ Timestamps are Unix time (seconds since 1970, UTC): `date -d @1793684400`.
 |---|---|---|
 | `mask_key` | a random secret (mode 600), created on first use | the pseudonym of a mail address is a hash of the address with this key, so the same mailbox always gets the same pseudonym (`mbx-4f2a91@example.com`) and nobody without the key can compute it back. It never leaves the server. Delete it and all mailboxes get new pseudonyms. |
 | `mailbox_pseudonyms` | `pseudonym address last-seen` | `--decode` turns pseudonyms in a report or an AI review back into real addresses. Entries are kept for 30 days (or `RETENTION_DAYS`, if longer), as long as uploaded reports may contain them. |
+
+## Mails (only with `REPORT_MAIL_TO`)
+
+| File | Content | Used for |
+|---|---|---|
+| `mailed_alerts` | `key mailed-at` – a hash of each mailed alert without its figures | a report is mailed right away only for an alert that was not mailed in the last 24 hours, so a lasting problem doesn't send a mail every run. Delete it and the next alert is mailed again. |
+| `mail_summary_date` | the day (YYYY-MM-DD) the summary was last mailed | the summary goes out once a day, with the first run from `REPORT_MAIL_HOUR` on. |
 
 ## Where reading stopped
 
@@ -2258,6 +2350,7 @@ init() {
     logger -t plesk-server-report "STATE_DIR must not be empty or /" 2>/dev/null
     exit 1
   fi
+  [[ -n $REPORT_MAIL_FROM ]] || REPORT_MAIL_FROM="plesk-server-report@$HOST"
   # Unattended runs (cron) are stopped after MAX_RUNTIME, together with everything they started.
   # Interactive runs are not wrapped, so that Ctrl-C keeps working.
   if [[ -z ${PSR_LIMITED:-} && ! -t 0 && -f $0 ]] && (( MAX_RUNTIME > 0 )); then
@@ -2319,6 +2412,8 @@ init() {
   for v in VHOST_LOGS PLESK_PANEL_LOG MAILNAMES_DIR DKIM_KEY_DIR; do
     [[ -n ${!v} ]] || note "config: $v is empty in $CONF – the checks that need it are skipped"
   done
+  [[ -n $REPORT_MAIL_TO ]] && ! command -v sendmail >/dev/null &&
+    note "REPORT_MAIL_TO is set, but there is no sendmail command – reports are not mailed"
   command -v plesk >/dev/null || note "plesk command not found – domain list from VHOST_LOGS only, domain aliases unknown"
 }
 
@@ -2342,6 +2437,7 @@ main() {
     write_report
     (( SUMMARY )) && write_summary "$OUT_DIR/summary.txt"
     upload_report
+    mail_reports
     return 0
   fi
   if (( SUMMARY_ONLY )); then
@@ -2376,6 +2472,8 @@ main() {
   (( SUMMARY )) && write_summary "$OUT_DIR/summary.txt"
   step "upload"
   upload_report
+  step "mail"
+  mail_reports
   # -mmin instead of -mtime: "-mtime +7" only matches files at least 8 full days old
   (( LOCAL_KEEP_DAYS > 0 )) && find "$OUT_DIR" -name 'report-*.txt' -mmin +$(( LOCAL_KEEP_DAYS * 1440 )) -delete
   echo "$RUN_START" >"$STATE_DIR/last_run"
