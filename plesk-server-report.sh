@@ -487,6 +487,10 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     self != "" { q0 = qid($0)
       if (q0 != "" && (q0 in own)) {
         if (/ status=(deferred|bounced)/) { ownn++; if (ownx == "") { r = $0; sub(/^.*: to=/, "to=", r); ownx = substr(r, 1, 250) } }
+        # Plesk: Postfix logs "status=sent" when it hands the mail to Plesk (relay=plesk_virtual);
+        # a missing mailbox is only logged by postfix-local, and the mail is discarded without a bounce
+        if (/postfix-local\[[0-9]+\]: [0-9A-Za-z]+: (Unknown user|.*[Qq]uota)/) { ownn++
+          if (ownx == "") { r = $0; sub(/^.*postfix-local\[[0-9]+\]: [0-9A-Za-z]+: /, "Plesk: ", r); ownx = substr(r, 1, 250) } }
         next } }
     # Successfully authenticated submissions (one line per mail with sasl_username).
     # Note: recent Postfix versions also append sasl_username to FAILED auth warnings.
@@ -622,7 +626,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   (( BL >= WARN_BLOCKLIST )) && alert "Mail: $BL rejections by remote servers mentioning a blocklist, reputation, spam or rate limit – check the server IP and the examples"
   (( QUEUE > WARN_QUEUE )) && alert "Mail: $QUEUE messages in the queue"
   while IFS=$'\t' read -r _ n ex; do
-    [[ -n $n ]] && alert "Mail: the report mail (REPORT_MAIL_TO) was deferred or bounced $n time(s) – check the address: $ex"
+    [[ -n $n ]] && alert "Mail: the report mail (REPORT_MAIL_TO) could not be delivered ($n×) – check the address: $ex"
   done < <(grep '^OWNF' <<<"$MAILSTATS")
   grep '^BLEX' <<<"$MAILSTATS" | cut -f2- | sed 's/^/  example: /' >>"$BODY"
   # outgoing deliveries per provider: shows trouble with a big provider whatever its reply says
@@ -2115,7 +2119,7 @@ send_mail() {
 # log for up to 20 seconds, so a new setup can be checked without waiting for an alert or the next
 # day's summary. Changes no state; a later normal run also reports a failed delivery.
 test_mail() {
-  local f log="" size=0 q="" lines="" i r st
+  local f log="" size=0 q="" lines="" i r st pl a p
   [[ -n $REPORT_MAIL_TO ]] || { echo "REPORT_MAIL_TO is empty – set it in $CONF first" >&2; return 1; }
   f=$(ls -1t "$STATE_DIR"/out/report-*.txt 2>/dev/null | head -1)
   [[ -n $f ]] || { echo "no report in $STATE_DIR/out yet – let the script run once first" >&2; return 1; }
@@ -2145,10 +2149,15 @@ test_mail() {
     echo "  not found in the mail log within 20 s (qmail, or a log elsewhere) – check the mailbox"; return 0
   fi
   [[ -n $st ]] || { echo "  queued as $q, no delivery yet after 20 s – check the mailbox; the next normal run reports a failure"; return 0; }
+  # Plesk hands the mail to its own delivery (relay=plesk_virtual, logged as "sent"); a missing
+  # mailbox or a full one is only logged by postfix-local – and the mail is discarded, no bounce
+  pl=$(grep -F " $q: " <<<"$lines" | grep 'postfix-local' | grep -E ': (Unknown user|.*[Qq]uota)')
   r=0
   while IFS= read -r i; do
-    printf '  %s: %s\n' "$(sed -n 's/.* to=<\([^>]*\)>.*/\1/p' <<<"$i")" "$(sed -n 's/.* status=\(.*\)/\1/p' <<<"$i")"
-    [[ $i == *" status=sent"* ]] || r=1
+    a=$(sed -n 's/.* to=<\([^>]*\)>.*/\1/p' <<<"$i")
+    p=$(grep -F "$a" <<<"$pl" | head -1 | sed 's/.*postfix-local\[[0-9]*\]: [0-9A-Za-z]*: //')
+    if [[ -n $p ]]; then printf '  %s: NOT delivered – Plesk: %s (the mail was discarded, no bounce)\n' "$a" "$p"; r=1
+    else printf '  %s: %s\n' "$a" "$(sed -n 's/.* status=\(.*\)/\1/p' <<<"$i")"; [[ $i == *" status=sent"* ]] || r=1; fi
   done <<<"$st"
   if (( r )); then echo "Not delivered to every recipient – check REPORT_MAIL_TO (does the mailbox exist on this server?)"
   else echo "Delivered. If the mail is not in the inbox, look in the spam folder (see README: whitelist the sender)."; fi
