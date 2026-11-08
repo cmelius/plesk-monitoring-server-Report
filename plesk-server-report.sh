@@ -39,6 +39,8 @@
 #   --decode [PSEUDONYM ...]  with MASK_MAILBOXES=1: the real address of a pseudonym
 #                     (mbx-…@domain); without arguments it reads a text from stdin, e.g. an
 #                     AI review, and prints it with the real addresses
+#   --test-mail       mail the newest report to REPORT_MAIL_TO now and show from the mail
+#                     log whether it was delivered; changes nothing
 #   --version         print the version
 #   --help            show this help
 #
@@ -2109,6 +2111,49 @@ send_mail() {
     { logger -t plesk-server-report "mailing the report to $REPORT_MAIL_TO failed"
       can_write_state && date '+%Y-%m-%d %H:%M %Z' >"$STATE_DIR/mail_failed"; return 1; }
 }
+# --test-mail: mail the newest local report to REPORT_MAIL_TO right away and follow it in the mail
+# log for up to 20 seconds, so a new setup can be checked without waiting for an alert or the next
+# day's summary. Changes no state; a later normal run also reports a failed delivery.
+test_mail() {
+  local f log="" size=0 q="" lines="" i r st
+  [[ -n $REPORT_MAIL_TO ]] || { echo "REPORT_MAIL_TO is empty – set it in $CONF first" >&2; return 1; }
+  f=$(ls -1t "$STATE_DIR"/out/report-*.txt 2>/dev/null | head -1)
+  [[ -n $f ]] || { echo "no report in $STATE_DIR/out yet – let the script run once first" >&2; return 1; }
+  for log in /var/log/maillog /var/log/mail.log ""; do [[ -z $log || -r $log ]] && break; done
+  [[ -n $log ]] && size=$(stat -c %s "$log")
+  echo "Sending $(basename "$f") to $REPORT_MAIL_TO (from $REPORT_MAIL_FROM) …"
+  if ! send_mail "$HOST: test mail of plesk-server-report ($(basename "$f"))" "$f"; then
+    if command -v sendmail >/dev/null; then echo "FAILED: sendmail did not accept the mail – see journalctl -t plesk-server-report"
+    else echo "FAILED: there is no sendmail command – is a mail server (Postfix or qmail) installed?"; fi
+    return 1
+  fi
+  echo "Accepted by the local mail server. Delivery (from the mail log):"
+  if [[ -z $log ]] && ! command -v journalctl >/dev/null; then
+    echo "  no mail log found – check the mailbox"; return 0
+  fi
+  for (( i = 0; i < 20; i++ )); do
+    sleep 1
+    if [[ -n $log ]]; then lines=$(tail -c +$(( size + 1 )) "$log" 2>/dev/null)
+    else lines=$(journalctl --since "-$(( i + 30 )) s" -o short -u 'postfix*' 2>/dev/null); fi
+    [[ -n $q ]] || q=$(grep 'postfix/pickup' <<<"$lines" | grep -F "from=<$REPORT_MAIL_FROM>" | tail -1 | sed -n 's/.*\]: \([0-9A-Za-z]*\): .*/\1/p')
+    [[ -n $q ]] || continue
+    # one status line per recipient; stop when every recipient has one
+    st=$(grep -F " $q: to=<" <<<"$lines" | grep ' status=')
+    (( $(grep -c . <<<"$st") >= $(wc -w <<<"${REPORT_MAIL_TO//,/ }") )) && break
+  done
+  if [[ -z $q ]]; then
+    echo "  not found in the mail log within 20 s (qmail, or a log elsewhere) – check the mailbox"; return 0
+  fi
+  [[ -n $st ]] || { echo "  queued as $q, no delivery yet after 20 s – check the mailbox; the next normal run reports a failure"; return 0; }
+  r=0
+  while IFS= read -r i; do
+    printf '  %s: %s\n' "$(sed -n 's/.* to=<\([^>]*\)>.*/\1/p' <<<"$i")" "$(sed -n 's/.* status=\(.*\)/\1/p' <<<"$i")"
+    [[ $i == *" status=sent"* ]] || r=1
+  done <<<"$st"
+  if (( r )); then echo "Not delivered to every recipient – check REPORT_MAIL_TO (does the mailbox exist on this server?)"
+  else echo "Delivered. If the mail is not in the inbox, look in the spam folder (see README: whitelist the sender)."; fi
+  return $r
+}
 # alert_key – an alert without its changing figures ("sent 163 mails" = "sent 170 mails"), so
 # that the same problem in the next run is not mailed again; IPs and names stay
 alert_key() {
@@ -2303,6 +2348,7 @@ parse_args() {
       --summary) SUMMARY_ONLY=1 ;;
       --version) echo "plesk-server-report $VERSION"; exit 0 ;;
       --state-readme) state_readme; exit 0 ;;
+      --test-mail) TEST_MAIL=1 ;;
       --show-state) SHOW_STATE=1 ;;
       --decode) shift; DECODE=1; DECODE_ARGS=("$@"); break ;;
       --pseudonymise|--pseudonymize)
@@ -2439,6 +2485,13 @@ main() {
     if (( SHOW_STATE )); then show_state; else decode_pseudonyms "${DECODE_ARGS[@]}"; fi
     return
   fi
+  if (( TEST_MAIL )); then              # changes no state (ONLY_MODE)
+    [[ -r $CONF ]] && . "$CONF"
+    [[ -n $REPORT_MAIL_FROM ]] || REPORT_MAIL_FROM="plesk-server-report@$HOST"
+    ONLY_MODE=1; TMPD=$(mktemp -d) || return 1
+    test_mail; local rc=$?
+    rm -rf "$TMPD"; return $rc
+  fi
   if [[ -n $PSEUDO_FILE ]]; then        # preview: creates mask_key and stores the pseudonyms, so --decode works
     [[ -r $CONF ]] && . "$CONF"
     TMPD=$(mktemp -d) || return 1
@@ -2493,6 +2546,6 @@ main() {
   echo "$RUN_START" >"$STATE_DIR/last_run"
 }
 
-LOCKED_OUT=0; DONE=0; STEP=""; RUNFILE=""; SUMMARY_ONLY=0; ONLY_MODE=0; SHOW_STATE=0; DECODE=0; DECODE_ARGS=(); PSEUDO_FILE=""
+LOCKED_OUT=0; DONE=0; STEP=""; RUNFILE=""; SUMMARY_ONLY=0; ONLY_MODE=0; SHOW_STATE=0; TEST_MAIL=0; DECODE=0; DECODE_ARGS=(); PSEUDO_FILE=""
 main "$@"
 DONE=1

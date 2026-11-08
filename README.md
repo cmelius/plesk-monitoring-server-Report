@@ -541,6 +541,23 @@ What is mailed: `REPORT_MAIL` takes one or more of these words, separated by spa
 | `summary` | `summary.txt` once a day, with the first run from `REPORT_MAIL_HOUR` on (default 6, server time) – also on quiet days, so a missing mail is a sign that something is wrong |
 | `all` | every report (with an hourly cron job: 24 mails a day) |
 
+A normal run that finds nothing new sends **no mail** – and the summary only goes out once a day. So right after the setup, test it:
+
+```bash
+plesk-server-report.sh --test-mail
+```
+
+It mails the newest report to `REPORT_MAIL_TO` at once and follows it in the mail log for up to 20 seconds:
+
+```
+Sending report-20261108-1217.txt to admin@example.com (from plesk-server-report@host.example) …
+Accepted by the local mail server. Delivery (from the mail log):
+  admin@example.com: sent (delivered via plesk_virtual service)
+Delivered. If the mail is not in the inbox, look in the spam folder (see README: whitelist the sender).
+```
+
+With a mailbox that doesn't exist the line says e.g. `bounced (User unknown in virtual mailbox table)`. `--test-mail` changes nothing in the state: it works any time, also after the daily summary was sent. (Postfix only – with qmail it can't follow the mail and asks you to check the mailbox.)
+
 - The mails are sent with the local `sendmail` (Postfix or qmail, both part of Plesk) from `plesk-server-report@<host name>` (`REPORT_MAIL_FROM`). The script leaves its own mails out of the mail figures of the next report.
 - **Did the mail arrive?** The next report checks the mail log: if a report mail was deferred or bounced (wrong address, mailbox missing or full), it raises an alert with the reply of the mail server. If `sendmail` refuses a mail or is missing, the next report says so in its notes (` i `).
 - **The mailbox must really be hosted here.** If a domain exists in Plesk with mail service switched on, but its MX record points elsewhere (e.g. Microsoft 365), Postfix still delivers to the Plesk mailbox, which nobody reads. Use an address whose mail is actually read on this server, or switch off the mail service of that domain in Plesk.
@@ -549,7 +566,7 @@ What is mailed: `REPORT_MAIL` takes one or more of these words, separated by spa
 - `MASK_MAILBOXES=1` pseudonymises the mails like the uploads.
 - **The report watches the mail server it is sent through.** If Postfix hangs, the disk is full or the server is down, no mail arrives – and no mail says so. Notice when the daily summary is missing. With the upload and a daily AI review this gap doesn't exist: the review reports a missing `summary.txt`.
 - The mails pile up in the mailbox and are part of the Plesk backup. Delete old ones, e.g. after 30 days, in line with the other retention periods.
-- Test runs (`--no-upload`, `--only`) send no mails.
+- Test runs (`--no-upload`, `--only`) send no mails; `--test-mail` sends one on purpose.
 
 ---
 
