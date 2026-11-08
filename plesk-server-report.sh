@@ -2180,7 +2180,7 @@ test_mail() {
 alert_key() {
   awk '{ n = split($0, w, " "); s = ""
          for (i = 1; i <= n; i++) { t = w[i]; gsub(/^[(\[]+|[),;:\]]+$/, "", t)
-           s = s " " (t ~ /^[0-9]+([.,][0-9]+)?%?$/ ? "#" : w[i]) }
+           s = s " " (t ~ /^[0-9]+([.,][0-9]+)?(%|×)?$/ ? "#" : w[i]) }
          print s }' <<<"$1" | md5sum | cut -c1-16
 }
 # mail_reports – what REPORT_MAIL asks for: the report when it has an alert that was not mailed in
