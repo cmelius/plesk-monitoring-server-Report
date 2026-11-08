@@ -481,7 +481,11 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     # the reports this script mails (REPORT_MAIL_TO) are left out of all mail figures:
     # pickup logs the sender, every later line of that message carries its queue ID
     self != "" && /postfix\/pickup/ && index($0, "from=<" self ">") { q0 = qid($0); if (q0 != "") own[q0] = 1 }
-    self != "" { q0 = qid($0); if (q0 != "" && (q0 in own)) next }
+    # … except a failed delivery of such a mail (wrong address, mailbox missing, full): an alert
+    self != "" { q0 = qid($0)
+      if (q0 != "" && (q0 in own)) {
+        if (/ status=(deferred|bounced)/) { ownn++; if (ownx == "") { r = $0; sub(/^.*: to=/, "to=", r); ownx = substr(r, 1, 250) } }
+        next } }
     # Successfully authenticated submissions (one line per mail with sasl_username).
     # Note: recent Postfix versions also append sasl_username to FAILED auth warnings.
     /postfix\/.*smtpd.*sasl_username=/ && !/authentication failed/ {
@@ -605,6 +609,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       for (u in fu)   printf "FUSR\t%d\t%s\n", fu[u], u
       for (u in mm)   printf "MISM\t%d\t%s\t%s\n", mm[u], u, mml[u]
       for (i=1; i<=blx; i++) printf "BLEX\t%s\n", bex[i]
+      if (ownn) printf "OWNF\t%d\t%s\n", ownn, ownx
     }' "$TMP")
 
   read -r _ SENT DEF BOU BL SF DF <<<"$(grep '^TOT' <<<"$MAILSTATS")"
@@ -614,6 +619,9 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   (( DEF > WARN_DEFERRED )) && alert "Mail: $DEF deferred deliveries"
   (( BL >= WARN_BLOCKLIST )) && alert "Mail: $BL rejections by remote servers mentioning a blocklist, reputation, spam or rate limit – check the server IP and the examples"
   (( QUEUE > WARN_QUEUE )) && alert "Mail: $QUEUE messages in the queue"
+  while IFS=$'\t' read -r _ n ex; do
+    [[ -n $n ]] && alert "Mail: the report mail (REPORT_MAIL_TO) was deferred or bounced $n time(s) – check the address: $ex"
+  done < <(grep '^OWNF' <<<"$MAILSTATS")
   grep '^BLEX' <<<"$MAILSTATS" | cut -f2- | sed 's/^/  example: /' >>"$BODY"
   # outgoing deliveries per provider: shows trouble with a big provider whatever its reply says
   if grep -q '^PROV' <<<"$MAILSTATS"; then
@@ -2083,7 +2091,7 @@ send_mail() {
   local body rcpt to
   if ! command -v sendmail >/dev/null; then
     logger -t plesk-server-report "REPORT_MAIL_TO is set, but there is no sendmail command – no mail sent"
-    return 1
+    return 1                            # the report says so in its notes (init)
   fi
   body=$(upload_copy "$2")
   read -ra rcpt <<<"${REPORT_MAIL_TO//,/ }"
@@ -2097,8 +2105,9 @@ send_mail() {
     printf 'MIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n'
     printf 'Auto-Submitted: auto-generated\n\n'
     cat "$body"
-  } | T "$CMD_TIMEOUT" sendmail -oi -f "$REPORT_MAIL_FROM" -- "${rcpt[@]}" ||
-    { logger -t plesk-server-report "mailing the report to $REPORT_MAIL_TO failed"; return 1; }
+  } | T "$CMD_TIMEOUT" sendmail -oi -f "$REPORT_MAIL_FROM" "${rcpt[@]}" ||
+    { logger -t plesk-server-report "mailing the report to $REPORT_MAIL_TO failed"
+      can_write_state && date '+%Y-%m-%d %H:%M %Z' >"$STATE_DIR/mail_failed"; return 1; }
 }
 # alert_key – an alert without its changing figures ("sent 163 mails" = "sent 170 mails"), so
 # that the same problem in the next run is not mailed again; IPs and names stay
@@ -2195,6 +2204,7 @@ Timestamps are Unix time (seconds since 1970, UTC): `date -d @1793684400`.
 |---|---|---|
 | `mailed_alerts` | `key mailed-at` – a hash of each mailed alert without its figures | a report is mailed right away only for an alert that was not mailed in the last 24 hours, so a lasting problem doesn't send a mail every run. Delete it and the next alert is mailed again. |
 | `mail_summary_date` | the day (YYYY-MM-DD) the summary was last mailed | the summary goes out once a day, with the first run from `REPORT_MAIL_HOUR` on. |
+| `mail_failed` | time of a mail that `sendmail` refused | the next report mentions it as a note, then the file is deleted. Mails that were accepted but could not be delivered (wrong address, mailbox full) raise an alert in the next report instead. |
 
 ## Where reading stopped
 
@@ -2414,6 +2424,10 @@ init() {
   done
   [[ -n $REPORT_MAIL_TO ]] && ! command -v sendmail >/dev/null &&
     note "REPORT_MAIL_TO is set, but there is no sendmail command – reports are not mailed"
+  if [[ -f $STATE_DIR/mail_failed ]] && can_write_state; then
+    note "mail: sendmail refused the report mail of $(cat "$STATE_DIR/mail_failed") – see journalctl -t plesk-server-report"
+    rm -f "$STATE_DIR/mail_failed"
+  fi
   command -v plesk >/dev/null || note "plesk command not found – domain list from VHOST_LOGS only, domain aliases unknown"
 }
 

@@ -38,6 +38,7 @@ Timestamps are Unix time (seconds since 1970, UTC): `date -d @1793684400`.
 |---|---|---|
 | `mailed_alerts` | `key mailed-at` – a hash of each mailed alert without its figures | a report is mailed right away only for an alert that was not mailed in the last 24 hours, so a lasting problem doesn't send a mail every run. Delete it and the next alert is mailed again. |
 | `mail_summary_date` | the day (YYYY-MM-DD) the summary was last mailed | the summary goes out once a day, with the first run from `REPORT_MAIL_HOUR` on. |
+| `mail_failed` | time of a mail that `sendmail` refused | the next report mentions it as a note, then the file is deleted. Mails that were accepted but could not be delivered (wrong address, mailbox full) raise an alert in the next report instead. |
 
 ## Where reading stopped
 
