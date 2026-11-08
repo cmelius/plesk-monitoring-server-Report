@@ -491,7 +491,10 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
         # a missing mailbox is only logged by postfix-local, and the mail is discarded without a bounce
         if (/postfix-local\[[0-9]+\]: [0-9A-Za-z]+: (Unknown user|.*[Qq]uota)/) { ownn++
           if (ownx == "") { r = $0; sub(/^.*postfix-local\[[0-9]+\]: [0-9A-Za-z]+: /, "Plesk: ", r); ownx = substr(r, 1, 250) } }
-        next } }
+        next }
+      # a mail TO the sender address: a remote server that accepted a report mail and bounced it
+      # later (Plesk drops it, as that address has no mailbox) – status line of its delivery
+      if (index($0, "to=<" self ">") && / status=/) bnc++ }
     # Successfully authenticated submissions (one line per mail with sasl_username).
     # Note: recent Postfix versions also append sasl_username to FAILED auth warnings.
     /postfix\/.*smtpd.*sasl_username=/ && !/authentication failed/ {
@@ -616,6 +619,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       for (u in mm)   printf "MISM\t%d\t%s\t%s\n", mm[u], u, mml[u]
       for (i=1; i<=blx; i++) printf "BLEX\t%s\n", bex[i]
       if (ownn) printf "OWNF\t%d\t%s\n", ownn, ownx
+      else if (bnc) printf "OWNF\t%d\t%s\n", bnc, "a mail to the sender address " self " arrived – probably a later bounce from the receiving server"
     }' "$TMP")
 
   read -r _ SENT DEF BOU BL SF DF <<<"$(grep '^TOT' <<<"$MAILSTATS")"
@@ -2157,11 +2161,19 @@ test_mail() {
     a=$(sed -n 's/.* to=<\([^>]*\)>.*/\1/p' <<<"$i")
     p=$(grep -F "$a" <<<"$pl" | head -1 | sed 's/.*postfix-local\[[0-9]*\]: [0-9A-Za-z]*: //')
     if [[ -n $p ]]; then printf '  %s: NOT delivered – Plesk: %s (the mail was discarded, no bounce)\n' "$a" "$p"; r=1
+    elif [[ $i == *" status=deferred"* ]]; then
+      printf '  %s: deferred – %s\n' "$a" "$(sed -n 's/.* status=deferred \(.*\)/\1/p' <<<"$i")"
+      echo "    not failed yet: Postfix tries again (the next normal run still lists the deferral as an alert)"; (( r )) || r=2
     else printf '  %s: %s\n' "$a" "$(sed -n 's/.* status=\(.*\)/\1/p' <<<"$i")"; [[ $i == *" status=sent"* ]] || r=1; fi
   done <<<"$st"
-  if (( r )); then echo "Not delivered to every recipient – check REPORT_MAIL_TO (does the mailbox exist on this server?)"
-  else echo "Delivered. If the mail is not in the inbox, look in the spam folder (see README: whitelist the sender)."; fi
-  return $r
+  case $r in
+    1) echo "Not delivered to every recipient – check REPORT_MAIL_TO (does the mailbox exist?)" ;;
+    2) echo "Not delivered yet (deferred) – check the mailbox later" ;;
+    *) echo "Delivered. If the mail is not in the inbox, look in the spam folder (see README: whitelist the sender)."
+       [[ $st == *"relay=plesk_virtual"* ]] ||
+         echo "(Delivered to another mail server: if it rejects the mail later, its bounce comes back to $REPORT_MAIL_FROM – the next normal run reports that.)" ;;
+  esac
+  return $(( r == 1 ))
 }
 # alert_key – an alert without its changing figures ("sent 163 mails" = "sent 170 mails"), so
 # that the same problem in the next run is not mailed again; IPs and names stay
