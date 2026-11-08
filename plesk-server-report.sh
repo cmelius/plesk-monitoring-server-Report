@@ -55,7 +55,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.7.0
+VERSION=1.8.0
 
 set -uo pipefail
 export LC_ALL=C
@@ -538,6 +538,29 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     # successful IMAP/POP3 logins per mailbox and client IP (country check)
     /(imap|pop3)-login: Login: user=<[^>]+>.*rip=/ {
       u=$0; sub(/.*user=</, "", u); sub(/>.*/, "", u); r=$0; sub(/.*rip=/, "", r); sub(/[, ].*/, "", r); iok[u SUBSEP r]++
+      if (match($0, /session=<[^>]+>/)) dses[substr($0, RSTART+9, RLENGTH-10)] = u SUBSEP r
+    }
+    # how much mail a session read, for the country check ("no mail read" vs. "3.4 MB read"):
+    # Courier: "DISCONNECTED|LOGOUT, user=x, ip=[…], headers=N, body=N" (IMAP) or "retr=N, top=N" (POP3)
+    /(imap|pop3)[ds](-ssl)?(\[[0-9]+\])?: (DISCONNECTED|LOGOUT|TIMEOUT), user=[^,]+, ip=\[/ {
+      u=$0; sub(/.*, user=/, "", u); sub(/,.*/, "", u); r=$0; sub(/.*ip=\[/, "", r); sub(/\].*/, "", r); sub(/^::ffff:/, "", r)
+      b = 0
+      if (match($0, /headers=[0-9]+/)) b += substr($0, RSTART+8, RLENGTH-8)
+      if (match($0, /body=[0-9]+/))    b += substr($0, RSTART+5, RLENGTH-5)
+      if (match($0, /retr=[0-9]+/))    b += substr($0, RSTART+5, RLENGTH-5)
+      if (match($0, /top=[0-9]+/))     b += substr($0, RSTART+4, RLENGTH-4)
+      ird[u SUBSEP r] += b; irs[u SUBSEP r] = 1
+    }
+    # Dovecot: "imap(x)<pid><session>: Disconnected: … hdr_bytes=N body_bytes=N" / pop3 "retr=n/bytes"
+    /(imap|pop3)\([^)]+\)<[0-9]+><[^>]+>: Disconnected/ {
+      s_ = $0; sub(/.*\)<[0-9]+></, "", s_); sub(/>.*/, "", s_)
+      if (s_ in dses) {
+        b = 0
+        if (match($0, /hdr_bytes=[0-9]+/))  b += substr($0, RSTART+10, RLENGTH-10)
+        if (match($0, /body_bytes=[0-9]+/)) b += substr($0, RSTART+11, RLENGTH-11)
+        if (match($0, /retr=[0-9]+\/[0-9]+/)) { x = substr($0, RSTART, RLENGTH); sub(/.*\//, "", x); b += x }
+        ird[dses[s_]] += b; irs[dses[s_]] = 1
+      }
     }
     /(imap|pop3)[ds](-ssl)?(\[[0-9]+\])?: LOGIN, user=[^,]+, ip=\[/ {
       u=$0; sub(/.*LOGIN, user=/, "", u); sub(/,.*/, "", u); r=$0; sub(/.*ip=\[/, "", r); sub(/\].*/, "", r); sub(/^::ffff:/, "", r)
@@ -562,6 +585,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       for (p in pt) printf "PROV\t%d\t%d\t%d\t%d\t%s\n", pt[p], pv[p, 1], pv[p, 2], pv[p, 3], p
       nw = split(watch, ww, " "); for (i = 1; i <= nw; i++) { w = tolower(ww[i]); printf "WATCH\t%d\t%d\t%d\t%s\t%s\n", wv[w, 1], wv[w, 2], wv[w, 3], w, wx[w] }
       for (k in iok) { split(k, kk, SUBSEP); printf "IMOK\t%d\t%s\t%s\n", iok[k], kk[1], kk[2] }
+      for (k in irs) { split(k, kk, SUBSEP); printf "IMRD\t%d\t%s\t%s\n", ird[k], kk[1], kk[2] }
       for (u in sasl) printf "SASL\t%d\t%d\t%s\t%s\n", sasl[u], nip[u], u, ipl[u]
       for (k in sic) { split(k, kk, SUBSEP); printf "SAIP\t%d\t%s\t%s\n", sic[k], kk[1], kk[2] }
       for (m in pick) printf "PICK\t%d\t%s\n", pick[m], m
@@ -664,9 +688,11 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   # one per run. State: known_imap_countries ("mailbox CC last-seen-epoch"); a country not seen
   # for IMAP_COUNTRY_KEEP_DAYS is forgotten, so the next trip alerts again. First run: silent.
   out ""; out "IMAP/POP3 logins (logins, mailbox, IP) from outside ALLOWED_COUNTRIES:"
-  local -A IMF=() IMU=() IMI=() KC=()
-  local imn=0 KNOWNC="$STATE_DIR/known_imap_countries" firstc=0 isnew km kc kt now
+  local -A IMF=() IMU=() IMI=() KC=() RD=()
+  local imn=0 KNOWNC="$STATE_DIR/known_imap_countries" firstc=0 isnew km kc kt now rd b
   now=$(date +%s)
+  # bytes of mail read per mailbox and IP (sessions that ended in this run)
+  while IFS=$'\t' read -r _ b who ip; do RD["$who $ip"]=$b; done < <(grep '^IMRD' <<<"$MAILSTATS")
   if [[ -f $KNOWNC ]]; then
     while read -r km kc kt; do
       [[ -n $kc ]] || continue
@@ -685,8 +711,14 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       isnew=""
       [[ -n ${KC["$who $GEO_CC"]+x} ]] || { (( firstc )) || isnew=1; }
       KC["$who $GEO_CC"]=$now
-      printf '  %6d  %s  from %s (%s)%s\n' "$c" "$who" "$ip" "$GEO_LABEL" "${isnew:+  – first login from $GEO_CC}" >>"$BODY"
-      [[ -n $isnew && ${IMF[$who]:-} != *"$ip "* ]] && IMF[$who]+="$ip ($GEO_LABEL) "
+      rd=""
+      if [[ -n ${RD["$who $ip"]+x} ]]; then
+        b=${RD["$who $ip"]}
+        if (( b == 0 )); then rd="no mail read"
+        else rd="$(awk -v b="$b" 'BEGIN { if (b >= 1048576) printf "%.1f MB", b/1048576; else printf "%d KB", (b+1023)/1024 }') of mail read"; fi
+      fi
+      printf '  %6d  %s  from %s (%s)%s%s\n' "$c" "$who" "$ip" "$GEO_LABEL" "${rd:+  – $rd}" "${isnew:+  – first login from $GEO_CC}" >>"$BODY"
+      [[ -n $isnew && ${IMF[$who]:-} != *"$ip "* ]] && IMF[$who]+="$ip ($GEO_LABEL${rd:+, $rd}) "
     fi
   done < <(grep '^IMOK' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr)
   if can_write_state; then

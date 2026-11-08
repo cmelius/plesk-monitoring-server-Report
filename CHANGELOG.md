@@ -2,6 +2,11 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
+## [1.8.0] – not yet released (on `main`)
+
+### Added
+- **How much mail a foreign login read:** every line under "IMAP/POP3 logins … from outside ALLOWED_COUNTRIES" – and the alert for a new country – now says `no mail read` or e.g. `48.3 MB of mail read` (Courier: IMAP headers and bodies, POP3 downloads; Dovecot: `hdr_bytes`/`body_bytes` and POP3 `retr` of its default logout line). A phone keeping an idle connection open over a VPN reads nothing; an attacker downloads the mailbox. The example prompt says so.
+
 ## [1.7.0] – 2026-11-08
 
 ### Added
