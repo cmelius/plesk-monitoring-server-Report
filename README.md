@@ -2,7 +2,7 @@
 
 A single bash script that writes an **hourly health and security report** for a Plesk server on Linux and (optionally) uploads it to cloud storage with [rclone](https://rclone.org/) or mails it to you – to a mailbox on the same server, if you like, so the reports never leave it.
 
-It is built around the most common way a shared Plesk server gets into trouble: **a compromised mailbox or a hacked website starts sending spam**, the server IP ends up on a blocklist, and every customer's mail bounces. The report is short plain text you can read yourself – but where it really shines is a daily review by an AI assistant: it reads the latest report and a 24-hour summary every morning and tells you in a few lines whether anything needs your attention. The reports are written for exactly that; see [Reading the reports](#reading-the-reports) for an example prompt.
+It is built around the most common way a shared Plesk server gets into trouble: **a compromised mailbox or a hacked website starts sending spam**, the server IP ends up on a blocklist, and every customer's mail bounces. The report is short plain text you can read yourself – but where it really shines is a daily review by an AI assistant: it reads the latest report and a 24-hour summary every morning and tells you in a few lines whether anything needs your attention. The reports are written for exactly that; see [Reading the reports](#reading-the-reports) for an example prompt. If you host for customers, mind data protection: an AI review means handing personal data to the AI and storage provider – see [Privacy](#privacy-gdpr) for the options, from a local-only setup to pseudonymised uploads.
 
 The script only **reads** logs and system state. It never changes the server configuration, mail queue or websites.
 
@@ -748,7 +748,14 @@ What the script does to keep it small:
 - **Limited retention:** reports `RETENTION_DAYS` / `LOCAL_KEEP_DAYS` (7 days), client IPs of mail logins `KNOWN_MAIL_IP_DAYS` (30), foreign countries per mailbox `IMAP_COUNTRY_KEEP_DAYS` (30), SSH/Plesk login IPs `KNOWN_LOGIN_IP_DAYS` (90).
 - It only reads logs the server writes anyway; it creates no new raw data.
 
-**No cloud at all:** set `REMOTE=""` and mail the reports to a mailbox on the same server ([Reports by mail](#reports-by-mail)). They never leave the server, and no storage or AI provider is involved – the simplest setup in terms of GDPR. The price: no AI review, and you have to notice yourself when the daily summary doesn't arrive.
+**Which setup, from a GDPR point of view** – from best to weakest:
+
+1. **Local only** (`REMOTE=""`, no `REPORT_MAIL_TO`) – no copy anywhere else, deleted after `LOCAL_KEEP_DAYS`. But nobody is told about a problem unless they log in and read the reports – and monitoring is a security measure in its own right (Art. 32 GDPR).
+2. **Mail to a mailbox on this server, no upload** ([Reports by mail](#reports-by-mail)) – no third party either. Additional copies in the mailbox, in the server backups and on the devices that read it – delete old mails regularly. You have to notice yourself when the daily summary doesn't arrive. The best balance for most.
+3. **Upload with `MASK_MAILBOXES=1`** – the storage and AI provider get pseudonymised mail addresses, but still IP addresses and domains. Data processing agreements are still needed (see below).
+4. **Upload with full addresses** – the most convenient for an AI review, and the most personal data at third parties.
+
+The AI review is the most useful option – and the weakest one for data protection. If you can't name the storage and AI provider in your agreements with your customers, stay with 1 or 2.
 
 **If you upload the reports or let an AI read them**, the storage and the AI provider receive this data. If you host mail or websites for customers, they are typically sub-processors: name them in your data processing agreements with your customers and in your record of processing activities, and use providers that offer a data processing agreement (and, outside the EU, a valid transfer mechanism). **Pseudonymised mailboxes:** with `MASK_MAILBOXES=1` the uploaded reports show every mail address as a pseudonym such as `mbx-4f2a91@example.com`, while the local reports stay complete. The same mailbox always gets the same pseudonym, so the AI can still follow a mailbox across reports and days; the key to compute it stays on your server ([state files](STATE-FILES.md)). When a review names a pseudonym, translate it back on the server:
 
