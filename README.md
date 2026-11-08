@@ -25,7 +25,7 @@ That's it: from now on a report is written every hour to `/var/lib/plesk-server-
 1. **Upload** the reports to cloud storage, so you (or an AI assistant) can read them anywhere – [Storage for the reports](#storage-for-the-reports). Without it, the reports stay on the server.
 2. **Geolocation** of login IPs: `apt install mmdb-bin` – no configuration needed.
 3. **Country alerts:** `echo 'ALLOWED_COUNTRIES="DE AT CH"' >> /etc/plesk-server-report.conf` (your customers' countries).
-4. **Mail** instead of (or besides) the upload: `echo 'REPORT_MAIL_TO="admin@example.com"' >> /etc/plesk-server-report.conf` – a daily summary and a mail as soon as something new is wrong, see [Reports by mail](#reports-by-mail).
+4. **Mail** instead of (or besides) the upload: `echo 'REPORT_MAIL_TO="admin@example.com"' >> /etc/plesk-server-report.conf` – a daily summary and a mail as soon as something new is wrong. Put the sender on the spam filter whitelist, see [Reports by mail](#reports-by-mail).
 
 The sections below explain everything in detail; you don't need to read them to get started.
 
@@ -539,6 +539,7 @@ What is mailed (`REPORT_MAIL`, default `"alerts summary"`):
 **Use a mailbox on this server** (e.g. one of your own domains hosted here): Postfix delivers the mail locally, the reports don't leave the server and no cloud storage or other provider is involved (see [Privacy](#privacy-gdpr)). You read them like any other mail, encrypted over IMAP. An address at another provider works too, but then the reports are sent over the internet and stored there.
 
 - The mails are sent with the local `sendmail` (Postfix or qmail, both part of Plesk) from `plesk-server-report@<host name>` (`REPORT_MAIL_FROM`). The script leaves its own mails out of the mail figures of the next report.
+- **Put the sender on the spam filter's whitelist – important.** The reports quote what attackers try: paths like `/wp-admin/`, `/wp-login.php`, `/wp-content/uploads/x.php` and names of sensitive files. SpamAssassin has rules for links to hacked WordPress sites (`URI_WP_HACKED_2`, `URI_WPADMIN`) and counts exactly these as spam signals. On the author's server, the summary of a quiet day already scored 4.1 of the 6.5 points at which Plesk treats a mail as spam. On a day with many attacks – when the mail matters most – it can end up in the spam folder or be deleted. The script can't avoid this, the paths are the content of the report. So add `plesk-server-report@<host name>` (or your `REPORT_MAIL_FROM`) to the whitelist of the receiving mailbox – in Plesk: *Mail* → click the mailbox → *Spam Filter* → open the *advanced settings* → *White list*. A whitelist trusts the sender address, which others could forge; Plesk signs the mails with DKIM, so keep DMARC for the server's domain at `quarantine` or `reject` and forged mails fail it.
 - `MASK_MAILBOXES=1` pseudonymises the mails like the uploads.
 - **The report watches the mail server it is sent through.** If Postfix hangs, the disk is full or the server is down, no mail arrives – and no mail says so. Notice when the daily summary is missing. With the upload and a daily AI review this gap doesn't exist: the review reports a missing `summary.txt`.
 - The mails pile up in the mailbox and are part of the Plesk backup. Delete old ones, e.g. after 30 days, in line with the other retention periods.
