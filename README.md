@@ -25,7 +25,7 @@ That's it: from now on a report is written every hour to `/var/lib/plesk-server-
 1. **Upload** the reports to cloud storage, so you (or an AI assistant) can read them anywhere – [Storage for the reports](#storage-for-the-reports). Without it, the reports stay on the server.
 2. **Geolocation** of login IPs: `apt install mmdb-bin` – no configuration needed.
 3. **Country alerts:** `echo 'ALLOWED_COUNTRIES="DE AT CH"' >> /etc/plesk-server-report.conf` (your customers' countries).
-4. **Mail** instead of (or besides) the upload: `echo 'REPORT_MAIL_TO="admin@example.com"' >> /etc/plesk-server-report.conf` – a daily summary and a mail as soon as something new is wrong. Put the sender on the spam filter whitelist, see [Reports by mail](#reports-by-mail).
+4. **Mail** instead of (or besides) the upload: `echo 'REPORT_MAIL_TO="admin@example.com"' >> /etc/plesk-server-report.conf` – ideally a mailbox on this server, so the reports never leave it – a daily summary and a mail as soon as something new is wrong. Put the sender on the spam filter whitelist, see [Reports by mail](#reports-by-mail).
 
 The sections below explain everything in detail; you don't need to read them to get started.
 
@@ -521,22 +521,25 @@ Use a dedicated Nextcloud user and an app password (*Personal settings → Secur
 
 ## Reports by mail
 
-Instead of – or in addition to – the upload, the script can mail the reports. Set an address in `/etc/plesk-server-report.conf`:
+Instead of – or in addition to – the upload, the script can mail the reports.
+
+> **Recommended: a mailbox on this server** (e.g. an address of one of your own domains hosted here). Postfix then delivers the mail locally: the reports never travel over the internet, and no cloud storage or other provider gets them (see [Privacy](#privacy-gdpr)). You read them like any other mail, encrypted over IMAP. An address at another provider (Gmail, Microsoft 365, …) works too, but then every report is sent over the internet and stored at that provider – the same data protection questions as with an upload.
+
+Set the address in `/etc/plesk-server-report.conf`:
 
 ```bash
-REPORT_MAIL_TO="admin@example.com"       # several: space-separated
+REPORT_MAIL_TO="admin@example.com"       # a mailbox on this server; several: space-separated
+REPORT_MAIL="alerts summary"             # the default – see the table
 REMOTE=""                                # only if you want no upload at all
 ```
 
-What is mailed (`REPORT_MAIL`, default `"alerts summary"`):
+What is mailed: `REPORT_MAIL` takes one or more of these words, separated by spaces, e.g. `"alerts summary"` (default), `"summary"` (only the daily mail) or `"all summary"`:
 
 | Word | Mail |
 |---|---|
 | `alerts` | the full report as soon as a run has an alert that was not mailed in the last 24 hours. An alert that stays (the same mailbox sending too much in the next run, only with other figures) is not mailed again every run; the daily summary still lists it. Subject: `<host>: WARNING (n, new: m) – <first new alert>` |
 | `summary` | `summary.txt` once a day, with the first run from `REPORT_MAIL_HOUR` on (default 6, server time) – also on quiet days, so a missing mail is a sign that something is wrong |
 | `all` | every report (with an hourly cron job: 24 mails a day) |
-
-**Use a mailbox on this server** (e.g. one of your own domains hosted here): Postfix delivers the mail locally, the reports don't leave the server and no cloud storage or other provider is involved (see [Privacy](#privacy-gdpr)). You read them like any other mail, encrypted over IMAP. An address at another provider works too, but then the reports are sent over the internet and stored there.
 
 - The mails are sent with the local `sendmail` (Postfix or qmail, both part of Plesk) from `plesk-server-report@<host name>` (`REPORT_MAIL_FROM`). The script leaves its own mails out of the mail figures of the next report.
 - **Put the sender on the spam filter's whitelist – important.** The reports quote what attackers try: paths like `/wp-admin/`, `/wp-login.php`, `/wp-content/uploads/x.php` and names of sensitive files. SpamAssassin has rules for links to hacked WordPress sites (`URI_WP_HACKED_2`, `URI_WPADMIN`) and counts exactly these as spam signals. On the author's server, the summary of a quiet day already scored 4.1 of the 6.5 points at which Plesk treats a mail as spam. On a day with many attacks – when the mail matters most – it can end up in the spam folder or be deleted. The script can't avoid this, the paths are the content of the report. So add `plesk-server-report@<host name>` (or your `REPORT_MAIL_FROM`) to the whitelist of the receiving mailbox – in Plesk: *Mail* → click the mailbox → *Spam Filter* → open the *advanced settings* → *White list*. A whitelist trusts the sender address, which others could forge; Plesk signs the mails with DKIM, so keep DMARC for the server's domain at `quarantine` or `reject` and forged mails fail it.
@@ -647,8 +650,8 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 | `KNOWN_MAIL_IP_DAYS` | 30 | days to remember client IPs of successful mail logins – alert when fail2ban bans one of them |
 | `KNOWN_LOGIN_IP_DAYS` | 90 | days to remember an SSH/Plesk login IP without a login from it (0 = never). After that, the next login from it raises "unknown IP" again |
 | `UPDATE_CHECK` | 1 | once a day, ask GitHub whether a newer release of the script exists and say so in the daily checks (info only, nothing is installed); 0 = no request |
-| `REPORT_MAIL_TO` | empty | mail the reports to this address (several: space-separated), see [Reports by mail](#reports-by-mail). Empty = no mails |
-| `REPORT_MAIL` | `alerts summary` | what is mailed: `alerts` = the report when it has a new alert, `summary` = `summary.txt` once a day, `all` = every report |
+| `REPORT_MAIL_TO` | empty | mail the reports to this address (several: space-separated). Recommended: a mailbox on this server, so the reports never leave it. See [Reports by mail](#reports-by-mail). Empty = no mails |
+| `REPORT_MAIL` | `alerts summary` | what is mailed, one or more words separated by spaces: `alerts` = the report when it has a new alert, `summary` = `summary.txt` once a day, `all` = every report. E.g. `"summary"` = only the daily mail |
 | `REPORT_MAIL_HOUR` | 6 | the summary mail goes out with the first run from this hour on (server time, 0–23) |
 | `REPORT_MAIL_FROM` | `plesk-server-report@<host>` | sender address of the mails |
 | `MASK_MAILBOXES` | 0 | 1 = the uploaded and mailed reports show mail addresses pseudonymised (`mbx-4f2a91@example.com`); the local reports stay complete, `--decode` translates back. See [Privacy](#privacy-gdpr) |

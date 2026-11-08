@@ -70,8 +70,8 @@ REMOTE="reports:server-reports/${HOST}"  # rclone remote:path – empty = local 
 RETENTION_DAYS=7                         # delete remote reports older than x days (0 = never)
 UPDATE_CHECK=1                           # daily: ask GitHub for the latest release of this script (one HTTPS request; 0 = off)
 MASK_MAILBOXES=0                         # 1 = uploaded and mailed reports show mail addresses pseudonymised (mbx-4f2a91@example.com); local reports stay complete, decode with --decode
-REPORT_MAIL_TO=""                        # mail reports to this address (several: space-separated); "" = no mails. A mailbox on this server: the reports never leave it
-REPORT_MAIL="alerts summary"             # what is mailed: alerts = a report with a new alert right away, summary = summary.txt once a day, all = every report
+REPORT_MAIL_TO=""                        # mail reports to this address (several: space-separated); "" = no mails. Recommended: a mailbox on this server – the reports never leave it
+REPORT_MAIL="alerts summary"             # what is mailed, one or more words (space-separated): alerts = a report with a new alert right away, summary = summary.txt once a day, all = every report
 REPORT_MAIL_HOUR=6                       # the summary mail goes out with the first run from this hour on (server time, 0-23)
 REPORT_MAIL_FROM=""                      # sender address of the mails (default: plesk-server-report@<host name>)
 LOCAL_KEEP_DAYS=7                        # keep local reports x days (0 = never delete; summary.txt needs at least SUMMARY_HOURS)
@@ -2112,7 +2112,7 @@ alert_key() {
 # the last 24 hours (alerts), every report (all), summary.txt once a day from REPORT_MAIL_HOUR on
 mail_reports() {
   [[ -n $REPORT_MAIL_TO ]] && (( UPLOAD )) || return 0
-  local m=" $REPORT_MAIL " f="$STATE_DIR/mailed_alerts" now a k first="" n=0 today hour subj
+  local m=" ${REPORT_MAIL//[,|]/ } " f="$STATE_DIR/mailed_alerts" now a k first="" n=0 today hour subj
   now=$(date +%s)
   if [[ $m == *" all "* ]]; then
     if (( ${#ALERTS[@]} )); then subj="$HOST: WARNING (${#ALERTS[@]}) – ${ALERTS[0]}"
