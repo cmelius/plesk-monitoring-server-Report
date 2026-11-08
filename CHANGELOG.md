@@ -2,7 +2,7 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [1.7.0] – not yet released (on `main`)
+## [1.7.0] – 2026-11-08
 
 ### Added
 - **Pseudonymised mailboxes** (`MASK_MAILBOXES`, new setting, default off): the uploaded reports show every mail address as a stable pseudonym (`mbx-4f2a91@example.com`), computed with a secret key that stays on the server; the local reports stay complete. `--decode` translates a pseudonym – or a whole pasted AI review – back to the real addresses. `--pseudonymise FILE` shows a local report as it would be uploaded, without uploading anything. Key and pseudonym list are described in [STATE-FILES.md](STATE-FILES.md).
