@@ -58,7 +58,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.8.0
+VERSION=1.8.1
 
 set -uo pipefail
 export LC_ALL=C
@@ -1705,13 +1705,15 @@ run_daily() {   # run_daily NAME… – section text to stdout, alerts to $DALER
   done
   return 0
 }
-# daily checks run once per day (first run after midnight); later runs reuse the cached text
+# daily checks run once per day (first run after midnight); later runs reuse the cached text.
+# After an update they run again right away, so the daily checks show the new version's
+# results (and its own version line) at once instead of from the next night on.
 daily_checks() {
   local daily="$STATE_DIR/daily.txt" a
   DALERTS="$STATE_DIR/daily_alerts.txt"
-  if [[ $(cat "$STATE_DIR/daily_date" 2>/dev/null) != "$(date +%F)" ]]; then
+  if [[ $(cat "$STATE_DIR/daily_date" 2>/dev/null) != "$(date +%F) $VERSION" ]]; then
     # mark the day first: if a daily check makes the run abort, the next runs still report hourly
-    date +%F >"$STATE_DIR/daily_date"
+    echo "$(date +%F) $VERSION" >"$STATE_DIR/daily_date"
     # shellcheck disable=SC2086
     run_daily $DAILY_CHECKS >"$daily.new" 2>/dev/null; mv "$daily.new" "$daily"
   fi
@@ -2286,7 +2288,7 @@ Timestamps are Unix time (seconds since 1970, UTC): `date -d @1793684400`.
 
 | File | Content |
 |---|---|
-| `daily_date` | the day (YYYY-MM-DD) the daily checks last ran – they run in the first run of a new day. Delete it to run them again in the next run. |
+| `daily_date` | the day (YYYY-MM-DD) and the script version of the last daily checks – they run in the first run of a new day, and right after an update to another version. Delete it to run them again in the next run. |
 | `daily.txt` | their output, repeated in every report of that day under DAILY CHECKS. |
 | `daily_alerts.txt` | their alerts, repeated in every report of that day. |
 
@@ -2315,7 +2317,7 @@ show_state() {
   echo "State directory: $STATE_DIR (description: README.txt there, or --state-readme)"
   echo ""
   f=$STATE_DIR/last_run; [[ -f $f ]] && echo "Last normal run: $(d "$(cat "$f")")"
-  f=$STATE_DIR/daily_date; [[ -f $f ]] && echo "Daily checks last run on: $(cat "$f")"
+  f=$STATE_DIR/daily_date; [[ -f $f ]] && echo "Daily checks last run on: $(cat "$f") (day, script version)"
   for f in last_scan webshell_scan; do
     [[ -f $STATE_DIR/$f ]] && echo "$f: $(date -r "$STATE_DIR/$f" '+%Y-%m-%d %H:%M')"
   done

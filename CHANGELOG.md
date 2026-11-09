@@ -2,6 +2,11 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
+## [1.8.1] – not yet released (on `main`)
+
+### Changed
+- **Daily checks run again right after an update.** Until now the daily checks of the old version were shown until the next night – including its version line (`Script version: … newer than the latest release …`) – and checks new in the update were missing. The script now remembers which version ran the daily checks and repeats them in the first run of a new version.
+
 ## [1.8.0] – 2026-11-09
 
 ### Added

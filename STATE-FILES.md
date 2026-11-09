@@ -54,7 +54,7 @@ Timestamps are Unix time (seconds since 1970, UTC): `date -d @1793684400`.
 
 | File | Content |
 |---|---|
-| `daily_date` | the day (YYYY-MM-DD) the daily checks last ran – they run in the first run of a new day. Delete it to run them again in the next run. |
+| `daily_date` | the day (YYYY-MM-DD) and the script version of the last daily checks – they run in the first run of a new day, and right after an update to another version. Delete it to run them again in the next run. |
 | `daily.txt` | their output, repeated in every report of that day under DAILY CHECKS. |
 | `daily_alerts.txt` | their alerts, repeated in every report of that day. |
 
