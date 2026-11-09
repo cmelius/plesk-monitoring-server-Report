@@ -2,11 +2,12 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [1.8.0] – not yet released (on `main`)
+## [1.8.0] – 2026-11-09
 
 ### Added
 - **How much mail a foreign login read:** every line under "IMAP/POP3 logins … from outside ALLOWED_COUNTRIES" – and the alert for a new country – now says `no mail read` or e.g. `48.3 MB of mail read` (Courier: IMAP headers and bodies, POP3 downloads; Dovecot: `hdr_bytes`/`body_bytes` and POP3 `retr` of its default logout line). A phone keeping an idle connection open over a VPN reads nothing; an attacker downloads the mailbox. The example prompt says so.
 - **Reports by mail** (`REPORT_MAIL_TO`, new setting, default off): the reports can be mailed instead of – or in addition to – the upload. By default a mail goes out when a run has an alert that was not mailed in the last 24 hours, and `summary.txt` once a day (`REPORT_MAIL`, `REPORT_MAIL_HOUR`); `all` mails every report. Sent with the local `sendmail`: to a mailbox on the same server the reports never leave it – no cloud storage needed. The script leaves its own mails out of its mail figures. `--test-mail` sends the newest report right away and shows from the mail log whether it was delivered. A report mail that bounces raises an alert in the next report. README: new section *Reports by mail* (including why the sender belongs on the spam filter whitelist: the reports quote attack paths like `/wp-admin/`, which SpamAssassin counts as spam signals), Privacy and Security updated.
+- README, Privacy: the setups ranked from a GDPR point of view – local only, mail to a mailbox on this server, pseudonymised upload, upload with full addresses – and a clear note that the AI review is the most useful and the weakest option for data protection.
 
 ## [1.7.0] – 2026-11-08
 
