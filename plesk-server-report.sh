@@ -250,6 +250,10 @@ declare -A GEO_CACHE=()
 # geo IP – sets GEO_CC, GEO_ORG and GEO_LABEL ("DE, Deutsche Telekom AG" / "US, Amazon.com [datacenter]")
 geo() {
   local ip=$1 v cc="" org=""
+  # the server itself (webmail and local scripts connect from localhost) – not a foreign IP
+  if [[ $ip == 127.* || $ip == ::1 || ( -n ${PUBIP:-} && $ip == "$PUBIP" ) ]]; then
+    GEO_CC=""; GEO_ORG=""; GEO_LABEL="this server"; return 0
+  fi
   if [[ -n ${GEO_CACHE[$ip]+x} ]]; then v=${GEO_CACHE[$ip]}
   else
     if (( GEO_OK )) && [[ $ip =~ ^[0-9a-fA-F:.]+$ ]]; then
@@ -560,7 +564,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     /spamc\[[0-9]+\]: skipped message, greater than max message size/ {
       sk++; if (match($0, /\([0-9]+ bytes\)/)) skl = substr($0, RSTART+1, RLENGTH-8)
     }
-    /SASL (LOGIN|PLAIN|CRAM-MD5) authentication failed/ {
+    /SASL [A-Z0-9-]+ authentication failed/ {
       sf++; sip[ipof($0)]++
       if (match($0, /sasl_username=[^ ,]+/)) fu[tolower(substr($0, RSTART+14, RLENGTH-14))]++   # Office@ = office@
     }
@@ -870,7 +874,7 @@ check_webmail() {   # Roundcube: mails sent per mailbox with real client IP, fai
 }
 
 check_system() {   # load, CPU per system user, top processes, RAM, filesystems
-  local CORES L1 L5 L15 LIMIT pct user MEM MT MA MP SWAP mnt p
+  local CORES L1 L5 L15 LIMIT pct user MEM MT MA MP SWAP mnt p ip
   section "SYSTEM"
   CORES=$(nproc)
   read -r L1 L5 L15 _ </proc/loadavg
@@ -897,10 +901,17 @@ check_system() {   # load, CPU per system user, top processes, RAM, filesystems
   out ""; out "RAM: $MA of $MT MB available ($MP %) | swap used: $SWAP MB"
   (( MP < WARN_MEM_AVAIL_PCT )) && alert "RAM: only $MP % available"
 
-  out ""; out "Filesystems:"
+  # space and inodes: a filesystem with many small files (sessions, mails, caches) can run out
+  # of inodes – "no space left on device" – while df still shows free space
+  out ""; out "Filesystems (space used, inodes used):"
+  local -A INO=()
+  while read -r pct mnt; do INO[$mnt]=${pct%\%}; done < <(df -P -i -x tmpfs -x devtmpfs -x overlay -x squashfs 2>/dev/null | awk 'NR>1{print $5, $6}')
   while read -r pct mnt; do
-    p=${pct%\%}; printf '  %4s  %s\n' "$pct" "$mnt" >>"$BODY"
+    p=${pct%\%}; ip=${INO[$mnt]:-}
+    [[ $ip =~ ^[0-9]+$ ]] || ip=""                    # "-" on filesystems without a fixed number of inodes
+    printf '  %4s  %s%s\n' "$pct" "$mnt" "${ip:+  (inodes $ip%)}" >>"$BODY"
     (( p > WARN_DISK_PCT )) && alert "Disk: $mnt is $pct full"
+    [[ -n $ip ]] && (( ip > WARN_DISK_PCT )) && alert "Disk: $mnt has used $ip% of its inodes (too many small files) – no new files can be created when they run out"
   done < <(df -P -x tmpfs -x devtmpfs -x overlay -x squashfs 2>/dev/null | awk 'NR>1{print $5, $6}')
 }
 
@@ -990,7 +1001,7 @@ check_web() {   # requests, 5xx, WordPress logins, PHP errors, attack patterns, 
     note "web: log directory VHOST_LOGS=\"$VHOST_LOGS\" not found – web figures are 0"
     return 0
   fi
-  : >"$TMP"; : >"$TMP.php"; : >"$TMP.att"; : >"$TMP.modsec"
+  : >"$TMP"; : >"$TMP.php"; : >"$TMP.att"; : >"$TMP.modsec"; : >"$TMP.scan"
   for dir in "$VHOST_LOGS"/*/logs; do
     [[ -d $dir ]] || continue
     dom=$(basename "$(dirname "$dir")")
@@ -1035,7 +1046,11 @@ check_web() {   # requests, 5xx, WordPress logins, PHP errors, attack patterns, 
                      printf "%d\t%d\t%d\t%s\t%s (%d)\t%d\t%d\t%d\t%d\t%d\t%s (%d)\t%s\t%s\n",
                             n, e5+0, lp+0, d, top, m, wl+0, nsucc, xr+0, xb+0, nl, lt, lm, succ, brute } }' \
       bf="$WARN_LOGIN_BRUTE_FAILS" as="$ATTACK_STATS" attf="$TMP.att" >>"$TMP"
-    new_lines "$dir/error_log" | awk -v d="$dom" -v msf="$TMP.modsec" '
+    new_lines "$dir/error_log" | awk -v d="$dom" -v msf="$TMP.modsec" -v scf="$TMP.scan" '
+      # A scanner that requests a theme, plugin or wp-admin file directly runs it without WordPress:
+      # "Call to undefined function <WordPress core function>()" / undefined constant ABSPATH. Not an
+      # error of the site – counted separately, not towards WARN_PHP_FATAL.
+      /PHP Fatal error/ && (/Call to undefined function (add_action|add_filter|add_shortcode|apply_filters|do_action|get_header|get_footer|get_sidebar|get_template_part|get_locale|load_textdomain|load_theme_textdomain|load_plugin_textdomain|language_attributes|get_bloginfo|bloginfo|wp_head|wp_footer|wp_die|is_admin|get_option|plugin_dir_path|plugin_dir_url|plugins_url|register_activation_hook|get_template_directory|get_template_directory_uri|get_stylesheet_directory|wp_enqueue_script|wp_enqueue_style|esc_html|esc_attr|esc_html__|esc_html_e|__|_e)\(\)/ || /Undefined constant "?ABSPATH/) { ns++; next }
       /PHP Fatal error/ { n++; if (ex == "") { ex=$0; sub(/.*PHP Fatal error: */, "", ex); ex=substr(ex, 1, 160) } }
       /ModSecurity: / {
         if (/Access denied/) mb++; else mw++
@@ -1044,6 +1059,7 @@ check_web() {   # requests, 5xx, WordPress logins, PHP errors, attack patterns, 
         r[id]++; rm[id]=substr(msg, 1, 70)
       }
       END { if (n) printf "%d\t%s\t%s\n", n, d, ex
+            if (ns) printf "%d\t%s\n", ns, d >> scf
             if (mb + mw) { top=""; for (k=0; k<3; k++) { b=""; c=0; for (i in r) if (r[i] > c) { c=r[i]; b=i }
                                                        if (b == "") break; top=top (top==""?"":"; ") b " " rm[b] " ×" c; delete r[b] }
                            printf "%d\t%d\t%s\t%s\n", mb+mw, mb, d, top >> msf } }' >>"$TMP.php"
@@ -1085,6 +1101,8 @@ check_web() {   # requests, 5xx, WordPress logins, PHP errors, attack patterns, 
     ignored_domain "$dom" && continue
     (( n > WARN_PHP_FATAL )) && alert "Web: $dom logged $n PHP fatal errors"
   done <"$TMP.php"
+  [[ -s $TMP.scan ]] &&
+    out "  not counted – scanners calling WordPress files directly (undefined WordPress function/ABSPATH): $(sort -t$'\t' -k1,1nr "$TMP.scan" | head -8 | awk -F'\t' '{ printf "%s%s ×%d", (NR > 1 ? ", " : ""), $2, $1 }')"
 
   if (( ATTACK_STATS )); then
     out ""; out "Attack patterns & sensitive-file probes (count, of which answered 200):"
@@ -1121,7 +1139,7 @@ check_web() {   # requests, 5xx, WordPress logins, PHP errors, attack patterns, 
       out "  none (or ModSecurity not active)"
     fi
   fi
-  rm -f "$TMP.att" "$TMP.modsec"
+  rm -f "$TMP.att" "$TMP.modsec" "$TMP.scan"
 }
 
 check_uploads() {   # new PHP files in wp-content/uploads
@@ -1137,7 +1155,9 @@ check_uploads() {   # new PHP files in wp-content/uploads
   can_write_state && touch "$SCAN_STAMP.new"   # remember the time before scanning
   while IFS= read -r up; do
     if [[ -f $SCAN_STAMP ]]; then
-      T "$FIND_TIMEOUT" find "$up" -type f \( -iname '*.php' -o -iname '*.php[0-9]' -o -iname '*.phtml' -o -iname '*.phar' \) -newer "$SCAN_STAMP" 2>/dev/null
+      # changed since the last scan – by file date (mtime) OR by inode change time (ctime): malware
+      # sets the file date back (PHP touch()) to look old; the change time can't be set by a user
+      T "$FIND_TIMEOUT" find "$up" -type f \( -iname '*.php' -o -iname '*.php[0-9]' -o -iname '*.phtml' -o -iname '*.phar' \) \( -newer "$SCAN_STAMP" -o -cnewer "$SCAN_STAMP" \) 2>/dev/null
     else
       T "$FIND_TIMEOUT" find "$up" -type f \( -iname '*.php' -o -iname '*.php[0-9]' -o -iname '*.phtml' -o -iname '*.phar' \) ! -name 'index.php' 2>/dev/null
     fi
@@ -1151,7 +1171,14 @@ check_uploads() {   # new PHP files in wp-content/uploads
     out "First run – existing PHP files (excluding index.php): $CNT"
     (( CNT > 0 )) && alert "Web: $CNT PHP file(s) found in wp-content/uploads – check whether legitimate"
   fi
-  head -15 "$TMP" | sed 's/^/  /' >>"$BODY"
+  local st=0 fm
+  [[ -f $SCAN_STAMP ]] && st=$(stat -c %Y "$SCAN_STAMP")
+  head -15 "$TMP" | while IFS= read -r up; do
+    fm=$(stat -c %Y "$up" 2>/dev/null || echo 0)
+    if (( st > 0 && fm > 0 && fm < st )); then     # found by its change time only
+      printf '  %s  (file date %s is older than its last change – set back, or the file was moved/its permissions changed)\n' "$up" "$(date -d "@$fm" +%F)" >>"$BODY"
+    else printf '  %s\n' "$up" >>"$BODY"; fi
+  done
   # after a timeout the scan was incomplete: keep the old stamp, so the next run looks again
   if [[ $(timeouts_seen) == "$nto" ]]; then can_write_state && mv "$SCAN_STAMP.new" "$SCAN_STAMP"; fi
   return 0
@@ -1568,10 +1595,30 @@ check_backups() {   # latest Plesk backup (time, age, errors), Acronis agent –
 # Daily checks – write their section text to stdout, alerts via dalert
 # =============================================================================
 
+# A newer kernel is installed than the one running? Fallback where the distribution's own signal
+# is missing: /var/run/reboot-required only exists where a package writes it (Debian/Ubuntu:
+# unattended-upgrades, update-notifier-common), needs-restarting needs dnf-utils (RHEL family).
+# Only if the running kernel is one from /boot – a container or a provider kernel can't be compared.
+kernel_reboot_check() {
+  local run new k
+  run=$(uname -r)
+  [[ -e /boot/vmlinuz-$run ]] || return 0
+  new=$(for k in /boot/vmlinuz-*; do echo "${k#/boot/vmlinuz-}"; done | sort -V | tail -1)
+  if [[ -n $new && $new != "$run" ]]; then
+    echo "Reboot required: kernel $run is running, $new is installed"
+    dalert "System: reboot required – kernel $new is installed, $run is still running"
+  fi
+  return 0
+}
 check_updates() {   # pending (security) updates, reboot required
   local upg sec
   if command -v apt-get >/dev/null; then
-    upg=$(T "$CMD_TIMEOUT" apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep '^Inst' || true)
+    # --with-new-pkgs: plain "upgrade" leaves out every update that needs a new package – on
+    # Debian/Ubuntu that is nearly every kernel update (linux-image-<new version>)
+    # (an apt too old for the option falls back to the plain simulation)
+    upg=$(T "$CMD_TIMEOUT" apt-get -s -o Debug::NoLocking=1 --with-new-pkgs upgrade 2>/dev/null) ||
+      upg=$(T "$CMD_TIMEOUT" apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null)
+    upg=$(grep '^Inst' <<<"$upg" || true)
     sec=$(grep -ci 'security' <<<"$upg" || true)
     echo "Updates available: $(grep -c . <<<"$upg" || true), security updates: $sec"
     grep -i security <<<"$upg" | awk '{print "  " $2}' | head -10
@@ -1579,14 +1626,16 @@ check_updates() {   # pending (security) updates, reboot required
     if [[ -f /var/run/reboot-required ]]; then
       echo "Reboot required (since $(date -r /var/run/reboot-required '+%Y-%m-%d'))"
       dalert "System: reboot required after updates"
-    fi
+    else kernel_reboot_check; fi
   elif command -v dnf >/dev/null; then
     sec=$(T "$CMD_TIMEOUT" dnf -q updateinfo list --security 2>/dev/null | grep -c . || true)
     echo "Security updates available: $sec"
     (( sec > 0 )) && dalert "Updates: $sec security update(s) pending"
-    if command -v needs-restarting >/dev/null && ! needs-restarting -r >/dev/null 2>&1; then
-      echo "Reboot required"; dalert "System: reboot required after updates"
-    fi
+    if command -v needs-restarting >/dev/null; then
+      if ! needs-restarting -r >/dev/null 2>&1; then
+        echo "Reboot required"; dalert "System: reboot required after updates"
+      fi
+    else kernel_reboot_check; fi                       # needs-restarting (dnf-utils) is not installed
   fi
   (( UPDATE_CHECK )) && script_update_check
   return 0
@@ -1851,6 +1900,8 @@ check_exposed() {   # .env, .git, dumps, backups, config copies in document root
   (( pub )) && echo "  This list is from the daily check (see \"As of\") and repeats until the next one. After fixing a file, check again right away: $(basename "$0") --only exposed – or rm $STATE_DIR/daily_date to refresh the daily checks in the next run"
   return 0
 }
+# "Recently changed" = by file date (mtime) or by inode change time (ctime): a backdated file
+# (PHP touch()) still has a fresh ctime.
 check_webshell() {   # recently changed PHP files with typical backdoor code
   local stamp="$STATE_DIR/webshell_scan" new="$STATE_DIR/webshell_scan.new" dom root out="" n=0 hits=0 f nto
   local re='eval[[:space:]]*\([[:space:]]*(base64_decode|gzinflate|gzuncompress|str_rot13|gzdecode)[[:space:]]*\(|assert[[:space:]]*\([[:space:]]*\$_(POST|GET|REQUEST|COOKIE)|\$_(POST|GET|REQUEST|COOKIE)[[:space:]]*\[[^]]*\][[:space:]]*\(|preg_replace[[:space:]]*\([[:space:]]*["'"'"'][^"'"'"']*/e["'"'"']|create_function[[:space:]]*\([^)]*\$_(POST|GET|REQUEST)|(system|shell_exec|passthru|exec|popen|proc_open)[[:space:]]*\([[:space:]]*\$_(POST|GET|REQUEST|COOKIE)'
@@ -1863,10 +1914,10 @@ check_webshell() {   # recently changed PHP files with typical backdoor code
     while IFS= read -r f; do
       [[ -n $WEBSHELL_IGNORE && $f =~ $WEBSHELL_IGNORE ]] && continue
       hits=$((hits + 1))
-      out+="  $f ($(date -r "$f" '+%Y-%m-%d %H:%M'))"$'\n'
+      out+="  $f (file date $(date -r "$f" '+%Y-%m-%d %H:%M'), last change $(date -d "@$(stat -c %Z "$f" 2>/dev/null || echo 0)" '+%Y-%m-%d %H:%M'))"$'\n'
       dalert "Web: suspicious code in recently changed file $f – check it (webshell/backdoor?)"
-    done < <(if [[ -f $stamp ]]; then T "$FIND_TIMEOUT" find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) -newer "$stamp" 2>/dev/null
-             else T "$FIND_TIMEOUT" find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) -mtime -"$WEBSHELL_FIRST_DAYS" 2>/dev/null; fi |
+    done < <(if [[ -f $stamp ]]; then T "$FIND_TIMEOUT" find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) \( -newer "$stamp" -o -cnewer "$stamp" \) 2>/dev/null
+             else T "$FIND_TIMEOUT" find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) \( -mtime -"$WEBSHELL_FIRST_DAYS" -o -ctime -"$WEBSHELL_FIRST_DAYS" \) 2>/dev/null; fi |
              T "$FIND_TIMEOUT" xargs -r -d '\n' grep -lE "$re" 2>/dev/null | head -30)
   done < <(docroots)
   # after a timeout the scan was incomplete: keep the old stamp, so the next scan looks again
@@ -2388,19 +2439,30 @@ upload_report() {
     cat "$REPORT"
   elif [[ -n $REMOTE ]] && command -v rclone >/dev/null; then
     local up sm
+    local ok=1 err="$TMPD/rclone.err" uf="$STATE_DIR/upload_failed"
     up=$(upload_copy "$REPORT")
-    rcl copyto "$up" "$REMOTE/$(basename "$REPORT")" --quiet &&
-    replace_remote "$up" latest.txt ||
-      logger -t plesk-server-report "upload to $REMOTE failed"
+    { rcl copyto "$up" "$REMOTE/$(basename "$REPORT")" --quiet &&
+      replace_remote "$up" latest.txt; } 2>"$err" ||
+      { ok=0; logger -t plesk-server-report "upload to $REMOTE failed"; }
     if (( SUMMARY )) && [[ -s $OUT_DIR/summary.txt ]]; then
       sm=$(upload_copy "$OUT_DIR/summary.txt")
-      replace_remote "$sm" summary.txt ||
-        logger -t plesk-server-report "upload of summary.txt to $REMOTE failed"
+      replace_remote "$sm" summary.txt 2>>"$err" ||
+        { ok=0; logger -t plesk-server-report "upload of summary.txt to $REMOTE failed"; }
+    fi
+    # a failed upload is only in the system log, and the report that could say so was not
+    # uploaded: remember it (time of the first failure, rclone's message), the next run raises
+    # an alert – in the local report, by mail (REPORT_MAIL_TO) and in the upload once it works again
+    if can_write_state; then
+      if (( ok )); then rm -f "$uf"
+      else
+        [[ -s $uf ]] || date '+%Y-%m-%d %H:%M %Z' >"$uf"
+        { head -1 "$uf"; grep -v '^$' "$err" 2>/dev/null | tail -1 | cut -c1-200; } >"$uf.new" && mv "$uf.new" "$uf"
+      fi
     fi
     if (( RETENTION_DAYS > 0 )); then
       # delete old reports permanently (Google Drive: not into the trash)
       rcl delete "$REMOTE" --include 'report-*.txt' --min-age "${RETENTION_DAYS}d" \
-        --drive-use-trash=false --quiet ||
+        --drive-use-trash=false --quiet 2>>"$err" ||
         logger -t plesk-server-report "deleting old reports in $REMOTE failed"
     fi
   fi
@@ -2606,8 +2668,8 @@ is always reported). Processes are not stored – they are checked live in every
 | `last_run` | Unix time of the last normal run | everything "since the last run" (journal, web logs). |
 | `offsets/` | one file per log, named after a hash of its path; content `inode bytes-read path` | the script reads only the lines added since the last run. The inode identifies the file after a rotation (`maillog` → `maillog.processed`), so the rest of the old file is still read. Delete a file here and that log is read again from its last 20,000 lines. |
 | `journal_since` | Unix time | position in the systemd journal (only if there is no mail log file). |
-| `last_scan` | empty; its modification time counts | new PHP files in upload folders are files newer than this. |
-| `webshell_scan` | empty; its modification time counts | the daily scan for suspicious code looks only at PHP files changed since then. |
+| `last_scan` | empty; its modification time counts | new PHP files in upload folders are files changed after this – by file date or by inode change time, so a file with its date set back is found too. |
+| `webshell_scan` | empty; its modification time counts | the daily scan for suspicious code looks only at PHP files changed since then (file date or inode change time). |
 
 ## Daily checks
 
@@ -2625,6 +2687,7 @@ is always reported). Processes are not stored – they are checked live in every
 | `geoip/` | the DB-IP Lite databases for country and network operator (`GEOIP_DIR`), refreshed monthly. |
 | `lock` | lock file, so that only one run at a time is active (it is never deleted). |
 | `running` | exists only while a run is active: `PID start now step exit-code`. If it is still there at the next run, that run did not finish, and the report says so (alert "Script: …"). |
+| `upload_failed` | time of the first failed upload, and rclone's last error message | while the upload to `REMOTE` fails, every report raises an alert (local report, mail). Deleted by the next successful upload. |
 | `tmp.*` | temporary files of the current run, removed at its end. |
 | `README.txt` | this description. |
 EOF
@@ -2841,8 +2904,13 @@ init() {
   for v in VHOST_LOGS PLESK_PANEL_LOG MAILNAMES_DIR DKIM_KEY_DIR; do
     [[ -n ${!v} ]] || note "config: $v is empty in $CONF – the checks that need it are skipped"
   done
+  [[ -n $REMOTE ]] && (( UPLOAD )) && ! command -v rclone >/dev/null &&
+    note "upload: REMOTE is set, but rclone is not installed – reports stay in $OUT_DIR (REMOTE=\"\" in $CONF switches the upload off)"
   [[ -n $REPORT_MAIL_TO ]] && ! command -v sendmail >/dev/null &&
     note "REPORT_MAIL_TO is set, but there is no sendmail command – reports are not mailed"
+  if [[ -s $STATE_DIR/upload_failed ]] && ! (( ONLY_MODE || SUMMARY_ONLY )); then
+    alert "Script: the upload to $REMOTE fails since $(head -1 "$STATE_DIR/upload_failed") – the reports are missing there (local copies: $OUT_DIR). rclone says: $(sed -n 2p "$STATE_DIR/upload_failed" | grep . || echo "nothing – see journalctl -t plesk-server-report"). Test: rclone lsf $REMOTE"
+  fi
   if [[ -f $STATE_DIR/mail_failed ]] && can_write_state; then
     note "mail: sendmail refused the report mail of $(cat "$STATE_DIR/mail_failed") – see journalctl -t plesk-server-report"
     rm -f "$STATE_DIR/mail_failed"

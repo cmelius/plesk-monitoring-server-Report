@@ -19,7 +19,17 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 - **The script refuses to run with an unsafe configuration file:** if `/etc/plesk-server-report.conf` belongs to another user or group/others may write it, the script stops before loading it – it is run as root code, so a warning afterwards would come too late. The reason and the fix go to stderr (cron mails it to root) and the system log. `--version`, `--help` and `--state-readme` still work.
 - README, *What it found so far*: the switched-off fail2ban jail for Courier and the customer devices it revealed, the spam filter size limit, missing HSTS, unchecked SSH keys.
 
+- **Inodes:** the filesystem list shows space and inodes used; running out of inodes (too many small files) raises an alert like a full disk (`WARN_DISK_PCT`).
+- **A failed upload raises an alert.** Until now it was only in the system log, and the report that could have said so was not uploaded either. The script remembers the first failure and rclone's message (state file `upload_failed`); every following report alerts – locally, by mail, and in the upload once it works again. A note says so when `REMOTE` is set but rclone is not installed.
+
+### Fixed
+- **Kernel security updates were not counted.** The simulated `apt-get upgrade` leaves out updates that need a new package – on Debian and Ubuntu nearly every kernel update. Now simulated with `--with-new-pkgs`. And "reboot required" no longer depends on the distribution's signal alone (`/var/run/reboot-required` on Debian/Ubuntu, `needs-restarting` on the RHEL family – both come from optional packages): where it is missing, a newer kernel in `/boot` than the running one counts.
+- **PHP files with their date set back were not found.** The scans for new PHP files in upload folders and for suspicious code looked at the file date only, which malware sets back (PHP `touch()`). They now also use the inode change time, which can't be forged; the report says when a file was found that way.
+- Failed SMTP logins with other SASL methods than LOGIN, PLAIN and CRAM-MD5 were not counted.
+
 ### Changed
+- **PHP fatal errors caused by scanners don't count.** A scanner requesting a theme, plugin or wp-admin file directly produces "Call to undefined function get_header()" and the like. These are listed separately and no longer count towards `WARN_PHP_FATAL`.
+- The server's own addresses (localhost, its public IP – webmail and local scripts) are labelled "this server" instead of an unknown country.
 - **Exposed files: how to check again after a fix.** The daily list of publicly reachable files and its alert now say that the result is from the daily check and how to recheck right away (`--only exposed`, or delete `daily_date`). The hourly alert for a sensitive file served with 200 says that it is a request from the access log – a past download, not the current state. (Thanks to the first GitHub issue.)
 - **Every file the script creates is readable by root only** (`umask 077`). The state directory was already mode 700; now the files in it are 600 as well.
 - **Size limits for the DB-IP download:** at most 200 MB compressed and 500 MB unpacked, so that a broken or tampered download can't fill the disk. The real databases are far smaller.

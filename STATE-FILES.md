@@ -61,8 +61,8 @@ is always reported). Processes are not stored – they are checked live in every
 | `last_run` | Unix time of the last normal run | everything "since the last run" (journal, web logs). |
 | `offsets/` | one file per log, named after a hash of its path; content `inode bytes-read path` | the script reads only the lines added since the last run. The inode identifies the file after a rotation (`maillog` → `maillog.processed`), so the rest of the old file is still read. Delete a file here and that log is read again from its last 20,000 lines. |
 | `journal_since` | Unix time | position in the systemd journal (only if there is no mail log file). |
-| `last_scan` | empty; its modification time counts | new PHP files in upload folders are files newer than this. |
-| `webshell_scan` | empty; its modification time counts | the daily scan for suspicious code looks only at PHP files changed since then. |
+| `last_scan` | empty; its modification time counts | new PHP files in upload folders are files changed after this – by file date or by inode change time, so a file with its date set back is found too. |
+| `webshell_scan` | empty; its modification time counts | the daily scan for suspicious code looks only at PHP files changed since then (file date or inode change time). |
 
 ## Daily checks
 
@@ -80,5 +80,6 @@ is always reported). Processes are not stored – they are checked live in every
 | `geoip/` | the DB-IP Lite databases for country and network operator (`GEOIP_DIR`), refreshed monthly. |
 | `lock` | lock file, so that only one run at a time is active (it is never deleted). |
 | `running` | exists only while a run is active: `PID start now step exit-code`. If it is still there at the next run, that run did not finish, and the report says so (alert "Script: …"). |
+| `upload_failed` | time of the first failed upload, and rclone's last error message | while the upload to `REMOTE` fails, every report raises an alert (local report, mail). Deleted by the next successful upload. |
 | `tmp.*` | temporary files of the current run, removed at its end. |
 | `README.txt` | this description. |
