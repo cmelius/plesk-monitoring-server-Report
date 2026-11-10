@@ -2740,6 +2740,23 @@ only_list() {
 
 # on_exit – runs at every end of the script: a run that did not finish (error, timeout, kill)
 # leaves $RUNFILE with its last step and exit code, so the next run can report it
+# load_conf – the configuration is bash code run as root: whoever can write it gets root. If it
+# belongs to another user or group/others may write it, the script refuses to run at all –
+# a warning in the report would come too late, after the code already ran. The message goes
+# to stderr (cron mails it to root) and to the system log.
+load_conf() {
+  [[ -e $CONF ]] || return 0
+  if [[ -n $(find -L "$CONF" -maxdepth 0 \( ! -user root -o -perm /022 \) 2>/dev/null) ]]; then
+    local m="refusing to run – $CONF is $(stat -L -c '%U:%G %A' "$CONF" 2>/dev/null). It is loaded as root code; whoever can write it gets root. Fix: chown root:root $CONF; chmod 600 $CONF"
+    echo "plesk-server-report: $m" >&2
+    logger -t plesk-server-report "$m" 2>/dev/null
+    DONE=1; exit 1
+  fi
+  # shellcheck source=/dev/null
+  [[ -r $CONF ]] && . "$CONF"
+  return 0
+}
+
 on_exit() {
   local rc=$?
   if [[ -n ${RUNFILE:-} ]] && can_write_state; then
@@ -2754,8 +2771,7 @@ on_exit() {
 
 init() {
   local opid="" ostart="" onow="" ostep="" orc="" why
-  # shellcheck source=/dev/null
-  [[ -r $CONF ]] && . "$CONF"
+  load_conf
   if [[ -z $STATE_DIR || $STATE_DIR == / ]]; then
     echo "plesk-server-report: STATE_DIR must not be empty or / – check $CONF" >&2
     logger -t plesk-server-report "STATE_DIR must not be empty or /" 2>/dev/null
@@ -2830,30 +2846,25 @@ init() {
     rm -f "$STATE_DIR/mail_failed"
   fi
   command -v plesk >/dev/null || note "plesk command not found – domain list from VHOST_LOGS only, domain aliases unknown"
-  # the configuration is loaded as code: whoever can write it gets root. It is still loaded
-  # (without it the report might not reach anyone), but every report says so until it is fixed
-  if [[ -e $CONF && -n $(find -L "$CONF" -maxdepth 0 \( ! -user root -o -perm /022 \) 2>/dev/null) ]]; then
-    alert "Script: $CONF is $(stat -L -c '%U:%G %A' "$CONF" 2>/dev/null) – the script runs it as root, so whoever can write it gets root. Fix: chown root:root $CONF; chmod 600 $CONF"
-  fi
 }
 
 main() {
   ARGS=("$@")
   parse_args "$@"
   if (( SHOW_STATE || DECODE )); then  # read-only: no lock, no state written
-    [[ -r $CONF ]] && . "$CONF"
+    load_conf
     if (( SHOW_STATE )); then show_state; else decode_pseudonyms "${DECODE_ARGS[@]}"; fi
     return
   fi
   if (( TEST_MAIL )); then              # changes no state (ONLY_MODE)
-    [[ -r $CONF ]] && . "$CONF"
+    load_conf
     [[ -n $REPORT_MAIL_FROM ]] || REPORT_MAIL_FROM="plesk-server-report@$HOST"
     ONLY_MODE=1; TMPD=$(mktemp -d) || return 1
     test_mail; local rc=$?
     rm -rf "$TMPD"; return $rc
   fi
   if [[ -n $PSEUDO_FILE ]]; then        # preview: creates mask_key and stores the pseudonyms, so --decode works
-    [[ -r $CONF ]] && . "$CONF"
+    load_conf
     TMPD=$(mktemp -d) || return 1
     MASK_MAILBOXES=1 upload_copy "$PSEUDO_FILE" | xargs cat
     rm -rf "$TMPD"; return 0
