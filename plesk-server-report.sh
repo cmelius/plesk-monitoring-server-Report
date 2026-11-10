@@ -1225,11 +1225,21 @@ check_logins() {   # successful SSH and Plesk panel logins, alert for previously
 # them silently. Stored are fingerprints, names, checksums and cron lines with passwords masked.
 
 # content that has no business in a cron job or autostart file: download piped into a shell,
-# base64 decoding, reverse shells, programs in /tmp, interpreter one-liners, known miners
-PERSIST_SUSPICIOUS='(curl|wget|fetch)[^|;]*\|[[:space:]]*(sudo[[:space:]]+)?(ba|da|z|k)?sh([[:space:]]|$)|base64[[:space:]]+(-d|--decode)|/dev/(tcp|udp)/|(^|[[:space:];&|`(=])/(tmp|var/tmp|dev/shm)/|python[0-9.]*[[:space:]]+-c[[:space:]]|(perl|ruby)[[:space:]]+-e[[:space:]]|php[0-9.]*[[:space:]]+-r[[:space:]]|(^|[[:space:];&|])nc(at)?[[:space:]].*-[ec][[:space:]]|xmrig|minerd|kdevtmpfsi|kinsing'
-persist_suspicious() {   # persist_suspicious TEXT – output redirections (> /tmp/x.log) don't count, except to /dev/tcp
-  grep -qE '/dev/(tcp|udp)/' <<<"$1" && return 0
-  sed -E 's/[0-9&]*>>?[[:space:]]*[^[:space:];|&]+//g' <<<"$1" | grep -qEi -- "$PERSIST_SUSPICIOUS"
+# base64 decoding, reverse shells, interpreter one-liners, known miners – and programs in /tmp:
+# in a cron line any path there (a cron job has no reason to use /tmp but to start something),
+# in an autostart script only a program started from there (scripts use temporary files)
+PERSIST_SUSPICIOUS='(curl|wget|fetch)[^|;]*\|[[:space:]]*(sudo[[:space:]]+)?(ba|da|z|k)?sh([[:space:]]|$)|base64[[:space:]]+(-d|--decode)|python[0-9.]*[[:space:]]+-c[[:space:]]|(perl|ruby)[[:space:]]+-e[[:space:]]|php[0-9.]*[[:space:]]+-r[[:space:]]|(^|[[:space:];&|])nc(at)?[[:space:]].*-[ec][[:space:]]|xmrig|minerd|kdevtmpfsi|kinsing'
+PERSIST_TMP_LINE='(^|[[:space:];&|`(=])/(tmp|var/tmp|dev/shm)/'
+PERSIST_TMP_SCRIPT='(^[[:space:]]*|[;&|`(][[:space:]]*|(exec|nohup|sh|bash|setsid)[[:space:]]+)/(tmp|var/tmp|dev/shm)/'
+# persist_suspicious TEXT [script] – prints the first suspicious line (passwords masked); output
+# redirections (> /tmp/x.log) don't count, except to /dev/tcp (reverse shell)
+persist_suspicious() {
+  local re="$PERSIST_SUSPICIOUS|$PERSIST_TMP_LINE" n
+  [[ ${2:-} == script ]] && re="$PERSIST_SUSPICIOUS|$PERSIST_TMP_SCRIPT"
+  n=$(grep -nE '/dev/(tcp|udp)/' <<<"$1" | head -1) ||
+    n=$(sed -E 's/[0-9&]*>>?[[:space:]]*[^[:space:];|&]+//g' <<<"$1" | grep -nEi -- "$re" | head -1)
+  [[ -n $n ]] || return 1
+  sed -n "${n%%:*}p" <<<"$1" | sed 's/^[[:space:]]*//' | persist_mask | cut -c1-160
 }
 persist_mask() {   # cron lines may hold passwords (mysqldump -pSECRET, https://user:pw@…): mask them
   sed -E 's/(^|[[:space:]])-p[^[:space:]]+/\1-p***/g
@@ -1347,7 +1357,7 @@ persist_procs() {
 }
 
 check_persistence() {   # SSH keys, accounts, sudo, cron/autostart, suspicious processes, listening ports
-  local first w k v c n u what nto pid uid why exe user cmd ports key
+  local first w k v c n u what nto pid uid why exe user cmd ports key hit
   local -A gone=() before=() said=()
   section "ACCESS & PERSISTENCE (SSH keys, accounts, sudo, cron, autostart, processes, ports)"
   nto=$(timeouts_seen)
@@ -1417,7 +1427,7 @@ check_persistence() {   # SSH keys, accounts, sudo, cron/autostart, suspicious p
   while IFS=$'\t' read -r w k v; do [[ $w == file ]] && gone["$k"]=1; done <"$TMP.c.del"
   while IFS=$'\t' read -r w k v; do
     if [[ $w == line ]]; then
-      if persist_suspicious "$v"; then
+      if persist_suspicious "$v" >/dev/null; then
         persist_finding '!' "cron ($k): $v" "Cron: $( ((first)) && echo "entry" || echo "new entry") with suspicious content in $k: $(cut -c1-160 <<<"$v") – check it"
       elif (( ! first )); then
         # a new entry of root or the system (not of a customer's subscription) is rare: alert once
@@ -1428,8 +1438,8 @@ check_persistence() {   # SSH keys, accounts, sudo, cron/autostart, suspicious p
       fi
     else
       c=$(grep -vE '^[[:space:]]*(#|$)' "$k" 2>/dev/null | head -c 20000)
-      if persist_suspicious "$c"; then
-        persist_finding '!' "autostart file $k contains suspicious commands" "Cron: $( ((first)) && echo "autostart file" || echo "new or changed autostart file") $k contains suspicious commands – check it"
+      if hit=$(persist_suspicious "$c" script); then
+        persist_finding '!' "autostart file $k contains: $hit" "Cron: $( ((first)) && echo "autostart file" || echo "new or changed autostart file") $k contains suspicious commands: $hit – check it"
       elif (( ! first )); then
         if [[ -n ${gone[$k]:-} ]]; then persist_finding '~' "autostart file changed: $k"
         else persist_finding + "new autostart file: $k" "Cron: new autostart file $k – added by you or a package update?"; fi
