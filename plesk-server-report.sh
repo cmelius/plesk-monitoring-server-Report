@@ -1377,10 +1377,19 @@ check_persistence() {   # SSH keys, accounts, sudo, cron/autostart, suspicious p
   else
     first=0; baseline_diff keys "$TMP.k" || first=1
     out "SSH keys (authorized_keys): $(wc -l <"$TMP.k") key(s) of $(cut -f1 "$TMP.k" | sort -u | wc -l) account(s)$(persist_first_note "$first")"
+    # same account and fingerprint gone and back = only the comment changed: same access, no alert
+    while IFS=$'\t' read -r u k c; do gone["$u"$'\t'"$k"]=$c; done <"$TMP.k.del"
     while IFS=$'\t' read -r u k c; do
-      persist_finding + "SSH key for $u: $k${c:+ ($c)}" "Access: new SSH key for $u: $k${c:+ ($c)} – added by you?"
+      key="$u"$'\t'"$k"
+      if [[ -n ${gone[$key]+x} ]]; then
+        persist_finding '~' "SSH key for $u: $k – comment changed: ${gone[$key]:-no comment} → ${c:-no comment}"
+        unset 'gone[$key]'
+      else
+        persist_finding + "SSH key for $u: $k${c:+ ($c)}" "Access: new SSH key for $u: $k${c:+ ($c)} – added by you?"
+      fi
     done <"$TMP.k.add"
-    while IFS=$'\t' read -r u k c; do persist_finding - "SSH key removed for $u: $k${c:+ ($c)}"; done <"$TMP.k.del"
+    for key in "${!gone[@]}"; do persist_finding - "SSH key removed for ${key%%$'\t'*}: ${key#*$'\t'}${gone[$key]:+ (${gone[$key]})}"; done
+    gone=()
   fi
 
   # --- accounts with a login shell, sudo, sudoers, ld.so.preload
