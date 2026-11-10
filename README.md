@@ -34,7 +34,9 @@ The sections below explain everything in detail; you don't need to read them to 
 
 The script runs as root and has grown to almost 3,000 lines of bash – more than most people will read. Let an AI assistant review it before the first run: attach the file you just downloaded (`/usr/local/sbin/plesk-server-report.sh` – review the exact file you are going to run, not a copy from somewhere else) and ask:
 
-> *Review this bash script before I run it as root from cron on a production Plesk server. List everything it changes on the system, every network connection it makes and every external command it runs. Flag anything that could damage the system, leak data or be abused by another local user.*
+> *Review this bash script before I run it as root from cron on a production Plesk server. Ignore the comments and the documentation – verify everything from the code itself. For every command that writes, deletes, moves or changes permissions of a file, every network connection and every command run with data from logs or the network, quote the line and say what it does. Then tell me whether anything changes the system outside the script's own state directory, could leak data, or could be abused by another local user.*
+
+Why "ignore the comments": a malicious script would be full of reassuring ones. Asking for the quoted line behind every statement makes the answer checkable – and a claim without a line (AI assistants do invent details now and then) stands out.
 
 Expect it to point out a few things that are by design:
 
