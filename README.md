@@ -16,6 +16,7 @@ The script works out of the box on a standard Plesk 18 (Obsidian) server on Linu
 curl -fsSL -o /usr/local/sbin/plesk-server-report.sh \
   https://github.com/cmelius/plesk-monitoring-server-Report/releases/latest/download/plesk-server-report.sh
 chmod 700 /usr/local/sbin/plesk-server-report.sh
+# before the first run: let an AI review it, see "Check it before you run it as root" below
 /usr/local/sbin/plesk-server-report.sh --no-upload        # test run: prints the report
 echo '5 * * * * root /usr/local/sbin/plesk-server-report.sh' > /etc/cron.d/plesk-server-report
 ```
@@ -28,6 +29,21 @@ That's it: from now on a report is written every hour to `/var/lib/plesk-server-
 4. **Mail** instead of (or besides) the upload: `echo 'REPORT_MAIL_TO="admin@example.com"' >> /etc/plesk-server-report.conf` – ideally a mailbox on this server, so the reports never leave it – a daily summary and a mail as soon as something new is wrong. Put the sender on the spam filter whitelist, see [Reports by mail](#reports-by-mail).
 
 The sections below explain everything in detail; you don't need to read them to get started.
+
+### Check it before you run it as root
+
+The script runs as root and has grown to almost 3,000 lines of bash – more than most people will read. Let an AI assistant review it before the first run: attach the file you just downloaded (`/usr/local/sbin/plesk-server-report.sh` – review the exact file you are going to run, not a copy from somewhere else) and ask:
+
+> *Review this bash script before I run it as root from cron on a production Plesk server. List everything it changes on the system, every network connection it makes and every external command it runs. Flag anything that could damage the system, leak data or be abused by another local user.*
+
+Expect it to point out a few things that are by design:
+
+- **It runs as root** – to read all logs, `/proc`, crontabs and `authorized_keys`. It changes nothing on the server: no IP is blocked, no process stopped, no file removed.
+- **It loads `/etc/plesk-server-report.conf` as code** (`source`), like most shell-script configurations. Anyone who can edit that file gets root, so keep it owned by root and writable only by root: `chmod 600 /etc/plesk-server-report.conf`.
+- **Network connections:** DNS lookups, the upload with rclone, report mails through the local `sendmail`, HTTPS requests to your own domains (with `curl -k`, because the check is meant to find invalid certificates), one request a day to the GitHub API for the latest version, and the monthly download of the DB-IP database.
+- **It deletes files** only in its own folder `/var/lib/plesk-server-report` (temporary files, old reports), and reads the Plesk database with `SELECT` only.
+
+Anything beyond that is worth a question – [open an issue](../../issues).
 
 **Young project, frequent updates:** new checks and fixes come out every few days at the moment. The daily report tells you when a newer release is available; *Watch → Custom → Releases* on GitHub notifies you as well. See [Updates](#updates).
 
@@ -408,7 +424,7 @@ curl -fsSL -o /usr/local/sbin/plesk-server-report.sh \
   https://github.com/cmelius/plesk-monitoring-server-Report/releases/latest/download/plesk-server-report.sh
 chmod 700 /usr/local/sbin/plesk-server-report.sh
 
-# read it before you run it as root
+# read it before you run it as root – or let an AI review it, see "Check it before you run it as root"
 less /usr/local/sbin/plesk-server-report.sh
 
 # optional, recommended: geolocation of login IPs
@@ -426,6 +442,7 @@ Options: `--no-upload` (print instead of upload), `--only CHECK,…` (run single
 
 ```bash
 echo 'ALLOWED_COUNTRIES="DE AT CH"' >> /etc/plesk-server-report.conf
+chmod 600 /etc/plesk-server-report.conf     # the script loads it as code: only root may write it
 ```
 
 The **first run** reads the last 20,000 lines of each log and lists all existing PHP files in upload folders, so it may contain warnings about older events. Review them once (see [First run](#first-run)). From the second run on, only new lines are analysed.
@@ -759,6 +776,8 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 
 ## Security
 
+- Before the first run, let an AI review the script – see [Check it before you run it as root](#check-it-before-you-run-it-as-root) for a prompt and what it will point out.
+- `/etc/plesk-server-report.conf` is loaded as code: keep it owned by root and writable only by root (`chmod 600`).
 - Runs as root because it needs to read all logs (and `/proc`, crontabs, `authorized_keys` for the persistence check). It changes nothing on the server – no IP is blocked, no process stopped, no file removed; findings are reported, the action is yours. It writes only to `/var/lib/plesk-server-report` (mode 700), to the configured rclone remote and – with `REPORT_MAIL_TO` – hands mails to the local `sendmail`.
 - External connections: DNS lookups (blocklists, SPF/DKIM, domain DNS), the rclone upload, the report mails (only if `REPORT_MAIL_TO` is at another provider), the daily HTTPS check of your own domains (to this server's IP), the monthly download of the DB-IP Lite database (only with geolocation), and once a day one request to the GitHub API for the latest release of the script (`UPDATE_CHECK=0` switches it off). Nothing about your server is sent; the script never updates itself.
 - The rclone config (`/root/.config/rclone/rclone.conf`) contains the token for the storage account. That is another reason to use a dedicated account with the narrowest possible scope (`drive.file`, bucket-limited keys, chrooted SFTP user).
