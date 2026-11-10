@@ -13,7 +13,7 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 
   The first run stores the current state as baseline (`baseline/` in the state directory, described in [STATE-FILES.md](STATE-FILES.md), shown by `--show-state`; `--only persistence` compares without storing anything). The script only reads: nothing is deleted, blocked or stopped. `summary.txt` has a new section with all changes and findings of the day. README: coverage table, notes, first run, configuration, example report and example prompt updated – if you use the prompt, update your copy.
 
-- README: **Check it before you run it as root** – a prompt to let an AI review the script before the first run, and what it will point out by design (root, the configuration file loaded as code, network connections, what it deletes). The configuration file should be writable by root only (`chmod 600`).
+- README: **Check it before you run it as root** – a prompt to let an AI review the script before the first run, and what it will point out by design (root, the configuration file loaded as code, network connections, what it deletes). The configuration file should be writable by root only (`chmod 600`); if another user owns it or can write it, every report now raises an alert.
 - README, *What it found so far*: the switched-off fail2ban jail for Courier and the customer devices it revealed, the spam filter size limit, missing HSTS, unchecked SSH keys.
 
 ### Changed

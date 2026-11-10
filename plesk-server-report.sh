@@ -2826,6 +2826,11 @@ init() {
     rm -f "$STATE_DIR/mail_failed"
   fi
   command -v plesk >/dev/null || note "plesk command not found – domain list from VHOST_LOGS only, domain aliases unknown"
+  # the configuration is loaded as code: whoever can write it gets root. It is still loaded
+  # (without it the report might not reach anyone), but every report says so until it is fixed
+  if [[ -e $CONF && -n $(find -L "$CONF" -maxdepth 0 \( ! -user root -o -perm /022 \) 2>/dev/null) ]]; then
+    alert "Script: $CONF is $(stat -L -c '%U:%G %A' "$CONF" 2>/dev/null) – the script runs it as root, so whoever can write it gets root. Fix: chown root:root $CONF; chmod 600 $CONF"
+  fi
 }
 
 main() {
