@@ -17,6 +17,9 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 - README, *What it found so far*: the switched-off fail2ban jail for Courier and the customer devices it revealed, the spam filter size limit, missing HSTS, unchecked SSH keys.
 
 ### Changed
+- **Every file the script creates is readable by root only** (`umask 077`). The state directory was already mode 700; now the files in it are 600 as well.
+- **Size limits for the DB-IP download:** at most 200 MB compressed and 500 MB unpacked, so that a broken or tampered download can't fill the disk. The real databases are far smaller.
+- README, *Check it before you run it as root*: check the lines an AI quotes with `grep` before believing a finding.
 - **Daily checks run again right after an update.** Until now the daily checks of the old version were shown until the next night – including its version line (`Script version: … newer than the latest release …`) – and checks new in the update were missing. The script now remembers which version ran the daily checks and repeats them in the first run of a new version.
 
 ## [1.8.0] – 2026-11-09

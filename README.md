@@ -36,14 +36,14 @@ The script runs as root and has grown to almost 3,000 lines of bash – more tha
 
 > *Review this bash script before I run it as root from cron on a production Plesk server. Ignore the comments and the documentation – verify everything from the code itself. For every command that writes, deletes, moves or changes permissions of a file, every network connection and every command run with data from logs or the network, quote the line and say what it does. Then tell me whether anything changes the system outside the script's own state directory, could leak data, or could be abused by another local user.*
 
-Why "ignore the comments": a malicious script would be full of reassuring ones. Asking for the quoted line behind every statement makes the answer checkable – and a claim without a line (AI assistants do invent details now and then) stands out.
+Why "ignore the comments": a malicious script would be full of reassuring ones. Asking for the quoted line behind every statement makes the answer checkable – and a claim without a line (AI assistants do invent details now and then) stands out. **Check the quoted lines with `grep` before you believe a finding.** In a test, one assistant reported the permission check of the configuration file as broken because its "quote" read `-perm 022` – the script says `-perm /022`, and the slash makes all the difference.
 
 Expect it to point out a few things that are by design:
 
 - **It runs as root** – to read all logs, `/proc`, crontabs and `authorized_keys`. It changes nothing on the server: no IP is blocked, no process stopped, no file removed.
 - **It loads `/etc/plesk-server-report.conf` as code** (`source`), like most shell-script configurations. Anyone who can edit that file gets root, so keep it owned by root and writable only by root: `chmod 600 /etc/plesk-server-report.conf`. If it isn't, every report raises an alert until it is fixed.
 - **Network connections:** DNS lookups, the upload with rclone, report mails through the local `sendmail`, HTTPS requests to your own domains (with `curl -k`, because the check is meant to find invalid certificates), one request a day to the GitHub API for the latest version, and the monthly download of the DB-IP database.
-- **It deletes files** only in its own folder `/var/lib/plesk-server-report` (temporary files, old reports), and reads the Plesk database with `SELECT` only.
+- **It deletes files** only in its own folder `/var/lib/plesk-server-report` (temporary files, old reports) – mode 700, and with `umask 077` every file it creates is readable by root only –, and reads the Plesk database with `SELECT` only.
 
 Anything beyond that is worth a question – [open an issue](../../issues).
 

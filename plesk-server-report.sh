@@ -65,6 +65,7 @@ VERSION=1.9.0
 
 set -uo pipefail
 export LC_ALL=C
+umask 077   # every file the script creates (state, reports, temporary files) is readable by root only
 # cron runs with PATH=/usr/bin:/bin – plesk, postqueue, ip etc. live in /usr/sbin
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
@@ -220,8 +221,11 @@ geo_update() {   # download/refresh the DB-IP Lite databases (monthly)
     f="$GEOIP_DIR/dbip-$kind-lite.mmdb"
     [[ -s $f && -z $(find "$f" -mtime +35 2>/dev/null) ]] && continue
     for m in "$(date +%Y-%m)" "$(date -d "$(date +%Y-%m-15) -1 month" +%Y-%m)"; do
-      if curl -fsS --max-time 180 -o "$f.gz.tmp" "https://download.db-ip.com/free/dbip-$kind-lite-$m.mmdb.gz" 2>/dev/null &&
-         gunzip -c "$f.gz.tmp" >"$f.tmp" 2>/dev/null &&
+      # size limits (the real files: a few MB to some 100 MB unpacked), so that a broken or
+      # tampered download can't fill the disk; a database that doesn't answer a lookup is not used
+      if curl -fsS --max-time 180 --max-filesize 200000000 -o "$f.gz.tmp" "https://download.db-ip.com/free/dbip-$kind-lite-$m.mmdb.gz" 2>/dev/null &&
+         gunzip -c "$f.gz.tmp" 2>/dev/null | head -c 500000001 >"$f.tmp" &&
+         (( $(stat -c %s "$f.tmp") <= 500000000 )) &&
          mmdblookup --file "$f.tmp" --ip 1.1.1.1 >/dev/null 2>&1; then
         mv "$f.tmp" "$f"; break
       fi
