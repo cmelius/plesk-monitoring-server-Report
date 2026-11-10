@@ -1260,6 +1260,11 @@ baseline_diff() {
   fi
   return $rc
 }
+persist_first_note() {   # persist_first_note FIRST – suffix of a summary line in the first run
+  (( $1 )) || return 0
+  if can_write_state; then echo " – first run, stored as baseline"
+  else echo " – no baseline yet (stored by the next normal run; --only stores nothing)"; fi
+}
 # persist_finding SIGN TEXT [ALERT] – a report line under the section (+ new, - gone, ~ changed,
 # ! finding) and, with ALERT, an alert; findings matching PERSISTENCE_IGNORE are left out (return 1)
 persist_finding() {
@@ -1371,7 +1376,7 @@ check_persistence() {   # SSH keys, accounts, sudo, cron/autostart, suspicious p
   if [[ $(timeouts_seen) != "$nto" ]]; then out "SSH keys: incomplete (time limit) – compared again in the next run"
   else
     first=0; baseline_diff keys "$TMP.k" || first=1
-    out "SSH keys (authorized_keys): $(wc -l <"$TMP.k") key(s) of $(cut -f1 "$TMP.k" | sort -u | wc -l) account(s)$( ((first)) && echo " – first run, stored as baseline")"
+    out "SSH keys (authorized_keys): $(wc -l <"$TMP.k") key(s) of $(cut -f1 "$TMP.k" | sort -u | wc -l) account(s)$(persist_first_note "$first")"
     while IFS=$'\t' read -r u k c; do
       persist_finding + "SSH key for $u: $k${c:+ ($c)}" "Access: new SSH key for $u: $k${c:+ ($c)} – added by you?"
     done <"$TMP.k.add"
@@ -1381,7 +1386,7 @@ check_persistence() {   # SSH keys, accounts, sudo, cron/autostart, suspicious p
   # --- accounts with a login shell, sudo, sudoers, ld.so.preload
   persist_access >"$TMP.a"
   first=0; baseline_diff access "$TMP.a" || first=1
-  out "Accounts with a login shell: $(grep -c '^account' "$TMP.a") | sudo group members: $(grep -c '^sudo group' "$TMP.a") | sudoers files: $(grep -c '^sudoers file' "$TMP.a")$( ((first)) && echo " – first run, stored as baseline")"
+  out "Accounts with a login shell: $(grep -c '^account' "$TMP.a") | sudo group members: $(grep -c '^sudo group' "$TMP.a") | sudoers files: $(grep -c '^sudoers file' "$TMP.a")$(persist_first_note "$first")"
   while IFS=$'\t' read -r w k v; do
     [[ $w == account && $k != root && $v == "uid 0,"* ]] && persist_finding '!' "account $k has UID 0 – full root rights under another name" "Access: account $k has UID 0 (root rights under another name) – check it"
     [[ $w == preload ]] && persist_finding '!' "/etc/ld.so.preload loads: $v" \
@@ -1419,7 +1424,7 @@ check_persistence() {   # SSH keys, accounts, sudo, cron/autostart, suspicious p
   persist_cron >"$TMP.c"
   [[ -f $STATE_DIR/baseline/cron ]] && while IFS=$'\t' read -r w k _; do before["$k"]=1; done <"$STATE_DIR/baseline/cron"
   first=0; baseline_diff cron "$TMP.c" || first=1
-  out "Cron jobs: $(grep -c '^line' "$TMP.c") entr(y/ies) | autostart files (cron.hourly…monthly, rc.local, systemd units in /etc): $(grep -c '^file' "$TMP.c")$( ((first)) && echo " – first run, stored as baseline")"
+  out "Cron jobs: $(grep -c '^line' "$TMP.c") entr(y/ies) | autostart files (cron.hourly…monthly, rc.local, systemd units in /etc): $(grep -c '^file' "$TMP.c")$(persist_first_note "$first")"
   if (( first )); then   # first run: nothing is new, but already present suspicious content is shown
     cp "$TMP.c" "$TMP.c.add"; : >"$TMP.c.del"
   fi
@@ -1482,7 +1487,7 @@ check_persistence() {   # SSH keys, accounts, sudo, cron/autostart, suspicious p
     else
       first=0; baseline_diff ports "$TMP.o" || first=1
       ports=$(sort -t$'\t' -k1,1n "$TMP.o" | awk -F'\t' '{ printf "%s%s %s", (NR > 1 ? ", " : ""), $1, $2 }')
-      out "Listening TCP ports (not loopback): ${ports:-none}$( ((first)) && echo " – first run, stored as baseline")"
+      out "Listening TCP ports (not loopback): ${ports:-none}$(persist_first_note "$first")"
       while IFS=$'\t' read -r k v; do
         persist_finding + "listening port $k ($v)" "Ports: new listening TCP port $k ($v) – started by you?"
       done <"$TMP.o.add"
@@ -2560,7 +2565,7 @@ is always reported). Processes are not stored – they are checked live in every
 | File | Content (one entry per line) | Used for |
 |---|---|---|
 | `baseline/keys` | `account key-type fingerprint comment` | the SSH keys in the `~/.ssh/authorized_keys` of all accounts. A new key raises "Access: new SSH key for …". |
-| `baseline/access` | `kind name details` | accounts with a login shell or UID 0, members of the groups `sudo`, `wheel` and `admin`, the sudoers files with a checksum, and what `/etc/ld.so.preload` loads. New or changed entries raise an alert. |
+| `baseline/access` | `kind name details` | accounts with a login shell or UID 0, members of the groups `sudo`, `wheel` and `admin`, the sudoers files with a checksum, and – only if the file exists, which it normally doesn't – what `/etc/ld.so.preload` loads. New or changed entries raise an alert. |
 | `baseline/cron` | `line where cron-line` or `file path checksum` | the cron jobs of all accounts and of the system (passwords in them masked), and checksums of the autostart files (`/etc/cron.hourly` … `monthly`, `rc.local`, systemd units in `/etc/systemd/system`). New entries are listed; suspicious ones and new entries of root or the system raise an alert. |
 | `baseline/ports` | `port process` | TCP ports listening on an address other than loopback. A new one raises "Ports: new listening TCP port …". |
 
