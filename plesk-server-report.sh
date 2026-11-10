@@ -1097,7 +1097,7 @@ check_web() {   # requests, 5xx, WordPress logins, PHP errors, attack patterns, 
         for f in $sfl; do
           if [[ -n $root && -e $root$f ]]; then
             printf '      served with 200 AND present on disk: %s\n' "$f" >>"$BODY"
-            ignored_domain "$dom" || alert "Web: $dom served the sensitive file $f (HTTP 200, file exists) – remove it or block access; assume it was downloaded"
+            ignored_domain "$dom" || alert "Web: $dom served the sensitive file $f (HTTP 200, file exists) – a request in the access log since the last run; remove the file or block access, and assume it was downloaded"
           else
             printf '      200 without such file (catch-all route?): %s\n' "$f" >>"$BODY"
           fi
@@ -1817,7 +1817,7 @@ check_domaindns() {   # still pointing here?, CAA vs. Let's Encrypt, DNSSEC, dom
 }
 
 check_exposed() {   # .env, .git, dumps, backups, config copies in document roots (with reachability test)
-  local dom root f rel code out="" n=0 found=0 nblk ex nerr exerr
+  local dom root f rel code out="" n=0 found=0 pub=0 nblk ex nerr exerr
   echo ""; echo "Exposed files in document roots (.env, .git, dumps, backups, config copies, info/admin tools):"
   while IFS=$'\t' read -r dom root; do
     [[ -d $root ]] || continue
@@ -1829,8 +1829,8 @@ check_exposed() {   # .env, .git, dumps, backups, config copies in document root
       code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 6 --resolve "$dom:443:${PUBIP:-127.0.0.1}" "https://$dom$rel$([[ -d $f ]] && echo HEAD)" 2>/dev/null)
       found=$((found + 1))
       if [[ $code == 200 ]]; then
-        out+="  $dom$rel – PUBLICLY REACHABLE (HTTP 200)"$'\n'
-        dalert "Web: $dom exposes $rel publicly (HTTP 200) – remove it from the document root or block access"
+        out+="  $dom$rel – PUBLICLY REACHABLE (HTTP 200)"$'\n'; pub=$((pub + 1))
+        dalert "Web: $dom exposes $rel publicly (HTTP 200) – remove it from the document root or block access, then check again: $(basename "$0") --only exposed"
       elif [[ $code == 403 || $code == 401 ]]; then
         nblk=$((nblk + 1)); [[ -z $ex ]] && ex="$rel"
       else
@@ -1848,6 +1848,8 @@ check_exposed() {   # .env, .git, dumps, backups, config copies in document root
   done < <(docroots)
   [[ -n $out ]] && printf '%s' "$out"
   echo "  $n document root(s) scanned, $found finding(s); only publicly reachable ones raise an alert"
+  (( pub )) && echo "  This list is from the daily check (see \"As of\") and repeats until the next one. After fixing a file, check again right away: $(basename "$0") --only exposed – or rm $STATE_DIR/daily_date to refresh the daily checks in the next run"
+  return 0
 }
 check_webshell() {   # recently changed PHP files with typical backdoor code
   local stamp="$STATE_DIR/webshell_scan" new="$STATE_DIR/webshell_scan.new" dom root out="" n=0 hits=0 f nto
