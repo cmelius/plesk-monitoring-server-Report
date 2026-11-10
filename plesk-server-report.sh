@@ -15,6 +15,9 @@
 # files (.env, .git, dumps, backups) and recently changed PHP files for webshell code.
 # Successful logins are annotated with country and network operator (local
 # GeoIP database, optional alerts for logins from unexpected countries).
+# What an attacker leaves behind is watched too: new SSH keys, accounts with a login
+# shell, sudo rights, cron jobs and autostart entries, processes started from /tmp or
+# deleted binaries, new listening ports. The script only reads – it changes and blocks nothing.
 #
 # Only log lines written since the previous run are analysed. The resulting
 # plain-text report is stored locally and (optionally) uploaded with rclone to
@@ -58,7 +61,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.8.1
+VERSION=1.9.0
 
 set -uo pipefail
 export LC_ALL=C
@@ -145,6 +148,9 @@ EXPOSED_FILES_IGNORE='/wp-content/plugins/[^/]+/(sql|schema|install)/|/include/u
 WEBSHELL_CHECK=1              # daily: recently changed PHP files containing typical backdoor code
 WEBSHELL_IGNORE=""            # regex on the full path of findings to ignore
 WEBSHELL_FIRST_DAYS=7         # first run: scan PHP files changed within this many days
+# Access & persistence (hourly): what an attacker leaves behind. Only reads, changes nothing
+PERSISTENCE_CHECK=1           # SSH keys, accounts with a login shell, sudo, cron/autostart, suspicious processes, new listening ports
+PERSISTENCE_IGNORE=""         # regex on the text of findings to ignore (e.g. a known tool running from /tmp)
 
 DNSBL_LISTS="zen.spamhaus.org bl.spamcop.net b.barracudacentral.org psbl.surriel.com"
 WEB_IGNORE_DOMAINS=""         # space-separated domains without web alerts (still listed)
@@ -165,7 +171,7 @@ CONF=/etc/plesk-server-report.conf
 
 # Check names in report order. Hourly checks analyse the log lines since the previous run,
 # daily checks run once a day and are cached in $STATE_DIR/daily.txt.
-HOURLY_CHECKS="mail webmail system fail2ban web uploads logins services backups"
+HOURLY_CHECKS="mail webmail system fail2ban web uploads logins persistence services backups"
 DAILY_CHECKS="updates certificates https serverdns mailtls domaindns exposed webshell mailauth"
 
 # =============================================================================
@@ -1211,6 +1217,271 @@ check_logins() {   # successful SSH and Plesk panel logins, alert for previously
   return 0
 }
 
+# ---------------------------------------------------------------- access & persistence
+# What an attacker leaves behind after a break-in, to come back or to use the server: an SSH
+# key, an account with a login shell, sudo rights, a cron job or autostart entry, a process
+# started from /tmp, a port listening for him. Read only – the script changes and blocks nothing.
+# Each list is compared with the previous run's ($STATE_DIR/baseline/); the first run stores
+# them silently. Stored are fingerprints, names, checksums and cron lines with passwords masked.
+
+# content that has no business in a cron job or autostart file: download piped into a shell,
+# base64 decoding, reverse shells, programs in /tmp, interpreter one-liners, known miners
+PERSIST_SUSPICIOUS='(curl|wget|fetch)[^|;]*\|[[:space:]]*(sudo[[:space:]]+)?(ba|da|z|k)?sh([[:space:]]|$)|base64[[:space:]]+(-d|--decode)|/dev/(tcp|udp)/|(^|[[:space:];&|`(=])/(tmp|var/tmp|dev/shm)/|python[0-9.]*[[:space:]]+-c[[:space:]]|(perl|ruby)[[:space:]]+-e[[:space:]]|php[0-9.]*[[:space:]]+-r[[:space:]]|(^|[[:space:];&|])nc(at)?[[:space:]].*-[ec][[:space:]]|xmrig|minerd|kdevtmpfsi|kinsing'
+persist_suspicious() {   # persist_suspicious TEXT – output redirections (> /tmp/x.log) don't count, except to /dev/tcp
+  grep -qE '/dev/(tcp|udp)/' <<<"$1" && return 0
+  sed -E 's/[0-9&]*>>?[[:space:]]*[^[:space:];|&]+//g' <<<"$1" | grep -qEi -- "$PERSIST_SUSPICIOUS"
+}
+persist_mask() {   # cron lines may hold passwords (mysqldump -pSECRET, https://user:pw@…): mask them
+  sed -E 's/(^|[[:space:]])-p[^[:space:]]+/\1-p***/g
+          s/(pass(word|wd)?|pwd|token|secret|api_?key)([=:])[^[:space:]&"'"'"']+/\1\3***/Ig
+          s/(--pass(word)?[[:space:]]+)[^[:space:]]+/\1***/Ig
+          s#(://[^/:@[:space:]]+:)[^@[:space:]]+@#\1***@#g'
+}
+# baseline_diff NAME FILE – entries of FILE (one per line) not in $STATE_DIR/baseline/NAME go to
+# FILE.add, entries gone from it to FILE.del; then FILE becomes the baseline. Returns 1 on the
+# first run (no baseline yet: nothing is reported as new).
+baseline_diff() {
+  local b="$STATE_DIR/baseline/$1" f=$2 rc=0
+  sort -u "$f" -o "$f"
+  if [[ -f $b ]]; then comm -13 "$b" "$f" >"$f.add"; comm -23 "$b" "$f" >"$f.del"
+  else : >"$f.add"; : >"$f.del"; rc=1; fi
+  if can_write_state; then
+    mkdir -p "$STATE_DIR/baseline" && cp "$f" "$b.new" && chmod 600 "$b.new" && mv "$b.new" "$b"
+  fi
+  return $rc
+}
+# persist_finding SIGN TEXT [ALERT] – a report line under the section (+ new, - gone, ~ changed,
+# ! finding) and, with ALERT, an alert; findings matching PERSISTENCE_IGNORE are left out (return 1)
+persist_finding() {
+  [[ -n $PERSISTENCE_IGNORE && $2 =~ $PERSISTENCE_IGNORE ]] && return 1
+  out "  $1 $2"
+  [[ -n ${3:-} ]] && alert "$3"
+  return 0
+}
+
+persist_keys() {   # every authorized SSH key: account TAB fingerprint TAB comment
+  local user home f
+  local -A seen=()
+  while IFS=: read -r user _ _ _ _ home _; do
+    [[ -n $home && $home != / ]] || continue
+    for f in "$home/.ssh/authorized_keys" "$home/.ssh/authorized_keys2"; do
+      [[ -f $f && -z ${seen[$f]:-} ]] || continue
+      seen[$f]=1
+      if command -v ssh-keygen >/dev/null; then   # "256 SHA256:… comment (ED25519)"; skips options and bad lines
+        T "$CMD_TIMEOUT" ssh-keygen -lf "$f" 2>/dev/null |
+          awk -v u="$user" '{ c = ""; for (i = 3; i < NF; i++) c = c (c == "" ? "" : " ") $i
+                              t = $NF; gsub(/[()]/, "", t); print u "\t" t " " $2 "\t" c }'
+      else                                         # no ssh-keygen: key type and the end of the key
+        awk -v u="$user" '!/^[[:space:]]*(#|$)/ {
+          for (i = 1; i < NF; i++) if ($i ~ /^(ssh-|ecdsa-|sk-)/) {
+            c = ""; for (j = i + 2; j <= NF; j++) c = c (c == "" ? "" : " ") $j
+            print u "\t" $i " …" substr($(i+1), length($(i+1)) - 15) "\t" c; break } }' "$f"
+      fi
+    done
+  done < <(getent passwd 2>/dev/null)
+}
+persist_access() {   # accounts with a login shell or UID 0, sudo groups, sudoers files, ld.so.preload
+  local g f
+  getent passwd 2>/dev/null | awk -F: '$3 == 0 || $7 !~ /(nologin|false|sync|shutdown|halt)$/ {
+    print "account\t" $1 "\tuid " $3 ", shell " ($7 == "" ? "/bin/sh (default)" : $7) }'
+  for g in sudo wheel admin; do
+    getent group "$g" 2>/dev/null | awk -F: -v g="$g" '{ n = split($4, m, ","); for (i = 1; i <= n; i++) if (m[i] != "") print "sudo group\t" m[i] "\tmember of " g }'
+  done
+  for f in /etc/sudoers /etc/sudoers.d/*; do
+    [[ -f $f ]] && printf 'sudoers file\t%s\tchecksum %s\n' "$f" "$(md5sum <"$f" | cut -c1-12)"
+  done
+  [[ -s /etc/ld.so.preload ]] && printf 'preload\t/etc/ld.so.preload\t%s\n' "$(grep -v '^[[:space:]]*#' /etc/ld.so.preload | xargs | cut -c1-200)"
+  return 0
+}
+persist_cron() {   # cron lines: "line TAB where TAB line"; autostart files: "file TAB path TAB checksum"
+  local f d
+  for d in /var/spool/cron/crontabs /var/spool/cron; do   # Debian/Ubuntu | RHEL-based
+    for f in "$d"/*; do
+      [[ -f $f ]] || continue
+      grep -vE '^[[:space:]]*(#|$)' "$f" 2>/dev/null | persist_mask | awk -v w="crontab of ${f##*/}" '{ print "line\t" w "\t" $0 }'
+    done
+  done
+  for f in /etc/crontab /etc/cron.d/*; do
+    [[ -f $f ]] || continue
+    grep -vE '^[[:space:]]*(#|$)' "$f" 2>/dev/null | persist_mask | awk -v w="$f" '{ print "line\t" w "\t" $0 }'
+  done
+  for f in /etc/cron.hourly/* /etc/cron.daily/* /etc/cron.weekly/* /etc/cron.monthly/* /etc/rc.local \
+           /etc/systemd/system/*.service /etc/systemd/system/*.timer; do
+    [[ -f $f && ! -L $f ]] && printf 'file\t%s\t%s\n' "$f" "$(md5sum <"$f" | cut -c1-12)"
+  done
+  return 0
+}
+persist_ports() {   # TCP ports listening on a non-loopback address: "port TAB process"
+  T "$CMD_TIMEOUT" ss -ltnp 2>/dev/null | awk '$1 == "LISTEN" {
+    a = $4; p = a; sub(/.*:/, "", p); h = a; sub(/:[^:]*$/, "", h)
+    if (h ~ /^(127\.|\[?::1\]?$|\[?::ffff:127\.)/ || h ~ /%lo$/) next
+    n = "?"; if (match($0, /users:\(\("[^"]+"/)) n = substr($0, RSTART + 9, RLENGTH - 10)
+    print p "\t" n }'
+}
+# persist_procs [FILE] – processes whose program lies in /tmp, /var/tmp, /dev/shm or a web folder,
+# exists only in memory, was deleted after start (and not replaced by an update), or that pose
+# as a kernel thread. Reads "/proc/PID TAB uid TAB program" (from FILE in tests); prints
+# "pid TAB uid TAB reason TAB program"
+# shellcheck disable=SC2120   # the argument is for tests only
+persist_procs() {
+  { if [[ -n ${1:-} ]]; then cat "$1"; else find /proc -mindepth 2 -maxdepth 2 -name exe -printf '%h\t%U\t%l\n' 2>/dev/null; fi
+    echo "--ps--"
+    ps -eo pid=,args= 2>/dev/null | awk '{ p = $1; sub(/^ *[0-9]+ /, ""); print p "\t" $0 }'
+  } | awk -F'\t' -v rf="$TMPD/procs_readable" '
+    $0 == "--ps--" { ps = 1; next }
+    !ps { pid = $1; sub(/.*\//, "", pid); if (pid !~ /^[0-9]+$/ || $3 == "") next
+          nr++; exe[pid] = $3; uid[pid] = $2; next }
+    ($1 in exe) { args[$1] = $2 }
+    END {
+      print nr + 0 > rf
+      for (p in exe) {
+        e = exe[p]; r = ""
+        if (e ~ /^\/(tmp|var\/tmp|dev\/shm)\//)            { d = e; sub(/^\//, "", d); sub(/\/.*/, "", d); if (d == "var") d = "var/tmp"; if (d == "dev") d = "dev/shm"; r = "runs from /" d }
+        else if (e ~ /^\/var\/www\//)                       r = "runs from a web folder"
+        else if (e ~ /^\/memfd:/) { if (uid[p] != 0)        r = "runs from memory only (memfd), no file on disk" }
+        else if (e ~ / \(deleted\)$/)                       r = "DELETED"
+        if (r == "" && substr(args[p], 1, 1) == "[")      { k = args[p]; sub(/\].*/, "]", k); r = "poses as a kernel thread " k }
+        if (r != "") print p "\t" uid[p] "\t" r "\t" e
+      }
+    }'
+}
+
+check_persistence() {   # SSH keys, accounts, sudo, cron/autostart, suspicious processes, listening ports
+  local first w k v c n u what nto pid uid why exe user cmd ports key
+  local -A gone=() before=() said=()
+  section "ACCESS & PERSISTENCE (SSH keys, accounts, sudo, cron, autostart, processes, ports)"
+  nto=$(timeouts_seen)
+
+  # without the account database every key and account would look removed, and new in the next run
+  if ! getent passwd root >/dev/null 2>&1; then
+    out "SSH keys and accounts: not checked (getent passwd root gives no answer)"
+  else
+  # --- SSH keys
+  persist_keys >"$TMP.k"
+  if [[ $(timeouts_seen) != "$nto" ]]; then out "SSH keys: incomplete (time limit) – compared again in the next run"
+  else
+    first=0; baseline_diff keys "$TMP.k" || first=1
+    out "SSH keys (authorized_keys): $(wc -l <"$TMP.k") key(s) of $(cut -f1 "$TMP.k" | sort -u | wc -l) account(s)$( ((first)) && echo " – first run, stored as baseline")"
+    while IFS=$'\t' read -r u k c; do
+      persist_finding + "SSH key for $u: $k${c:+ ($c)}" "Access: new SSH key for $u: $k${c:+ ($c)} – added by you?"
+    done <"$TMP.k.add"
+    while IFS=$'\t' read -r u k c; do persist_finding - "SSH key removed for $u: $k${c:+ ($c)}"; done <"$TMP.k.del"
+  fi
+
+  # --- accounts with a login shell, sudo, sudoers, ld.so.preload
+  persist_access >"$TMP.a"
+  first=0; baseline_diff access "$TMP.a" || first=1
+  out "Accounts with a login shell: $(grep -c '^account' "$TMP.a") | sudo group members: $(grep -c '^sudo group' "$TMP.a") | sudoers files: $(grep -c '^sudoers file' "$TMP.a")$( ((first)) && echo " – first run, stored as baseline")"
+  while IFS=$'\t' read -r w k v; do
+    [[ $w == account && $k != root && $v == "uid 0,"* ]] && persist_finding '!' "account $k has UID 0 – full root rights under another name" "Access: account $k has UID 0 (root rights under another name) – check it"
+    [[ $w == preload ]] && persist_finding '!' "/etc/ld.so.preload loads: $v" \
+      "$( ((first)) && echo "Access: /etc/ld.so.preload loads $v – a classic rootkit technique, check it")"
+  done <"$TMP.a"
+  while IFS=$'\t' read -r w k v; do gone["$w"$'\t'"$k"]=$v; done <"$TMP.a.del"
+  while IFS=$'\t' read -r w k v; do
+    key="$w"$'\t'"$k"
+    if [[ -n ${gone[$key]+x} ]]; then
+      persist_finding '~' "$w $k: ${gone[$key]} → $v" "Access: $w $k changed: $v – changed by you?"
+      unset 'gone[$key]'
+    else
+      case $w in
+        account)        what="new account with a login shell: $k ($v)" ;;
+        "sudo group")   what="$k is now ${v} (sudo rights)" ;;
+        "sudoers file") what="new sudoers file $k" ;;
+        preload)        what="/etc/ld.so.preload now loads $v – a classic rootkit technique" ;;
+        *)              what="$w $k $v" ;;
+      esac
+      persist_finding + "$what" "Access: $what – done by you?"
+    fi
+  done <"$TMP.a.add"
+  for key in "${!gone[@]}"; do
+    w=${key%%$'\t'*}; k=${key#*$'\t'}
+    case $w in
+      account)        persist_finding - "account $k removed or without login shell now (was: ${gone[$key]})" ;;
+      "sudo group")   persist_finding - "$k is no longer ${gone[$key]}" ;;
+      "sudoers file") persist_finding - "sudoers file removed: $k" ;;
+      *)              persist_finding - "$w $k removed" ;;
+    esac
+  done
+  fi
+
+  # --- cron and autostart
+  persist_cron >"$TMP.c"
+  [[ -f $STATE_DIR/baseline/cron ]] && while IFS=$'\t' read -r w k _; do before["$k"]=1; done <"$STATE_DIR/baseline/cron"
+  first=0; baseline_diff cron "$TMP.c" || first=1
+  out "Cron jobs: $(grep -c '^line' "$TMP.c") entr(y/ies) | autostart files (cron.hourly…monthly, rc.local, systemd units in /etc): $(grep -c '^file' "$TMP.c")$( ((first)) && echo " – first run, stored as baseline")"
+  if (( first )); then   # first run: nothing is new, but already present suspicious content is shown
+    cp "$TMP.c" "$TMP.c.add"; : >"$TMP.c.del"
+  fi
+  gone=()
+  while IFS=$'\t' read -r w k v; do [[ $w == file ]] && gone["$k"]=1; done <"$TMP.c.del"
+  while IFS=$'\t' read -r w k v; do
+    if [[ $w == line ]]; then
+      if persist_suspicious "$v"; then
+        persist_finding '!' "cron ($k): $v" "Cron: $( ((first)) && echo "entry" || echo "new entry") with suspicious content in $k: $(cut -c1-160 <<<"$v") – check it"
+      elif (( ! first )); then
+        # a new entry of root or the system (not of a customer's subscription) is rare: alert once
+        if [[ -z ${said[$k]:-} ]] && [[ $k == "crontab of root" || -z ${before[$k]:-} && $k == /etc/* ]]; then
+          said[$k]=1
+          persist_finding + "cron ($k): $v" "Cron: new entry in $k: $(cut -c1-160 <<<"$v") – added by you or a package update?"
+        else persist_finding + "cron ($k): $v"; fi
+      fi
+    else
+      c=$(grep -vE '^[[:space:]]*(#|$)' "$k" 2>/dev/null | head -c 20000)
+      if persist_suspicious "$c"; then
+        persist_finding '!' "autostart file $k contains suspicious commands" "Cron: $( ((first)) && echo "autostart file" || echo "new or changed autostart file") $k contains suspicious commands – check it"
+      elif (( ! first )); then
+        if [[ -n ${gone[$k]:-} ]]; then persist_finding '~' "autostart file changed: $k"
+        else persist_finding + "new autostart file: $k" "Cron: new autostart file $k – added by you or a package update?"; fi
+      fi
+      unset 'gone[$k]'
+    fi
+  done <"$TMP.c.add"
+  while IFS=$'\t' read -r w k v; do
+    if [[ $w == line ]]; then persist_finding - "cron ($k): $v"
+    elif [[ -n ${gone[$k]:-} ]]; then persist_finding - "autostart file removed: $k"; fi
+  done <"$TMP.c.del"
+
+  # --- processes (live state, no baseline: reported in every run while they run)
+  persist_procs >"$TMP.p"
+  n=$(cat "$TMPD/procs_readable" 2>/dev/null || echo 0)
+  if (( n == 0 )); then
+    out "Processes: program paths not readable (/proc/<pid>/exe – container without that right?) – not checked"
+  else
+    c=0
+    while IFS=$'\t' read -r pid uid why exe; do
+      if [[ $why == DELETED ]]; then
+        [[ -e ${exe% (deleted)} ]] && continue        # replaced by an update, only a restart is pending
+        why="program deleted after start"
+      fi
+      user=$(getent passwd "$uid" 2>/dev/null | cut -d: -f1); user=${user:-uid $uid}
+      cmd=$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | cut -c1-120 | sed 's/ *$//')
+      persist_finding '!' "process $pid of $user $why: $exe${cmd:+ – $cmd}" "Process: PID $pid of $user $why: $exe – crypto miner or backdoor? Check it" &&
+        c=$((c + 1))
+    done <"$TMP.p"
+    out "Processes: $n checked, $c suspicious (program in /tmp, /dev/shm or a web folder, deleted, memory only, fake kernel thread)"
+  fi
+
+  # --- listening ports
+  if ! command -v ss >/dev/null; then
+    out "Listening ports: not checked (no ss command, package iproute2)"
+  else
+    nto=$(timeouts_seen)
+    persist_ports >"$TMP.o"
+    if [[ $(timeouts_seen) != "$nto" || ! -s $TMP.o ]]; then out "Listening ports: could not be read (ss gave no answer) – compared again in the next run"
+    else
+      first=0; baseline_diff ports "$TMP.o" || first=1
+      ports=$(sort -t$'\t' -k1,1n "$TMP.o" | awk -F'\t' '{ printf "%s%s %s", (NR > 1 ? ", " : ""), $1, $2 }')
+      out "Listening TCP ports (not loopback): ${ports:-none}$( ((first)) && echo " – first run, stored as baseline")"
+      while IFS=$'\t' read -r k v; do
+        persist_finding + "listening port $k ($v)" "Ports: new listening TCP port $k ($v) – started by you?"
+      done <"$TMP.o.add"
+      while IFS=$'\t' read -r k v; do persist_finding - "listening port $k ($v) closed"; done <"$TMP.o.del"
+    fi
+  fi
+  return 0
+}
+
 check_services() {   # failed systemd units, OOM killer
   local FAILED OOM
   section "SERVICES"
@@ -1681,6 +1952,7 @@ check_enabled() {
     webshell)  (( WEBSHELL_CHECK )) ;;
     mailauth)  (( MAILAUTH_CHECK )) ;;
     https)     (( HTTPS_CHECK )) ;;
+    persistence) (( PERSISTENCE_CHECK )) ;;
     *) return 0 ;;
   esac
 }
@@ -1853,6 +2125,10 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       }
       next
     }
+    sec ~ /ACCESS & PERSISTENCE/ {   # changes (+ - ~) and findings (!), counted like the logins
+      if ($0 ~ /^  [-+~!] /) { l = substr($0, 3); if (!(l in pc)) { pc[l] = 0; pf[l] = tm; po[++npo] = l }; pc[l]++; pl[l] = tm }
+      next
+    }
     sec ~ /SERVICES/ {
       if (($0 ~ /^Failed units: / && $0 !~ /: none$/) || ($0 ~ /^OOM killer: / && $0 !~ /: none$/)) print "SVC\t" tm "\t" t($0)
       next
@@ -1888,6 +2164,7 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       for (d in mh) print "MODSEC\t" mh[d] "\t" mb[d] "\t" d
       print "UPTOT\t" up
       for (i = 1; i <= nlo; i++) { l = lo[i]; print "LOGIN\t" lc[l] "\t" lf[l] "\t" ll[l] "\t" t(l) }
+      for (i = 1; i <= npo; i++) { l = po[i]; print "PERS\t" pc[l] "\t" pf[l] "\t" pl[l] "\t" t(l) }
       print "NRUN\t" nrun
     }' "$@"
 }
@@ -1996,6 +2273,10 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
 
     echo ""; echo "== SUCCESSFUL LOGINS (SSH, Plesk panel; count, first – last) =="
     rec LOGIN | awk -F'\t' '{printf "  %4d×  %s – %s  %s\n", $1, $2, $3, $4}'
+
+    echo ""; echo "== ACCESS & PERSISTENCE (changes + − ~ and findings !; count, first – last) =="
+    if [[ -n $(rec PERS) ]]; then rec PERS | awk -F'\t' '{printf "  %4d×  %s – %s  %s\n", $1, $2, $3, $4}'
+    else echo "  no change, nothing suspicious"; fi
 
     echo ""; echo "Newest report: $(basename "$newest")"
   } >"$outf"
@@ -2259,6 +2540,20 @@ Timestamps are Unix time (seconds since 1970, UTC): `date -d @1793684400`.
 | `known_mail_ips` | `IP mailbox last-seen` | client IPs of successful IMAP/POP3 and SMTP logins, kept for `KNOWN_MAIL_IP_DAYS`. When fail2ban bans one of them, the report raises "fail2ban: jail … bans … which had successful logins before". |
 | `known_imap_countries` | `mailbox country last-seen` | countries outside `ALLOWED_COUNTRIES` a mailbox has fetched mail from. The alert "logged in via IMAP/POP3 from a new country" comes once per mailbox and country; an entry not seen for `IMAP_COUNTRY_KEEP_DAYS` is dropped, so the next trip alerts again. |
 
+## Baseline for the access & persistence check (`baseline/`)
+
+Each run compares the current state with these lists, reports what is new, changed
+or gone, and then replaces them. Delete the folder or a file and the next run stores
+the current state silently as the new baseline (except suspicious cron content, which
+is always reported). Processes are not stored – they are checked live in every run.
+
+| File | Content (one entry per line) | Used for |
+|---|---|---|
+| `baseline/keys` | `account key-type fingerprint comment` | the SSH keys in the `~/.ssh/authorized_keys` of all accounts. A new key raises "Access: new SSH key for …". |
+| `baseline/access` | `kind name details` | accounts with a login shell or UID 0, members of the groups `sudo`, `wheel` and `admin`, the sudoers files with a checksum, and what `/etc/ld.so.preload` loads. New or changed entries raise an alert. |
+| `baseline/cron` | `line where cron-line` or `file path checksum` | the cron jobs of all accounts and of the system (passwords in them masked), and checksums of the autostart files (`/etc/cron.hourly` … `monthly`, `rc.local`, systemd units in `/etc/systemd/system`). New entries are listed; suspicious ones and new entries of root or the system raise an alert. |
+| `baseline/ports` | `port process` | TCP ports listening on an address other than loopback. A new one raises "Ports: new listening TCP port …". |
+
 ## Pseudonyms (only with `MASK_MAILBOXES=1`)
 
 | File | Content | Used for |
@@ -2341,6 +2636,15 @@ show_state() {
     while read -r who cc t; do printf '  %-40s %-3s %s\n' "$who" "$cc" "$(d "$t")"; done <"$f"
   else echo "  (none)"; fi
   echo ""
+  if [[ -d $STATE_DIR/baseline ]]; then
+    echo "Baseline of the access & persistence check ($STATE_DIR/baseline):"
+    for f in keys access cron ports; do
+      [[ -f $STATE_DIR/baseline/$f ]] && printf '  %-7s %4d entries, as of %s\n' "$f" "$(wc -l <"$STATE_DIR/baseline/$f")" "$(date -r "$STATE_DIR/baseline/$f" '+%Y-%m-%d %H:%M')"
+    done
+    [[ -s $STATE_DIR/baseline/keys ]] && { echo "  SSH keys:"; awk -F'\t' '{ printf "    %-16s %s%s\n", $1, $2, ($3 == "" ? "" : "  " $3) }' "$STATE_DIR/baseline/keys"; }
+    [[ -s $STATE_DIR/baseline/ports ]] && echo "  Listening TCP ports: $(sort -n "$STATE_DIR/baseline/ports" | awk -F'\t' '{ printf "%s%s %s", (NR > 1 ? ", " : ""), $1, $2 }')"
+    echo ""
+  fi
   f=$STATE_DIR/mailbox_pseudonyms
   [[ -s $f ]] && { echo "Mailbox pseudonyms for MASK_MAILBOXES: $(wc -l <"$f") ($f, decode with --decode)"; echo ""; }
   echo "Log positions – bytes read, inode, log ($STATE_DIR/offsets):"

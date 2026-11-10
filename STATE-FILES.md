@@ -25,6 +25,20 @@ Timestamps are Unix time (seconds since 1970, UTC): `date -d @1793684400`.
 | `known_mail_ips` | `IP mailbox last-seen` | client IPs of successful IMAP/POP3 and SMTP logins, kept for `KNOWN_MAIL_IP_DAYS`. When fail2ban bans one of them, the report raises "fail2ban: jail … bans … which had successful logins before". |
 | `known_imap_countries` | `mailbox country last-seen` | countries outside `ALLOWED_COUNTRIES` a mailbox has fetched mail from. The alert "logged in via IMAP/POP3 from a new country" comes once per mailbox and country; an entry not seen for `IMAP_COUNTRY_KEEP_DAYS` is dropped, so the next trip alerts again. |
 
+## Baseline for the access & persistence check (`baseline/`)
+
+Each run compares the current state with these lists, reports what is new, changed
+or gone, and then replaces them. Delete the folder or a file and the next run stores
+the current state silently as the new baseline (except suspicious cron content, which
+is always reported). Processes are not stored – they are checked live in every run.
+
+| File | Content (one entry per line) | Used for |
+|---|---|---|
+| `baseline/keys` | `account key-type fingerprint comment` | the SSH keys in the `~/.ssh/authorized_keys` of all accounts. A new key raises "Access: new SSH key for …". |
+| `baseline/access` | `kind name details` | accounts with a login shell or UID 0, members of the groups `sudo`, `wheel` and `admin`, the sudoers files with a checksum, and what `/etc/ld.so.preload` loads. New or changed entries raise an alert. |
+| `baseline/cron` | `line where cron-line` or `file path checksum` | the cron jobs of all accounts and of the system (passwords in them masked), and checksums of the autostart files (`/etc/cron.hourly` … `monthly`, `rc.local`, systemd units in `/etc/systemd/system`). New entries are listed; suspicious ones and new entries of root or the system raise an alert. |
+| `baseline/ports` | `port process` | TCP ports listening on an address other than loopback. A new one raises "Ports: new listening TCP port …". |
+
 ## Pseudonyms (only with `MASK_MAILBOXES=1`)
 
 | File | Content | Used for |

