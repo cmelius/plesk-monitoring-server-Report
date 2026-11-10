@@ -49,6 +49,10 @@ On the author's production server (Plesk, about 40 customer domains), the first 
 - **Domains that no longer belong on the server:** websites moved to other hosts, parked domains without DNS. These were candidates for cleanup.
 - **A targeted login attempt** on the operator's own mailboxes from an unknown IP, among the usual brute-force noise.
 - **A distributed WordPress brute-force attack**, which led to the detailed login-attack section: distinct IPs, wp-login vs. xmlrpc, and successful logins after failures.
+- **No fail2ban protection for mailboxes.** Plesk ships a jail for Courier IMAP/POP3 but leaves it switched off, so password guessing on mailboxes was never banned. Switching it on had a side effect the report caught right away: three tablets in a customer's shop had been trying an outdated mail password for one and a half years – unnoticed while nothing was banned, now about to get the shop's whole connection blocked. That led to the alert for banned IPs that had logged in successfully before.
+- **A spam filter that skipped large mails.** SpamAssassin ignores every mail above its size limit – 256 KB by default in Plesk, exactly the size of spam with image attachments. The report counted the unscanned mails; the limit is now 3 MB.
+- **Websites without HSTS or http→https redirect**, found by the daily HTTPS check and fixed – all 40 domains now redirect and send HSTS.
+- **SSH keys nobody had looked at.** The access & persistence check listed four keys, one of them for root without a name. It turned out to be the author's own, from 2015 – but until the report listed every key, nobody had checked. Another one had been created by Plesk's SSH terminal for a customer subscription.
 
 Just as useful: the reports confirmed what is *fine*. Reverse DNS, HELO name and mail server certificates were correct, backups ran, and no mailbox was sending spam.
 
