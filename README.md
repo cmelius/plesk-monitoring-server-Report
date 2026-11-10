@@ -857,7 +857,10 @@ To update, download the script again (your settings in `/etc/plesk-server-report
 curl -fsSL -o /usr/local/sbin/plesk-server-report.sh \
   https://github.com/cmelius/plesk-monitoring-server-Report/releases/latest/download/plesk-server-report.sh
 /usr/local/sbin/plesk-server-report.sh --version
+/usr/local/sbin/plesk-server-report.sh --only services    # quick test run with your configuration
 ```
+
+The test run matters: if something keeps the script from running – since 1.9.0 for example a configuration file that another user may write – you see it right away, not only when the reports stop coming. `--version` doesn't load the configuration and won't tell you.
 
 (or the `main` URL from [Installation](#installation) to get changes before they are released)
 

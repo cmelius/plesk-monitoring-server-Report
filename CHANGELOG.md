@@ -4,6 +4,8 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 
 ## [1.9.0] – not yet released (on `main`)
 
+> **After updating, run the script once by hand:** `plesk-server-report.sh --only services`. From this version on, it refuses to run if `/etc/plesk-server-report.conf` belongs to another user or group/others may write it (see *Changed*). From cron you would only notice that in root's mail, the system log, or by reports that stop coming. A manual run shows the reason and the fix right away. `--version` doesn't help here: it doesn't load the configuration.
+
 ### Added
 - **Access & persistence check** (hourly, new section `ACCESS & PERSISTENCE`, `PERSISTENCE_CHECK`, `PERSISTENCE_IGNORE`): what an attacker leaves behind to come back or to use the server. The script compares every run with the previous one and lists each change once:
   - **SSH keys** in the `authorized_keys` of every account (with fingerprint and comment), **accounts** with a login shell or UID 0, members of `sudo`/`wheel`/`admin`, **sudoers** files, `/etc/ld.so.preload` (normally absent; rootkits use it) – alert for anything new or changed; a key whose comment changed (same fingerprint) is listed without alert.
