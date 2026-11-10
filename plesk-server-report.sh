@@ -1357,12 +1357,14 @@ persist_cron() {   # cron lines: "line TAB where TAB line"; autostart files: "fi
   done
   return 0
 }
+# One line per port. The process name is information only: several processes share a socket
+# (Postfix: master and smtpd), and ss names whichever comes first – it changes from run to run.
 persist_ports() {   # TCP ports listening on a non-loopback address: "port TAB process"
   T "$CMD_TIMEOUT" ss -ltnp 2>/dev/null | awk '$1 == "LISTEN" {
     a = $4; p = a; sub(/.*:/, "", p); h = a; sub(/:[^:]*$/, "", h)
     if (h ~ /^(127\.|\[?::1\]?$|\[?::ffff:127\.)/ || h ~ /%lo$/) next
     n = "?"; if (match($0, /users:\(\("[^"]+"/)) n = substr($0, RSTART + 9, RLENGTH - 10)
-    print p "\t" n }'
+    if (!(p in seen)) { seen[p] = 1; print p "\t" n } }'
 }
 # persist_procs [FILE] – processes whose program lies in /tmp, /var/tmp, /dev/shm or a web folder,
 # exists only in memory, was deleted after start (and not replaced by an update), or that pose
@@ -1525,13 +1527,23 @@ check_persistence() {   # SSH keys, accounts, sudo, cron/autostart, suspicious p
     persist_ports >"$TMP.o"
     if [[ $(timeouts_seen) != "$nto" || ! -s $TMP.o ]]; then out "Listening ports: could not be read (ss gave no answer) – compared again in the next run"
     else
-      first=0; baseline_diff ports "$TMP.o" || first=1
+      # compared by port number only – the process name of a port is not stable (see persist_ports)
+      local -A oldp=()
+      first=1
+      if [[ -f $STATE_DIR/baseline/ports ]]; then
+        first=0
+        while IFS=$'\t' read -r k v; do [[ -n $k ]] && oldp[$k]=${v:-?}; done <"$STATE_DIR/baseline/ports"
+      fi
+      baseline_diff ports "$TMP.o"
       ports=$(sort -t$'\t' -k1,1n "$TMP.o" | awk -F'\t' '{ printf "%s%s %s", (NR > 1 ? ", " : ""), $1, $2 }')
       out "Listening TCP ports (not loopback): ${ports:-none}$(persist_first_note "$first")"
       while IFS=$'\t' read -r k v; do
-        persist_finding + "listening port $k ($v)" "Ports: new listening TCP port $k ($v) – started by you?"
-      done <"$TMP.o.add"
-      while IFS=$'\t' read -r k v; do persist_finding - "listening port $k ($v) closed"; done <"$TMP.o.del"
+        if (( ! first )) && [[ -z ${oldp[$k]+x} ]]; then
+          persist_finding + "listening port $k ($v)" "Ports: new listening TCP port $k ($v) – started by you?"
+        fi
+        unset 'oldp[$k]'
+      done <"$TMP.o"
+      for k in "${!oldp[@]}"; do persist_finding - "listening port $k (${oldp[$k]}) closed"; done
     fi
   fi
   return 0
@@ -2644,7 +2656,7 @@ is always reported). Processes are not stored – they are checked live in every
 | `baseline/keys` | `account key-type fingerprint comment` | the SSH keys in the `~/.ssh/authorized_keys` of all accounts. A new key raises "Access: new SSH key for …". |
 | `baseline/access` | `kind name details` | accounts with a login shell or UID 0, members of the groups `sudo`, `wheel` and `admin`, the sudoers files with a checksum, and – only if the file exists, which it normally doesn't – what `/etc/ld.so.preload` loads. New or changed entries raise an alert. |
 | `baseline/cron` | `line where cron-line` or `file path checksum` | the cron jobs of all accounts and of the system (passwords in them masked), and checksums of the autostart files (`/etc/cron.hourly` … `monthly`, `rc.local`, systemd units in `/etc/systemd/system`). New entries are listed; suspicious ones and new entries of root or the system raise an alert. |
-| `baseline/ports` | `port process` | TCP ports listening on an address other than loopback. A new one raises "Ports: new listening TCP port …". |
+| `baseline/ports` | `port process` | TCP ports listening on an address other than loopback. A new port number raises "Ports: new listening TCP port …"; the process name is information only (processes sharing a socket take turns, e.g. Postfix `master` and `smtpd`). |
 
 ## Pseudonyms (only with `MASK_MAILBOXES=1`)
 

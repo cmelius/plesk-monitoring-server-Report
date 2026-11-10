@@ -37,7 +37,7 @@ is always reported). Processes are not stored – they are checked live in every
 | `baseline/keys` | `account key-type fingerprint comment` | the SSH keys in the `~/.ssh/authorized_keys` of all accounts. A new key raises "Access: new SSH key for …". |
 | `baseline/access` | `kind name details` | accounts with a login shell or UID 0, members of the groups `sudo`, `wheel` and `admin`, the sudoers files with a checksum, and – only if the file exists, which it normally doesn't – what `/etc/ld.so.preload` loads. New or changed entries raise an alert. |
 | `baseline/cron` | `line where cron-line` or `file path checksum` | the cron jobs of all accounts and of the system (passwords in them masked), and checksums of the autostart files (`/etc/cron.hourly` … `monthly`, `rc.local`, systemd units in `/etc/systemd/system`). New entries are listed; suspicious ones and new entries of root or the system raise an alert. |
-| `baseline/ports` | `port process` | TCP ports listening on an address other than loopback. A new one raises "Ports: new listening TCP port …". |
+| `baseline/ports` | `port process` | TCP ports listening on an address other than loopback. A new port number raises "Ports: new listening TCP port …"; the process name is information only (processes sharing a socket take turns, e.g. Postfix `master` and `smtpd`). |
 
 ## Pseudonyms (only with `MASK_MAILBOXES=1`)
 
