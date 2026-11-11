@@ -1792,10 +1792,10 @@ check_serverdns() {   # PTR of the server IP, HELO name, IPv6 reverse DNS
     ptr=$(DIGQ -x "$PUBIP6" | head -1); ptr=${ptr%.}
     if [[ -z $ptr ]]; then
       echo "  $PUBIP6 (IPv6): NO PTR record"
-      dalert "Mail: server IPv6 $PUBIP6 has no reverse DNS – Gmail rejects IPv6 mail without PTR; set it or disable IPv6 in Postfix (inet_protocols = ipv4)"
+      dalert "Mail: server IPv6 $PUBIP6 has no reverse DNS – Gmail rejects IPv6 mail without it; set the PTR or send over IPv4 only (postconf -e 'inet_protocols = ipv4', restart Postfix; Plesk may reset it after 'plesk repair mail' or updates)"
     elif host_has_ip "$ptr" "$PUBIP6"; then echo "  $PUBIP6 → $ptr: ok (forward-confirmed)"
     else echo "  $PUBIP6 → $ptr: does NOT resolve back (no matching AAAA)"
-      dalert "Mail: IPv6 reverse DNS $PUBIP6 → $ptr has no matching AAAA record"
+      dalert "Mail: IPv6 reverse DNS $PUBIP6 → $ptr has no matching AAAA record – Gmail rejects IPv6 mail without it; add the AAAA record (and the address to SPF) or send over IPv4 only (postconf -e 'inet_protocols = ipv4', restart Postfix; Plesk may reset it after 'plesk repair mail' or updates)"
     fi
   else
     echo "  IPv6: not used for mail (CHECK_IPV6=$CHECK_IPV6)"

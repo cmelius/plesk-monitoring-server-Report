@@ -72,6 +72,7 @@ On the author's production server (Plesk, about 40 customer domains), the first 
 - **A spam filter that skipped large mails.** SpamAssassin ignores every mail above its size limit – 256 KB by default in Plesk, exactly the size of spam with image attachments. The report counted the unscanned mails; the limit is now 3 MB.
 - **Websites without HSTS or http→https redirect**, found by the daily HTTPS check and fixed – all 40 domains now redirect and send HSTS.
 - **SSH keys nobody had looked at.** The access & persistence check listed four keys, one of them for root without a name. It turned out to be the author's own, from 2015 – but until the report listed every key, nobody had checked. Another one had been created by Plesk's SSH terminal for a customer subscription.
+- **IPv6 switched on overnight by the hosting provider.** Without any notice, the server suddenly had a global IPv6 address. Postfix was set to `inet_protocols = all` (the default), so it would have started sending mail over IPv6 – from an address whose reverse DNS did not resolve back, which Gmail rejects. The first report after the change flagged it, before a single mail had gone out over IPv6. Postfix now sends over IPv4 only.
 
 Just as useful: the reports confirmed what is *fine*. Reverse DNS, HELO name and mail server certificates were correct, backups ran, and no mailbox was sending spam.
 
@@ -843,6 +844,8 @@ Other applications popular on Plesk (Joomla, Drupal, TYPO3, PrestaShop, Shopware
 - the upload folders and any legitimate PHP files inside them
 
 The template includes a one-line command that anonymizes the log lines (IPs → `203.0.113.x`, domain → `example.com`). **Please never post real IPs, domains or user names. Issues are public.**
+
+**An idea: plugins.** Checks for specific software (other CMS, other mail servers, setups without Plesk) could one day become plugins – small files with a fixed contract, run in a sandbox where they can only read. This is only an idea for now, not a plan with a date: whether it is worth the work depends on how many people would use it. If you would, say so in an issue. Until then, the issue template above is the way to get support for your software added.
 
 ---
 

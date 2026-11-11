@@ -2,7 +2,7 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [1.9.0] – not yet released (on `main`)
+## [1.9.0] – 2026-11-11
 
 > **After updating, run the script once by hand:** `plesk-server-report.sh --only services`. From this version on, it refuses to run if `/etc/plesk-server-report.conf` belongs to another user or group/others may write it (see *Changed*). From cron you would only notice that in root's mail, the system log, or by reports that stop coming. A manual run shows the reason and the fix right away. `--version` doesn't help here: it doesn't load the configuration.
 
@@ -17,7 +17,7 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 
 - README: **Check it before you run it as root** – a prompt to let an AI review the script before the first run, and what it will point out by design (root, the configuration file loaded as code, network connections, what it deletes). The configuration file should be writable by root only (`chmod 600`).
 - **The script refuses to run with an unsafe configuration file:** if `/etc/plesk-server-report.conf` belongs to another user or group/others may write it, the script stops before loading it – it is run as root code, so a warning afterwards would come too late. The reason and the fix go to stderr (cron mails it to root) and the system log. `--version`, `--help` and `--state-readme` still work.
-- README, *What it found so far*: the switched-off fail2ban jail for Courier and the customer devices it revealed, the spam filter size limit, missing HSTS, unchecked SSH keys.
+- README, *What it found so far*: the switched-off fail2ban jail for Courier and the customer devices it revealed, the spam filter size limit, missing HSTS, unchecked SSH keys, and IPv6 switched on overnight by the hosting provider.
 
 - **Inodes:** the filesystem list shows space and inodes used; running out of inodes (too many small files) raises an alert like a full disk (`WARN_DISK_PCT`).
 - **A failed upload raises an alert.** Until now it was only in the system log, and the report that could have said so was not uploaded either. The script remembers the first failure and rclone's message (state file `upload_failed`); every following report alerts – locally, by mail, and in the upload once it works again. A note says so when `REMOTE` is set but rclone is not installed.
@@ -33,7 +33,9 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 - **Exposed files: how to check again after a fix.** The daily list of publicly reachable files and its alert now say that the result is from the daily check and how to recheck right away (`--only exposed`, or delete `daily_date`). The hourly alert for a sensitive file served with 200 says that it is a request from the access log – a past download, not the current state. (Thanks to the first GitHub issue.)
 - **Every file the script creates is readable by root only** (`umask 077`). The state directory was already mode 700; now the files in it are 600 as well.
 - **Size limits for the DB-IP download:** at most 200 MB compressed and 500 MB unpacked, so that a broken or tampered download can't fill the disk. The real databases are far smaller.
+- **The IPv6 reverse DNS alerts say what to do:** add the PTR or AAAA record (and the address to SPF), or send over IPv4 only (`inet_protocols = ipv4`) – and that Plesk may reset that setting after `plesk repair mail` or updates. This happens when the hosting provider switches IPv6 on: Postfix uses it by default.
 - README, *Notes and limitations*: FTP logins and uploads are not checked.
+- README, *Using another CMS?*: plugins for other software as an idea, depending on interest.
 - README, *Check it before you run it as root*: check the lines an AI quotes with `grep` before believing a finding.
 - **Daily checks run again right after an update.** Until now the daily checks of the old version were shown until the next night – including its version line (`Script version: … newer than the latest release …`) – and checks new in the update were missing. The script now remembers which version ran the daily checks and repeats them in the first run of a new version.
 
