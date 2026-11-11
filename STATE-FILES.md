@@ -22,7 +22,7 @@ Timestamps are Unix time (seconds since 1970, UTC): `date -d @1793684400`.
 | File | Content (one entry per line) | Used for |
 |---|---|---|
 | `known_login_ips` | `IP last-seen` | SSH and Plesk panel logins: an IP not in this list raises "login … from previously unknown IP". The first run fills it without alerts. An IP not seen for `KNOWN_LOGIN_IP_DAYS` is dropped. |
-| `known_mail_ips` | `IP mailbox last-seen` | client IPs of successful IMAP/POP3 and SMTP logins, kept for `KNOWN_MAIL_IP_DAYS`. When fail2ban bans one of them, the report raises "fail2ban: jail … bans … which had successful logins before". |
+| `known_mail_ips` | `IP mailbox last-seen` | client IPs of successful IMAP/POP3 and SMTP logins, kept for `KNOWN_MAIL_IP_DAYS`. Failed logins from one of them raise "… failed logins of … – a device with an outdated password?" (`WARN_OLD_PASSWORD`); when fail2ban bans one of them, the report raises "fail2ban: jail … bans … which had successful logins before". |
 | `known_imap_countries` | `mailbox country last-seen` | countries outside `ALLOWED_COUNTRIES` a mailbox has fetched mail from. The alert "logged in via IMAP/POP3 from a new country" comes once per mailbox and country; an entry not seen for `IMAP_COUNTRY_KEEP_DAYS` is dropped, so the next trip alerts again. |
 
 ## Baseline for the access & persistence check (`baseline/`)
@@ -68,7 +68,7 @@ is always reported). Processes are not stored – they are checked live in every
 
 | File | Content |
 |---|---|
-| `daily_date` | the day (YYYY-MM-DD) and the script version of the last daily checks – they run in the first run of a new day, and right after an update to another version. Delete it to run them again in the next run. |
+| `daily_date` | the day (YYYY-MM-DD), the script version and a checksum of the script and its configuration file of the last daily checks – they run in the first run of a new day, and right after the script or the configuration file changed. Delete it to run them again in the next run. |
 | `daily.txt` | their output, repeated in every report of that day under DAILY CHECKS. |
 | `daily_alerts.txt` | their alerts, repeated in every report of that day. |
 

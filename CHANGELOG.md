@@ -2,6 +2,22 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
+## [1.10.0] – not yet released (on `main`)
+
+### Added
+- **Devices with an outdated mail password – before fail2ban bans them.** Failed logins of one mailbox from an IP that has logged in successfully before (the same mailbox, or another one from the same office connection) raise an alert from `WARN_OLD_PASSWORD` failures in a run (new setting, default 3, `0` = off). Typically a phone or tablet after a password change, which retries until fail2ban bans the whole connection. Until now the report only noticed after the ban.
+- **Login names that don't exist** are marked in "Most attacked mailboxes", with their total (Plesk: `authpsa`/`plesk_saslauthd` "No such user", Dovecot "unknown user"). A device still set up for a deleted mailbox is named as such.
+- **Refused blocklist lookups of the spam filter:** SpamAssassin results with `URIBL_BLOCKED` and similar rules (`…_BLOCKED…`) are counted, with an alert and the fix. They mean that the DNS resolver – usually the hosting provider's, or a public one – is over the blocklists' free limit, so links in spam are not checked.
+- **Plesk's own log** (`PLESK_ERROR_LOG`, new setting, default `/var/log/plesk/panel.log`; new hourly section `PLESK PANEL LOG`, check name `panel`): failed panel logins with login name and top IPs, and **failed automatic certificate renewals** with the reason from Let's Encrypt (DNS pointing elsewhere, domain gone, challenge URL blocked) – an alert per domain, weeks before the certificate expires. The section replaces the bare count of failed panel logins from the access log.
+- **`.htaccess`, `.user.ini` and `php.ini`** in the document roots are part of the daily scan for suspicious code: a file loaded before every PHP request (`auto_prepend_file`/`auto_append_file` – Wordfence, NinjaFirewall and Sucuri excepted), PHP executed for image or text files, and the signature of a widespread WordPress malware campaign that blocks every PHP file except its own.
+- **Mail logins from datacenters inside `ALLOWED_COUNTRIES`** are listed for information (no alert): mail apps fetching through their servers, VPNs – or a password used from a rented server.
+- **Missing DMARC record** is listed as a recommendation in the mail authentication check (no alert).
+- README, *What it found so far*: the spam filter that checked no links.
+
+### Changed
+- **The daily checks run again after any change of the script or the configuration file**, not only after a new version number. Until now an update from `main` with the same version, or a changed setting, showed the old daily results until the next night. `daily_date` now holds a checksum of both.
+- README: the example prompt for the AI review mentions outdated passwords, failed certificate renewals and refused blocklist lookups – if you use the prompt, update your copy.
+
 ## [1.9.0] – 2026-11-11
 
 > **After updating, run the script once by hand:** `plesk-server-report.sh --only services`. From this version on, it refuses to run if `/etc/plesk-server-report.conf` belongs to another user or group/others may write it (see *Changed*). From cron you would only notice that in root's mail, the system log, or by reports that stop coming. A manual run shows the reason and the fix right away. `--version` doesn't help here: it doesn't load the configuration.

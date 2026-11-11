@@ -12,7 +12,10 @@
 # connections come from localhost and are invisible in the mail log).
 # Web logs are also scanned for attack patterns, probes for sensitive files, traffic
 # peaks and ModSecurity hits; once a day the document roots are searched for exposed
-# files (.env, .git, dumps, backups) and recently changed PHP files for webshell code.
+# files (.env, .git, dumps, backups) and recently changed PHP files for webshell code,
+# .htaccess/.user.ini for settings that run attacker code. Plesk's own log adds failed
+# panel logins and failed certificate renewals; devices with an outdated mail password
+# are reported before fail2ban bans their connection.
 # Successful logins are annotated with country and network operator (local
 # GeoIP database, optional alerts for logins from unexpected countries).
 # What an attacker leaves behind is watched too: new SSH keys, accounts with a login
@@ -61,7 +64,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.9.0
+VERSION=1.10.0
 
 set -uo pipefail
 export LC_ALL=C
@@ -93,6 +96,7 @@ KNOWN_LOGIN_IP_DAYS=90        # forget an SSH/Plesk login IP after x days withou
 MAX_LOG_MB=200                # read at most x MB of new lines per log file and run, the newest part (0 = no limit)
 VHOST_LOGS=/var/www/vhosts/system        # Plesk per-domain log directories
 PLESK_PANEL_LOG=/var/log/plesk/httpsd_access_log   # access log of the Plesk panel (port 8443) – panel logins
+PLESK_ERROR_LOG=/var/log/plesk/panel.log           # Plesk's own log – failed panel logins, failed certificate renewals
 ROUNDCUBE_LOG_DIR=""          # default: /var/log/plesk-roundcube (or /usr/share/psa-roundcube/logs)
 
 # Alert thresholds – per run (with an hourly cron job: per hour)
@@ -106,6 +110,7 @@ WATCH_RECIPIENT_DOMAINS=""    # space-separated recipient domains whose deliveri
 WARN_BLOCKLIST=1              # remote rejections mentioning a blocklist, reputation, spam or rate limiting
 WARN_QUEUE=200                # messages in the Postfix queue
 WARN_AUTH_FAIL=300            # failed mail logins (SMTP + IMAP/POP3)
+WARN_OLD_PASSWORD=3           # failed logins of one mailbox from an IP with earlier successful mail logins (outdated password on a device?); 0 = off
 WARN_LOAD_FACTOR=1.5          # 5-min load > CPU cores × factor
 WARN_CPU_USER_PCT=80          # %CPU of a single system user (snapshot)
 WARN_MEM_AVAIL_PCT=10         # available RAM below x %
@@ -172,7 +177,7 @@ CONF=/etc/plesk-server-report.conf
 
 # Check names in report order. Hourly checks analyse the log lines since the previous run,
 # daily checks run once a day and are cached in $STATE_DIR/daily.txt.
-HOURLY_CHECKS="mail webmail system fail2ban web uploads logins persistence services backups"
+HOURLY_CHECKS="mail webmail system fail2ban web uploads logins panel persistence services backups"
 DAILY_CHECKS="updates certificates https serverdns mailtls domaindns exposed webshell mailauth"
 
 # =============================================================================
@@ -475,7 +480,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   fi
   out "Source: $MAILLOG, $(wc -l <"$TMP") new lines"
 
-  MAILSTATS=$(awk -v watch="$WATCH_RECIPIENT_DOMAINS" -v self="$REPORT_MAIL_FROM" '
+  MAILSTATS=$(awk -v watch="$WATCH_RECIPIENT_DOMAINS" -v self="$REPORT_MAIL_FROM" -v apo="'" '
     # provider of a delivery: the big mail services by their MX host, others by the MX base domain
     function prov(line,   h, r, n, x) {
       h = ""; if (match(line, /relay=[^[, ]+/)) h = tolower(substr(line, RSTART+6, RLENGTH-6))
@@ -564,10 +569,20 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     /spamc\[[0-9]+\]: skipped message, greater than max message size/ {
       sk++; if (match($0, /\([0-9]+ bytes\)/)) skl = substr($0, RSTART+1, RLENGTH-8)
     }
+    # SpamAssassin results: rules ending in _BLOCKED (URIBL_BLOCKED, URIBL_DBL_BLOCKED_OPENDNS …) mean
+    # a blocklist refused to answer – usually because the DNS resolver is shared and over its free limit
+    /spamd: result: / && match($0, / - [A-Z0-9_,]+ scantime=/) {
+      sas++; t_ = substr($0, RSTART+3, RLENGTH-13); nb_ = 0
+      n_ = split(t_, a_, ","); for (i = 1; i <= n_; i++) if (a_[i] ~ /_BLOCKED/) { sbr[a_[i]]++; nb_ = 1 }
+      sab += nb_
+    }
     /SASL [A-Z0-9-]+ authentication failed/ {
       sf++; sip[ipof($0)]++
-      if (match($0, /sasl_username=[^ ,]+/)) fu[tolower(substr($0, RSTART+14, RLENGTH-14))]++   # Office@ = office@
+      if (match($0, /sasl_username=[^ ,]+/)) { u_ = tolower(substr($0, RSTART+14, RLENGTH-14)); fu[u_]++; fp[u_ SUBSEP ipof($0)]++ }   # Office@ = office@
     }
+    # login names that do not exist (Plesk: authpsa for IMAP/POP3, plesk_saslauthd for SMTP; Dovecot: "unknown user")
+    /in mail authorization database/ && index($0, "No such user " apo) { r = $0; sub(".*No such user " apo, "", r); sub(apo ".*", "", r); if (r != "") nu[tolower(r)]++ }
+    /auth.*\([^,()]+,[^()]*\): unknown user/ { match($0, /\([^,()]+,/); nu[tolower(substr($0, RSTART+1, RLENGTH-2))]++ }
     # plausibility check: lines of the IMAP/POP3 server vs. login lines recognized (ok or failed)
     /(dovecot|imap-login|pop3-login|imap[ds]|pop3[ds])/ { imapl++ }
     /(imap|pop3)-login: Login: / || /(imap|pop3)[ds](-ssl)?(\[[0-9]+\])?: LOGIN, user=/ { imapok++ }
@@ -604,20 +619,22 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     }
     # IMAP/POP3 – Dovecot: "imap-login: Disconnected (auth failed, …): user=<x>, …, rip=1.2.3.4"
     /(imap|pop3)-login: .*(auth failed|Authentication failed)/ {
-      df++; r=$0; if (match(r, /rip=[0-9a-fA-F:.]+/)) dip[substr(r, RSTART+4, RLENGTH-4)]++
-      if (match($0, /user=<[^>]+>/)) fu[tolower(substr($0, RSTART+6, RLENGTH-7))]++
+      df++; r=$0; ip_ = ""; if (match(r, /rip=[0-9a-fA-F:.]+/)) { ip_ = substr(r, RSTART+4, RLENGTH-4); dip[ip_]++ }
+      if (match($0, /user=<[^>]+>/)) { u_ = tolower(substr($0, RSTART+6, RLENGTH-7)); fu[u_]++; if (ip_ != "") fp[u_ SUBSEP ip_]++ }
     }
     # IMAP/POP3 – Courier (Plesk alternative): one line per failed attempt,
     # "imapd: LOGIN FAILED, user=x, ip=[::ffff:1.2.3.4], port=[…]" (user= is not always logged)
     /(imap|pop3)[ds](-ssl)?(\[[0-9]+\])?: LOGIN FAILED/ {
-      df++
+      df++; r = ""
       if (match($0, /ip=\[[^]]+\]/)) { r=substr($0, RSTART+4, RLENGTH-5); sub(/^::ffff:/, "", r); dip[r]++ }
-      if (match($0, /user=[^,]+/)) fu[tolower(substr($0, RSTART+5, RLENGTH-5))]++
+      if (match($0, /user=[^,]+/)) { u_ = tolower(substr($0, RSTART+5, RLENGTH-5)); fu[u_]++; if (r != "") fp[u_ SUBSEP r]++ }
     }
     END {
       printf "TOT\t%d\t%d\t%d\t%d\t%d\t%d\n", sent, def, bou, bl, sf, df
       printf "IMAPCHK\t%d\t%d\n", imapl, imapok + df
       printf "SKIP\t%d\t%s\n", sk, skl
+      rl_ = ""; for (r in sbr) rl_ = rl_ (rl_ == "" ? "" : ", ") r " ×" sbr[r]
+      printf "SADNS\t%d\t%d\t%s\n", sas, sab, rl_
       for (p in pt) printf "PROV\t%d\t%d\t%d\t%d\t%s\n", pt[p], pv[p, 1], pv[p, 2], pv[p, 3], p
       nw = split(watch, ww, " "); for (i = 1; i <= nw; i++) { w = tolower(ww[i]); printf "WATCH\t%d\t%d\t%d\t%s\t%s\n", wv[w, 1], wv[w, 2], wv[w, 3], w, wx[w] }
       for (k in iok) { split(k, kk, SUBSEP); printf "IMOK\t%d\t%s\t%s\n", iok[k], kk[1], kk[2] }
@@ -630,6 +647,8 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       for (i in sip)  printf "SFIP\t%d\t%s\n", sip[i], i
       for (i in dip)  printf "DFIP\t%d\t%s\n", dip[i], i
       for (u in fu)   printf "FUSR\t%d\t%s\n", fu[u], u
+      for (k in fp)   { split(k, kk, SUBSEP); printf "FPAIR\t%d\t%s\t%s\n", fp[k], kk[1], kk[2] }
+      for (u in nu)   printf "NOUSR\t%d\t%s\n", nu[u], u
       for (u in mm)   printf "MISM\t%d\t%s\t%s\n", mm[u], u, mml[u]
       for (i=1; i<=blx; i++) printf "BLEX\t%s\n", bex[i]
       if (ownn) printf "OWNF\t%d\t%s\n", ownn, ownx
@@ -669,6 +688,14 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     out "Spam filter: $n mail(s) not scanned – larger than the size limit (${lim:-limit unknown})"
   else
     out "Spam filter: all mails scanned – none above the size limit${lim:+ ($lim)}"
+  fi
+  # blocklist lookups of SpamAssassin refused (URIBL_BLOCKED …): spam with such links gets through
+  read -r _ n c k <<<"$(grep '^SADNS' <<<"$MAILSTATS" | tr '\t' ' ')"
+  if (( ${c:-0} > 0 )); then
+    out "Spam filter: blocklist lookups refused in $c of $n scanned mail(s) – $k"
+    alert "Mail: SpamAssassin's blocklist lookups are refused ($c of $n mails: $k) – the DNS resolver is shared and over the lists' free limit, so links in spam are not checked. Let SpamAssassin ask a local resolver: 'dns_server 127.0.0.1' in a file of its own in the SpamAssassin configuration (Plesk: BIND answers on 127.0.0.1; test: dig @127.0.0.1 test.uribl.com.multi.uribl.com → 127.0.0.14), then restart spamd"
+  elif (( ${n:-0} > 0 )); then
+    out "Spam filter: blocklist lookups answered ($n mail(s) scanned)"
   fi
 
   if is_public_ipv4 "$PUBIP"; then
@@ -730,7 +757,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   # for IMAP_COUNTRY_KEEP_DAYS is forgotten, so the next trip alerts again. First run: silent.
   out ""; out "IMAP/POP3 logins (logins, mailbox, IP) from outside ALLOWED_COUNTRIES:"
   local -A IMF=() IMU=() IMI=() KC=() RD=()
-  local imn=0 KNOWNC="$STATE_DIR/known_imap_countries" firstc=0 isnew km kc kt now rd b
+  local DCL="" imn=0 KNOWNC="$STATE_DIR/known_imap_countries" firstc=0 isnew km kc kt now rd b
   now=$(date +%s)
   # bytes of mail read per mailbox and IP (sessions that ended in this run)
   while IFS=$'\t' read -r _ b who ip; do RD["$who $ip"]=$b; done < <(grep '^IMRD' <<<"$MAILSTATS")
@@ -760,6 +787,8 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       fi
       printf '  %6d  %s  from %s (%s)%s%s\n' "$c" "$who" "$ip" "$GEO_LABEL" "${rd:+  – $rd}" "${isnew:+  – first login from $GEO_CC}" >>"$BODY"
       [[ -n $isnew && ${IMF[$who]:-} != *"$ip "* ]] && IMF[$who]+="$ip ($GEO_LABEL${rd:+, $rd}) "
+    elif [[ $GEO_LABEL == *"[datacenter]"* ]] && ! { [[ -n $GEO_TRUSTED_ORGS ]] && grep -qiE "$GEO_TRUSTED_ORGS" <<<"$GEO_ORG"; }; then
+      DCL+="$(printf '  %6d  %s  from %s (%s)  – IMAP/POP3' "$c" "$who" "$ip" "$GEO_LABEL")"$'\n'
     fi
   done < <(grep '^IMOK' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr)
   if can_write_state; then
@@ -774,6 +803,21 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   for who in "${!IMF[@]}"; do
     alert "Mail: mailbox $who logged in via IMAP/POP3 from a new country outside $ALLOWED_COUNTRIES: ${IMF[$who]% } – travelling, or password compromised?"
   done
+  # inside the allowed countries, but from a datacenter: mail apps that fetch through their own
+  # servers, VPNs – or a stolen password used from a rented server. Listed for information only.
+  if (( GEO_OK )) && [[ -n $ALLOWED_COUNTRIES ]]; then
+    while IFS=$'\t' read -r _ c who ip; do
+      [[ -n $ip ]] || continue
+      geo "$ip"; geo_foreign && continue
+      [[ $GEO_LABEL == *"[datacenter]"* ]] || continue
+      [[ -n $GEO_TRUSTED_ORGS ]] && grep -qiE "$GEO_TRUSTED_ORGS" <<<"$GEO_ORG" && continue
+      DCL+="$(printf '  %6d  %s  from %s (%s)  – SMTP, mails sent' "$c" "$who" "$ip" "$GEO_LABEL")"$'\n'
+    done <<<"$SAIP"
+    if [[ -n $DCL ]]; then
+      out "Mail logins from datacenters inside ALLOWED_COUNTRIES (info: mail apps fetching through their servers, VPNs – or a password used from a rented server):"
+      sort -k2,2 -k1,1nr <<<"${DCL%$'\n'}" | head -10 >>"$BODY"
+    fi
+  fi
   remember_mail_ips
 
   out ""; out "Mailboxes sending with a foreign sender domain (login ≠ from):"
@@ -799,9 +843,60 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     geo "$ip"; printf '  %6d  %s%s\n' "$c" "$ip" "${GEO_LABEL:+ ($GEO_LABEL)}" >>"$BODY"
   done < <(grep -E '^(SFIP|DFIP)' <<<"$MAILSTATS" | awk -F'\t' '{a[$3]+=$2} END{for(i in a) print a[i]"\t"i}' | sort -nr | head -5)
   out "Most attacked mailboxes (failed SMTP/IMAP/POP3 logins):"
-  grep '^FUSR' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -5 |
-    awk -F'\t' '{printf "  %6d  %s\n", $2, $3}' >>"$BODY"
+  # mark login names that don't exist: guessing, or a device of a deleted mailbox
+  local -A NOU=()
+  while IFS=$'\t' read -r _ n who; do [[ -n $who ]] && NOU[$who]=$n; done < <(grep '^NOUSR' <<<"$MAILSTATS")
+  while IFS=$'\t' read -r _ n who; do
+    printf '  %6d  %s%s\n' "$n" "$who" "${NOU[$who]+  – no such mailbox}" >>"$BODY"
+  done < <(grep '^FUSR' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -5)
+  if (( ${#NOU[@]} )); then
+    n=0; for who in "${!NOU[@]}"; do n=$(( n + NOU[$who] )); done
+    out "  Login names that don't exist: ${#NOU[@]} (${n} attempts) – guessed by attackers, or a device of a deleted mailbox"
+  fi
+  old_password_check
 
+}
+
+# A customer's device with an outdated password (changed in Plesk, not on the phone/tablet) retries
+# again and again from the same IP – until fail2ban bans the IP and with it the whole office or
+# home connection. Attackers rarely come from an IP that has logged in successfully before, so
+# failed logins of one mailbox from such an IP are reported before the ban (WARN_OLD_PASSWORD).
+old_password_check() {
+  local KM="$STATE_DIR/known_mail_ips" ip who t n line="" k q
+  local -A KW=() KT=()
+  (( WARN_OLD_PASSWORD > 0 )) || return 0
+  if [[ -r $KM ]]; then
+    while read -r ip who t; do
+      [[ -n $t ]] || continue
+      KW[$ip]+=" $who "; (( t > ${KT["$ip $who"]:-0} )) && KT["$ip $who"]=$t
+    done <"$KM"
+  fi
+  while IFS=$'\t' read -r _ _ who ip; do   # successful logins of this run
+    ip=${ip#::ffff:}; [[ -n $ip ]] || continue
+    [[ ${KW[$ip]:-} == *" $who "* ]] || KW[$ip]+=" $who "; KT["$ip $who"]=$(date +%s)
+  done < <(grep -E '^(IMOK|SAIP)' <<<"$MAILSTATS")
+  while IFS=$'\t' read -r _ n who ip; do
+    ip=${ip#::ffff:}
+    [[ -n ${KW[$ip]:-} ]] && (( n >= WARN_OLD_PASSWORD )) || continue
+    geo "$ip"
+    if [[ ${KW[$ip]} == *" $who "* ]]; then
+      k="this mailbox logged in successfully from there before (last $(date -d "@${KT["$ip $who"]}" '+%Y-%m-%d'))"
+    else
+      k="other mailboxes logged in successfully from there:$(tr -s ' ' <<<"${KW[$ip]}" | sed 's/ $//' | tr ' ' ',' | sed 's/^,/ /; s/,/, /g')"
+    fi
+    if [[ -n ${NOU[$who]+x} ]]; then
+      k+="; the mailbox doesn't exist (any more)"; q="A device still set up for a deleted mailbox? Remove the account from the device"
+    else
+      q="A device with an outdated password? Correct it on the device"
+    fi
+    line+="  $(printf '%6d' "$n")  $who from $ip${GEO_LABEL:+ ($GEO_LABEL)} – $k"$'\n'
+    alert "Mail: $n failed logins of $who from $ip${GEO_LABEL:+ ($GEO_LABEL)} – $k. $q before fail2ban bans the IP (and with it the whole connection)"
+  done < <(grep '^FPAIR' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -10)
+  if [[ -n $line ]]; then
+    out "Failed logins from IPs with earlier successful mail logins (device with an outdated password?):"
+    printf '%s' "$line" >>"$BODY"
+  fi
+  return 0
 }
 
 check_webmail() {   # Roundcube: mails sent per mailbox with real client IP, failed webmail logins
@@ -1242,9 +1337,64 @@ check_logins() {   # successful SSH and Plesk panel logins, alert for previously
   if [[ -s $NEWLOGINS ]]; then
     while IFS= read -r a; do alert "Login: $a"; done <"$NEWLOGINS"
   fi
-  [[ -s $TMPD/panel_fail ]] && (( $(cat "$TMPD/panel_fail") > 0 )) &&
+  # without Plesk's own log, the access log gives at least the number of failed panel logins
+  local panel_runs=0
+  if [[ -r $PLESK_ERROR_LOG ]]; then
+    if (( ONLY_MODE )); then [[ " ${ONLY//,/ } " == *" panel "* ]] && panel_runs=1
+    else [[ " $HOURLY_CHECKS " == *" panel "* ]] && panel_runs=1; fi
+  fi
+  (( ! panel_runs )) && [[ -s $TMPD/panel_fail ]] && (( $(cat "$TMPD/panel_fail") > 0 )) &&
     out "  Plesk panel: $(cat "$TMPD/panel_fail") failed login attempt(s) (fail2ban jail plesk-panel)"
   (( FIRST_LOGIN_RUN )) && out "  (first run: all IPs stored as known; from now on new IPs raise an alert. List: $KNOWN)"
+  return 0
+}
+
+# Plesk's own log (panel.log): failed panel logins with the login name, and failed automatic
+# certificate renewals (Let's Encrypt via SSL It!) with Let's Encrypt's reason. Plesk renews
+# 30 days before expiry and retries daily, so a failure shows up weeks before the certificate
+# check warns – usually a domain whose DNS points elsewhere, or a blocked challenge URL.
+check_panel() {
+  local PL n who ip d r line="" k
+  section "PLESK PANEL LOG"
+  PL=$PLESK_ERROR_LOG
+  if [[ -z $PL || ! -r $PL ]]; then out "Plesk log PLESK_ERROR_LOG=\"$PL\" not found (no Plesk?) – skipped"; return 0; fi
+  new_lines "$PL" | awk -v apo="'" '
+    /\[Action Log\] Failed login attempt with login / {
+      l = $0; sub(".*with login " apo, "", l); sub(apo ".*", "", l)
+      i = $0; sub(/.* from IP /, "", i); sub(/[ ,].*/, "", i)
+      fl[l]++; fi_[i]++; nf++ }
+    # one line per failed renewal; the reason of Lets Encrypt follows as "Type:" and "Detail:"
+    /\[extension\/sslit\] Failed to renew certificate of domain / {
+      d = $0; sub(".*of domain " apo, "", d); sub(apo ".*", "", d); fr[d]++; cur = d; wait = 6; next }
+    wait > 0 { wait--
+      if (/^Detail: /) { r = $0; sub(/^Detail: /, "", r); sub(/: ".*/, "", r); sub(/ - check that .*/, "", r); sub(/; DNS problem.*/, "", r)
+        gsub(/acme-challenge\/[A-Za-z0-9_-]+/, "acme-challenge/…", r); why[cur] = substr(r, 1, 160); wait = 0 }
+      else if (/^\[/) wait = 0 }
+    END {
+      printf "PFAIL\t%d\n", nf
+      for (l in fl) printf "PLOG\t%d\t%s\n", fl[l], l
+      for (i in fi_) printf "PIP\t%d\t%s\n", fi_[i], i
+      for (d in fr) printf "CERT\t%d\t%s\t%s\n", fr[d], d, why[d] }' >"$TMP.panel"
+
+  read -r _ n <<<"$(grep '^PFAIL' "$TMP.panel")"
+  out "Failed panel logins: ${n:-0}"
+  if (( ${n:-0} > 0 )); then
+    out "  login names: $(grep '^PLOG' "$TMP.panel" | sort -t$'\t' -k2,2nr | head -5 | awk -F'\t' '{printf "%s%s ×%d", (NR > 1 ? ", " : ""), $3, $2}')"
+    while IFS=$'\t' read -r _ n ip; do
+      geo "$ip"; line+="${line:+, }$ip${GEO_LABEL:+ ($GEO_LABEL)} ×$n"
+    done < <(grep '^PIP' "$TMP.panel" | sort -t$'\t' -k2,2nr | head -5)
+    out "  top IPs: $line"
+  fi
+  out "Failed automatic certificate renewals (Let's Encrypt):"
+  k=0
+  while IFS=$'\t' read -r _ n d r; do
+    [[ -n $d ]] || continue
+    ignored_domain "$d" && continue
+    k=$((k + 1))
+    out "  $d: ${n}× – ${r:-no reason logged}"
+    alert "Certificate: automatic renewal for $d failed${r:+ – $r}. Let's Encrypt must reach the domain on this server: DNS pointing elsewhere (remove the domain or its certificate), or the challenge URL blocked"
+  done < <(grep '^CERT' "$TMP.panel" | sort -t$'\t' -k3,3)
+  (( k )) || out "  none"
   return 0
 }
 
@@ -1914,12 +2064,31 @@ check_exposed() {   # .env, .git, dumps, backups, config copies in document root
 }
 # "Recently changed" = by file date (mtime) or by inode change time (ctime): a backdated file
 # (PHP touch()) still has a fresh ctime.
-check_webshell() {   # recently changed PHP files with typical backdoor code
-  local stamp="$STATE_DIR/webshell_scan" new="$STATE_DIR/webshell_scan.new" dom root out="" n=0 hits=0 f nto
+# .htaccess / .user.ini / php.ini: settings that make the web server run attacker code – a file
+# loaded before every PHP request (auto_prepend_file/auto_append_file, except known security
+# plugins), PHP executed for image or text files, and the signature of a widespread WordPress
+# malware campaign that blocks every PHP file except its own. Prints "FILE<TAB>LINE" per hit.
+php_config_backdoors() {   # php_config_backdoors < list of files
+  T "$FIND_TIMEOUT" xargs -r -d '\n' awk '
+    FNR == 1 { img = 0; seth = 0; done_ = 0 }
+    done_ { next }
+    { l = tolower($0); sub(/^[ \t]+/, "", l) }
+    l ~ /^[#;]/ { next }
+    l ~ /auto_(prepend|append)_file/ && l !~ /(wordfence-waf|ninjafirewall|sucuri)/ && l !~ /auto_(prepend|append)_file[ \t=]+"?(none)?"?[ \t]*$/ { hit(); next }
+    l ~ /(addhandler|addtype)[^#]*php/ && l ~ /\.(jpe?g|png|gif|ico|bmp|svg|webp|txt)([ \t$]|$)/ { hit(); next }
+    l ~ /<filesmatch[^>]*(jpe?g|png|gif|ico|bmp|svg|webp|txt)/ { img = 1 }
+    img && l ~ /sethandler[^#]*php/ { hit(); next }
+    l ~ /<\/filesmatch/ { img = 0 }
+    l ~ /<filesmatch[^>]*\.\(py\|exe\|php\)/ { hit(); next }
+    function hit() { printf "%s\t%s\n", FILENAME, substr($0, 1, 160); done_ = 1 }
+  ' 2>/dev/null
+}
+check_webshell() {   # recently changed PHP files with typical backdoor code, PHP settings in .htaccess/.user.ini
+  local stamp="$STATE_DIR/webshell_scan" new="$STATE_DIR/webshell_scan.new" dom root out="" n=0 hits=0 f nto ln
   local re='eval[[:space:]]*\([[:space:]]*(base64_decode|gzinflate|gzuncompress|str_rot13|gzdecode)[[:space:]]*\(|assert[[:space:]]*\([[:space:]]*\$_(POST|GET|REQUEST|COOKIE)|\$_(POST|GET|REQUEST|COOKIE)[[:space:]]*\[[^]]*\][[:space:]]*\(|preg_replace[[:space:]]*\([[:space:]]*["'"'"'][^"'"'"']*/e["'"'"']|create_function[[:space:]]*\([^)]*\$_(POST|GET|REQUEST)|(system|shell_exec|passthru|exec|popen|proc_open)[[:space:]]*\([[:space:]]*\$_(POST|GET|REQUEST|COOKIE)'
   can_write_state && touch "$new"
   nto=$(timeouts_seen)
-  echo ""; echo "Suspicious code in recently changed PHP files (typical webshell/backdoor patterns):"
+  echo ""; echo "Suspicious code in recently changed PHP files, .htaccess and .user.ini (typical webshell/backdoor patterns):"
   while IFS=$'\t' read -r dom root; do
     [[ -d $root ]] || continue
     n=$((n + 1))
@@ -1931,6 +2100,14 @@ check_webshell() {   # recently changed PHP files with typical backdoor code
     done < <(if [[ -f $stamp ]]; then T "$FIND_TIMEOUT" find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) \( -newer "$stamp" -o -cnewer "$stamp" \) 2>/dev/null
              else T "$FIND_TIMEOUT" find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) \( -mtime -"$WEBSHELL_FIRST_DAYS" -o -ctime -"$WEBSHELL_FIRST_DAYS" \) 2>/dev/null; fi |
              T "$FIND_TIMEOUT" xargs -r -d '\n' grep -lE "$re" 2>/dev/null | head -30)
+    while IFS=$'\t' read -r f ln; do
+      [[ -n $WEBSHELL_IGNORE && $f =~ $WEBSHELL_IGNORE ]] && continue
+      hits=$((hits + 1))
+      out+="  $f: $ln (file date $(date -r "$f" '+%Y-%m-%d %H:%M'))"$'\n'
+      dalert "Web: suspicious PHP setting in recently changed $f: $ln – check it (backdoor?)"
+    done < <(if [[ -f $stamp ]]; then T "$FIND_TIMEOUT" find "$root" -type f \( -name .htaccess -o -name .user.ini -o -name php.ini \) \( -newer "$stamp" -o -cnewer "$stamp" \) 2>/dev/null
+             else T "$FIND_TIMEOUT" find "$root" -type f \( -name .htaccess -o -name .user.ini -o -name php.ini \) \( -mtime -"$WEBSHELL_FIRST_DAYS" -o -ctime -"$WEBSHELL_FIRST_DAYS" \) 2>/dev/null; fi |
+             php_config_backdoors | head -30)
   done < <(docroots)
   # after a timeout the scan was incomplete: keep the old stamp, so the next scan looks again
   if [[ $(timeouts_seen) == "$nto" ]]; then can_write_state && mv "$new" "$stamp"; fi
@@ -1998,6 +2175,9 @@ mailauth_scan() {
       dalert "Mail auth: $d – SPF record is invalid (${spf#permerror:}) – receivers treat it as a hard error (DNS at ${ns:-?})"
     fi
     [[ $dkim == MISSING || $dkim == MISMATCH ]] && probs+=" DKIM:${dkim,,}"
+    # no DMARC record: Gmail and Yahoo require one from bulk senders, and without it nobody learns
+    # about forged mails with this domain – a recommendation, mail is still delivered
+    [[ -z $dmarc ]] && (( mxhere )) && probs+=" DMARC:missing"
     # DMARC passes if SPF *or* DKIM passes – only both failing breaks delivery
     local broken=0
     (( ! spf_ok )) && [[ $spf != "+all" && $dkim != ok ]] && broken=1
@@ -2017,7 +2197,7 @@ mailauth_scan() {
     fi
   done
   echo "  $ok domain(s) OK, $bad with findings$( ((nomail)) && echo ", $nomail alias(es) without mail service (info only)"). Alert only if SPF and DKIM both fail and the MX points here;"
-  echo "  a single missing/outdated record is a recommendation (DMARC passes if SPF or DKIM passes)."
+  echo "  a single missing/outdated record (SPF, DKIM or DMARC) is a recommendation (DMARC passes if SPF or DKIM passes)."
   echo "  DNS queried via ${MAILAUTH_RESOLVER:-system resolver}"
 }
 check_mailauth() {   # SPF / DKIM / DMARC of every domain with mail service
@@ -2071,14 +2251,20 @@ run_daily() {   # run_daily NAME… – section text to stdout, alerts to $DALER
   return 0
 }
 # daily checks run once per day (first run after midnight); later runs reuse the cached text.
-# After an update they run again right away, so the daily checks show the new version's
-# results (and its own version line) at once instead of from the next night on.
+# After an update or a change of the configuration file they run again right away, so the
+# daily checks show the new results (and the new version line) at once instead of from the
+# next night on. "Update" means the script file changed – also between two releases.
+self_sum() {   # self_sum – short checksum of this script and its configuration file
+  cat "$(readlink -f "$0" 2>/dev/null || echo "$0")" "$CONF" 2>/dev/null |
+    { sha256sum 2>/dev/null || cksum; } | awk '{print substr($1, 1, 12)}'
+}
 daily_checks() {
-  local daily="$STATE_DIR/daily.txt" a
+  local daily="$STATE_DIR/daily.txt" a stamp
   DALERTS="$STATE_DIR/daily_alerts.txt"
-  if [[ $(cat "$STATE_DIR/daily_date" 2>/dev/null) != "$(date +%F) $VERSION" ]]; then
+  stamp="$(date +%F) $VERSION $(self_sum)"
+  if [[ $(cat "$STATE_DIR/daily_date" 2>/dev/null) != "$stamp" ]]; then
     # mark the day first: if a daily check makes the run abort, the next runs still report hourly
-    echo "$(date +%F) $VERSION" >"$STATE_DIR/daily_date"
+    echo "$stamp" >"$STATE_DIR/daily_date"
     # shellcheck disable=SC2086
     run_daily $DAILY_CHECKS >"$daily.new" 2>/dev/null; mv "$daily.new" "$daily"
   fi
@@ -2148,6 +2334,8 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       if ($0 ~ /^Failed mail logins:/) { s = $0; sub(/.*SMTP /, "", s); a1 = s + 0; sub(/.*POP3 /, "", s); a2 = s + 0
                                          fs_ += a1; fd += a2; if (a1 + a2 > fm) { fm = a1 + a2; fmt = tm }; sub_ = "fip"; next }
       if ($0 ~ /^Most attacked mailboxes \(failed SMTP/) { sub_ = "fusr"; next }
+      if ($0 ~ /^Failed logins from IPs with earlier/) { sub_ = "oldpw"; next }
+      if ($0 ~ /^Mail logins from datacenters/) { sub_ = "dc"; next }
       if ($0 ~ /^Webmail \(Roundcube\)/) { sub_ = "wsend"; next }
       if ($0 ~ /^Failed webmail logins:/) { n = split($0, x, /[^0-9]+/); wf += x[2]; sub_ = "wfip"; next }
       if ($0 ~ /^Most attacked mailboxes \(failed webmail/) { sub_ = "wfusr"; next }
@@ -2641,7 +2829,7 @@ Timestamps are Unix time (seconds since 1970, UTC): `date -d @1793684400`.
 | File | Content (one entry per line) | Used for |
 |---|---|---|
 | `known_login_ips` | `IP last-seen` | SSH and Plesk panel logins: an IP not in this list raises "login … from previously unknown IP". The first run fills it without alerts. An IP not seen for `KNOWN_LOGIN_IP_DAYS` is dropped. |
-| `known_mail_ips` | `IP mailbox last-seen` | client IPs of successful IMAP/POP3 and SMTP logins, kept for `KNOWN_MAIL_IP_DAYS`. When fail2ban bans one of them, the report raises "fail2ban: jail … bans … which had successful logins before". |
+| `known_mail_ips` | `IP mailbox last-seen` | client IPs of successful IMAP/POP3 and SMTP logins, kept for `KNOWN_MAIL_IP_DAYS`. Failed logins from one of them raise "… failed logins of … – a device with an outdated password?" (`WARN_OLD_PASSWORD`); when fail2ban bans one of them, the report raises "fail2ban: jail … bans … which had successful logins before". |
 | `known_imap_countries` | `mailbox country last-seen` | countries outside `ALLOWED_COUNTRIES` a mailbox has fetched mail from. The alert "logged in via IMAP/POP3 from a new country" comes once per mailbox and country; an entry not seen for `IMAP_COUNTRY_KEEP_DAYS` is dropped, so the next trip alerts again. |
 
 ## Baseline for the access & persistence check (`baseline/`)
@@ -2687,7 +2875,7 @@ is always reported). Processes are not stored – they are checked live in every
 
 | File | Content |
 |---|---|
-| `daily_date` | the day (YYYY-MM-DD) and the script version of the last daily checks – they run in the first run of a new day, and right after an update to another version. Delete it to run them again in the next run. |
+| `daily_date` | the day (YYYY-MM-DD), the script version and a checksum of the script and its configuration file of the last daily checks – they run in the first run of a new day, and right after the script or the configuration file changed. Delete it to run them again in the next run. |
 | `daily.txt` | their output, repeated in every report of that day under DAILY CHECKS. |
 | `daily_alerts.txt` | their alerts, repeated in every report of that day. |
 
@@ -2717,7 +2905,7 @@ show_state() {
   echo "State directory: $STATE_DIR (description: README.txt there, or --state-readme)"
   echo ""
   f=$STATE_DIR/last_run; [[ -f $f ]] && echo "Last normal run: $(d "$(cat "$f")")"
-  f=$STATE_DIR/daily_date; [[ -f $f ]] && echo "Daily checks last run on: $(cat "$f") (day, script version)"
+  f=$STATE_DIR/daily_date; [[ -f $f ]] && echo "Daily checks last run on: $(cat "$f") (day, script version, checksum of script and configuration)"
   for f in last_scan webshell_scan; do
     [[ -f $STATE_DIR/$f ]] && echo "$f: $(date -r "$STATE_DIR/$f" '+%Y-%m-%d %H:%M')"
   done
