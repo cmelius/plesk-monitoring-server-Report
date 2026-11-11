@@ -110,6 +110,7 @@ WATCH_RECIPIENT_DOMAINS=""    # space-separated recipient domains whose deliveri
 WARN_BLOCKLIST=1              # remote rejections mentioning a blocklist, reputation, spam or rate limiting
 WARN_QUEUE=200                # messages in the Postfix queue
 WARN_AUTH_FAIL=300            # failed mail logins (SMTP + IMAP/POP3)
+WARN_DSN=1                    # delivery confirmations (DSN "delivered") sent to other servers – spammers request them to verify addresses; 0 = off
 WARN_OLD_PASSWORD=3           # failed logins of one mailbox from an IP with earlier successful mail logins (outdated password on a device?); 0 = off
 WARN_LOAD_FACTOR=1.5          # 5-min load > CPU cores × factor
 WARN_CPU_USER_PCT=80          # %CPU of a single system user (snapshot)
@@ -540,6 +541,11 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
         if (!((su SUBSEP f) in mms) && mmc[su] < 3) { mms[su SUBSEP f]=1; mmc[su]++; mml[su]=mml[su] " " f }
       }
     }
+    # delivery confirmations (DSN NOTIFY=SUCCESS): Postfix creates a new mail to the original sender;
+    # sent to another server, they mostly answer spam with a forged sender
+    /postfix\/bounce\[/ && / sender delivery status notification: / { c_ = $NF; dsnq[c_] = 1 }
+    / status=(sent|deferred|bounced)/ && /postfix\/smtp\[/ && (qid($0) in dsnq) && !((qid($0)) in dsnx) {
+      dsnx[qid($0)] = 1; dsnn++; if (dsnex == "") dsnex = rdom($0) }
     / status=(sent|deferred|bounced)/ && /postfix\/smtp\[/ {
       p = prov($0); st = ($0 ~ / status=sent/ ? 1 : ($0 ~ / status=deferred/ ? 2 : 3)); pv[p, st]++; pt[p]++
       w = watched(rdom($0))
@@ -636,6 +642,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       rl_ = ""; for (r in sbr) rl_ = rl_ (rl_ == "" ? "" : ", ") r " ×" sbr[r]
       printf "SADNS\t%d\t%d\t%s\n", sas, sab, rl_
       for (p in pt) printf "PROV\t%d\t%d\t%d\t%d\t%s\n", pt[p], pv[p, 1], pv[p, 2], pv[p, 3], p
+      printf "DSNOUT\t%d\t%s\n", dsnn, dsnex
       nw = split(watch, ww, " "); for (i = 1; i <= nw; i++) { w = tolower(ww[i]); printf "WATCH\t%d\t%d\t%d\t%s\t%s\n", wv[w, 1], wv[w, 2], wv[w, 3], w, wx[w] }
       for (k in iok) { split(k, kk, SUBSEP); printf "IMOK\t%d\t%s\t%s\n", iok[k], kk[1], kk[2] }
       for (k in irs) { split(k, kk, SUBSEP); printf "IMRD\t%d\t%s\t%s\n", ird[k], kk[1], kk[2] }
@@ -666,11 +673,19 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     [[ -n $n ]] && alert "Mail: the report mail (REPORT_MAIL_TO) could not be delivered ($n×) – check the address: $ex"
   done < <(grep '^OWNF' <<<"$MAILSTATS")
   grep '^BLEX' <<<"$MAILSTATS" | cut -f2- | sed 's/^/  example: /' >>"$BODY"
-  # outgoing deliveries per provider: shows trouble with a big provider whatever its reply says
+  # outgoing deliveries per receiving mail server: shows trouble with a big provider whatever its
+  # reply says. Grouped by the MX host, not the recipient's domain: a forged sender's domain shows
+  # up under the name of its (often unreachable) mail server.
   if grep -q '^PROV' <<<"$MAILSTATS"; then
-    out "Outgoing deliveries per provider (sent / deferred / bounced):"
+    out "Outgoing deliveries per receiving mail server (provider or MX host; sent / deferred / bounced):"
     grep '^PROV' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -10 |
       awk -F'\t' '{printf "  %-22s %5d / %d / %d\n", $6, $3, $4, $5}' >>"$BODY"
+  fi
+  # delivery confirmations to other servers: Postfix offers DSN to everyone by default
+  read -r _ n k <<<"$(grep '^DSNOUT' <<<"$MAILSTATS" | tr '\t' ' ')"
+  if (( ${n:-0} > 0 )); then
+    out "Delivery confirmations (DSN) sent to other servers: $n${k:+ (e.g. to $k)}"
+    (( WARN_DSN > 0 && n >= WARN_DSN )) && alert "Mail: $n delivery confirmation(s) (DSN) sent to other servers${k:+, e.g. to $k} – spammers request them to verify addresses, and they go to forged senders. Offer DSN to the server itself only: smtpd_discard_ehlo_keyword_address_maps (see README)"
   fi
   # watched recipient domains (WATCH_RECIPIENT_DOMAINS): every deferral or bounce is an alert
   while IFS=$'\t' read -r _ n c k who ex; do
@@ -2339,7 +2354,7 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       if ($0 ~ /^Delivered: /) { n = split($0, x, /[^0-9]+/); dl += x[2]; df += x[3]; bo += x[4]; if (x[5] + 0 > mq) { mq = x[5] + 0; mqt = tm }; next }
       if ($0 ~ /^Rejections mentioning/) { r = $0; sub(/.*: /, "", r); rj += r; next }
       if ($0 ~ /^  example: /) { if (nbx < 5) { l = $0; sub(/^  example: /, "", l); print "BLX\t" tm "\t" t(substr(l, 1, 260)); nbx++ }; next }
-      if ($0 ~ /^Outgoing deliveries per provider/) { sub_ = "prov"; next }
+      if ($0 ~ /^Outgoing deliveries per (provider|receiving mail server)/) { sub_ = "prov"; next }
       if (sub_ == "prov" && $0 ~ /^  [^ ].* [0-9]+ \/ [0-9]+ \/ [0-9]+$/) {
         n = split($0, x, " "); pn = $0; sub(/^  /, "", pn); sub(/ +[0-9]+ \/ [0-9]+ \/ [0-9]+$/, "", pn)
         ps[pn] += x[n-4]; pd[pn] += x[n-2]; pb[pn] += x[n]; next }
@@ -2503,7 +2518,7 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
     rec MAILTOT | awk -F'\t' '{printf "Delivered: %d | deferred: %d | bounced: %d | highest queue: %d%s\nRejections mentioning blocklist/reputation/spam/rate limit: %d\n", $1, $2, $3, $4, ($5 != "" ? " (" $5 ")" : ""), $6}'
     rec BLX | awk -F'\t' '{printf "  example (%s): %s\n", $1, $2}'
     if [[ -n $(rec PROVTOT) ]]; then
-      echo "Outgoing deliveries per provider (total sent / deferred / bounced):"
+      echo "Outgoing deliveries per receiving mail server (provider or MX host; total sent / deferred / bounced):"
       rec PROVTOT | sort -t$'\t' -k1,1nr | head -10 | awk -F'\t' '{printf "  %-22s %5d / %d / %d\n", $5, $2, $3, $4}'
     fi
     rec WATCHTOT | awk -F'\t' '{printf "Watched recipient domain %s: %d sent, %d deferred, %d bounced\n", $4, $1, $2, $3}'
