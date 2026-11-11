@@ -774,9 +774,9 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
   ```
   then `postconf -e 'smtpd_discard_ehlo_keyword_address_maps = cidr:/etc/postfix/esmtp_access'` and `systemctl reload postfix`. This is safe to do – everyday mail is not affected:
   - mail is sent and received as before, and bounces for undeliverable mail still arrive;
-  - read receipts ("Lesebestätigung") still work – they are a header in the mail, not DSN;
+  - read receipts still work – they are a header in the mail, not DSN;
   - programs on the server itself (scripts, the Plesk panel) may still request DSN;
-  - the only thing lost: the "delivery receipt" option of mail clients like Outlook ("Übermittlungsbestätigung") for mail sent through this server, and confirmations other senders request for mail to your customers. Few people use either.
+  - the only thing lost: the "delivery receipt" option of mail clients like Outlook for mail sent through this server, and confirmations other senders request for mail to your customers. Few people use either.
 
   Plesk may reset `main.cf` (e.g. `plesk repair mail`) – the report then shows the confirmations again, and you set the one line again (the file stays).
 - **Mail logins from datacenters** inside `ALLOWED_COUNTRIES` are listed for information, without alert: mail apps that fetch through their own servers, VPNs, iCloud Private Relay – or a stolen password used from a rented server. A mailbox that suddenly appears there deserves a look. Operators in `GEO_TRUSTED_ORGS` are left out.
