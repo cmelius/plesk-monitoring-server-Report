@@ -430,10 +430,10 @@ _spf() {
     case $m in
       ip4) (( ! v6 )) && [[ $q == + ]] && in_cidr "$ip" "$arg" && { SPF_RES=pass; return; } ;;
       ip6) (( v6 ))   && [[ $q == + ]] && in_cidr "$ip" "$arg" && { SPF_RES=pass; return; } ;;
-      a)   [[ $q == + ]] && host_has_ip "${arg:-$d}" "$ip" $bits && { SPF_RES=pass; return; } ;;
+      a)   [[ $q == + ]] && host_has_ip "${arg:-$d}" "$ip" "$bits" && { SPF_RES=pass; return; } ;;
       mx)  if [[ $q == + ]]; then
              for mxh in $(DIGQ MX "${arg:-$d}" | awk '{print $2}'); do
-               host_has_ip "${mxh%.}" "$ip" $bits && { SPF_RES=pass; return; }
+               host_has_ip "${mxh%.}" "$ip" "$bits" && { SPF_RES=pass; return; }
              done
            fi ;;
       include) _spf "$arg" "$ip" $((depth + 1))
@@ -892,7 +892,7 @@ old_password_check() {
   done < <(grep -E '^(IMOK|SAIP)' <<<"$MAILSTATS")
   while IFS=$'\t' read -r _ n who ip; do
     ip=${ip#::ffff:}
-    [[ -n ${KW[$ip]:-} ]] && (( n >= WARN_OLD_PASSWORD )) || continue
+    if [[ -z ${KW[$ip]:-} ]] || (( n < WARN_OLD_PASSWORD )); then continue; fi
     geo "$ip"
     if [[ ${KW[$ip]} == *" $who "* ]]; then
       k="this mailbox logged in successfully from there before (last $(date -d "@${KT["$ip $who"]}" '+%Y-%m-%d'))"
@@ -1082,7 +1082,9 @@ check_fail2ban() {
       cf=$(sed -n 's/.*Currently failed:[[:space:]]*//p' <<<"$s")
       [[ ${cb:-0} -gt 0 || ${cf:-0} -gt 0 ]] && printf '  %-28s banned: %3s (total %s), currently failed: %s\n' "$j" "$cb" "$tb" "$cf" >>"$BODY"
       # banned IPs that logged in successfully before – a device with an outdated password?
-      for ip in $(sed -n 's/.*Banned IP list:[[:space:]]*//p' <<<"$s"); do
+      local -a banned=()
+      read -ra banned <<<"$(sed -n 's/.*Banned IP list:[[:space:]]*//p' <<<"$s")"
+      for ip in "${banned[@]}"; do
         k=""
         [[ -n ${MW[$ip]:-} ]] && k="mail logins of ${MW[$ip]%, } (last $(date -d "@${ML[$ip]}" '+%Y-%m-%d'))"
         known_login_ip "$ip" "$KL" && k="${k:+$k; }SSH/Plesk logins"
@@ -1957,7 +1959,9 @@ check_serverdns() {   # PTR of the server IP, HELO name, IPv6 reverse DNS
   local ptr fwd helo
   echo ""; echo "Server DNS (reverse DNS / HELO):"
   ptr=$(DIGQ -x "$PUBIP" | head -1); ptr=${ptr%.}
-  helo=$(postconf -h smtp_helo_name 2>/dev/null); [[ -z $helo || $helo == '$myhostname' ]] && helo=$(postconf -h myhostname 2>/dev/null)
+  helo=$(postconf -h smtp_helo_name 2>/dev/null)
+  # shellcheck disable=SC2016  # the literal Postfix default "$myhostname", not a shell variable
+  [[ -z $helo || $helo == '$myhostname' ]] && helo=$(postconf -h myhostname 2>/dev/null)
   if [[ -z $ptr ]]; then
     echo "  $PUBIP: NO PTR record"
     dalert "Mail: server IP $PUBIP has no reverse DNS (PTR) – many receivers (Gmail, Microsoft, T-Online) reject such mail; set it at your hosting provider"
@@ -2105,8 +2109,9 @@ check_exposed() {   # .env, .git, dumps, backups, config copies in document root
 # plugins), PHP executed for image or text files, and the signature of a widespread WordPress
 # malware campaign that blocks every PHP file except its own. Prints "FILE<TAB>LINE" per hit.
 php_config_backdoors() {   # php_config_backdoors < list of files
+  # shellcheck disable=SC2016  # awk program: its $0 is awk's, not the shell's
   T "$FIND_TIMEOUT" xargs -r -d '\n' awk '
-    FNR == 1 { img = 0; seth = 0; done_ = 0 }
+    FNR == 1 { img = 0; done_ = 0 }
     done_ { next }
     { l = tolower($0); sub(/^[ \t]+/, "", l) }
     l ~ /^[#;]/ { next }
@@ -2121,6 +2126,7 @@ php_config_backdoors() {   # php_config_backdoors < list of files
 }
 check_webshell() {   # recently changed PHP files with typical backdoor code, PHP settings in .htaccess/.user.ini
   local stamp="$STATE_DIR/webshell_scan" new="$STATE_DIR/webshell_scan.new" dom root out="" n=0 hits=0 f nto ln
+  # shellcheck disable=SC2016  # a grep pattern: $_POST etc. are PHP, not shell variables
   local re='eval[[:space:]]*\([[:space:]]*(base64_decode|gzinflate|gzuncompress|str_rot13|gzdecode)[[:space:]]*\(|assert[[:space:]]*\([[:space:]]*\$_(POST|GET|REQUEST|COOKIE)|\$_(POST|GET|REQUEST|COOKIE)[[:space:]]*\[[^]]*\][[:space:]]*\(|preg_replace[[:space:]]*\([[:space:]]*["'"'"'][^"'"'"']*/e["'"'"']|create_function[[:space:]]*\([^)]*\$_(POST|GET|REQUEST)|(system|shell_exec|passthru|exec|popen|proc_open)[[:space:]]*\([[:space:]]*\$_(POST|GET|REQUEST|COOKIE)'
   can_write_state && touch "$new"
   nto=$(timeouts_seen)
@@ -2629,7 +2635,8 @@ mask_key() {
 # upload_copy FILE – the file to upload: FILE itself, or with MASK_MAILBOXES=1 a pseudonymised copy
 upload_copy() {
   (( MASK_MAILBOXES )) || { printf '%s\n' "$1"; return 0; }
-  local c="$TMPD/upload-$(basename "$1")" map="$TMPD/pseudonyms" key a t now f="$STATE_DIR/mailbox_pseudonyms"
+  local c map="$TMPD/pseudonyms" key a t now f="$STATE_DIR/mailbox_pseudonyms"
+  c="$TMPD/upload-${1##*/}"
   key=$(mask_key) || { printf '%s\n' "$1"; return 0; }
   now=$(date +%s)
   # one token per distinct address (lower case: Office@ and office@ are the same mailbox)
@@ -2637,7 +2644,7 @@ upload_copy() {
   while read -r a; do
     t=$(printf '%s:%s' "$key" "$a" | sha256sum | cut -c1-6)
     printf '%s mbx-%s@%s\n' "$a" "$t" "${a#*@}" >>"$map"
-  done < <(grep -oE "$MAIL_RE" "$1" | tr 'A-Z' 'a-z' | sort -u)
+  done < <(grep -oE "$MAIL_RE" "$1" | tr '[:upper:]' '[:lower:]' | sort -u)
   awk -v re="$MAIL_RE" -v note="Mailbox addresses are pseudonymised (MASK_MAILBOXES=1) – decode on the server: plesk-server-report.sh --decode" '
     NR == FNR { m[$1] = $2; next }
     { out = ""; rest = $0
@@ -2738,6 +2745,7 @@ send_mail() {
 test_mail() {
   local f log="" size=0 q="" lines="" i r st pl a p
   [[ -n $REPORT_MAIL_TO ]] || { echo "REPORT_MAIL_TO is empty – set it in $CONF first" >&2; return 1; }
+  # shellcheck disable=SC2012  # the newest report; the script names these files itself
   f=$(ls -1t "$STATE_DIR"/out/report-*.txt 2>/dev/null | head -1)
   [[ -n $f ]] || { echo "no report in $STATE_DIR/out yet – let the script run once first" >&2; return 1; }
   for log in /var/log/maillog /var/log/mail.log ""; do [[ -z $log || -r $log ]] && break; done
@@ -3053,7 +3061,8 @@ only_list() {
 load_conf() {
   [[ -e $CONF ]] || return 0
   if [[ -n $(find -L "$CONF" -maxdepth 0 \( ! -user root -o -perm /022 \) 2>/dev/null) ]]; then
-    local m="refusing to run – $CONF is $(stat -L -c '%U:%G %A' "$CONF" 2>/dev/null). It is loaded as root code; whoever can write it gets root. Fix: chown root:root $CONF; chmod 600 $CONF"
+    local m
+    m="refusing to run – $CONF is $(stat -L -c '%U:%G %A' "$CONF" 2>/dev/null). It is loaded as root code; whoever can write it gets root. Fix: chown root:root $CONF; chmod 600 $CONF"
     echo "plesk-server-report: $m" >&2
     logger -t plesk-server-report "$m" 2>/dev/null
     DONE=1; exit 1

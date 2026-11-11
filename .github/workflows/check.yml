@@ -1,0 +1,25 @@
+# Checks every push and pull request: shell syntax, shellcheck (no findings allowed),
+# and that STATE-FILES.md matches the description built into the script.
+# Uses only the shellcheck preinstalled on GitHub's Ubuntu runners – no third-party actions.
+name: check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax
+        run: bash -n plesk-server-report.sh
+      - name: shellcheck
+        run: |
+          shellcheck --version
+          shellcheck plesk-server-report.sh
+      - name: STATE-FILES.md up to date
+        run: bash plesk-server-report.sh --state-readme | diff -u STATE-FILES.md -

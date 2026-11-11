@@ -1,5 +1,7 @@
 # plesk-server-report
 
+[![check](https://github.com/cmelius/plesk-monitoring-server-Report/actions/workflows/check.yml/badge.svg)](https://github.com/cmelius/plesk-monitoring-server-Report/actions/workflows/check.yml)
+
 A single bash script that writes an **hourly health and security report** for a Plesk server on Linux and (optionally) uploads it to cloud storage with [rclone](https://rclone.org/) or mails it to you – to a mailbox on the same server, if you like, so the reports never leave it.
 
 It is built around the most common way a shared Plesk server gets into trouble: **a compromised mailbox or a hacked website starts sending spam**, the server IP ends up on a blocklist, and every customer's mail bounces. The report is short plain text you can read yourself – but where it really shines is a daily review by an AI assistant: it reads the latest report and a 24-hour summary every morning and tells you in a few lines whether anything needs your attention. The reports are written for exactly that; see [Reading the reports](#reading-the-reports) for an example prompt. If you host for customers, mind data protection: an AI review means handing personal data to the AI and storage provider – see [Privacy](#privacy-gdpr) for the options, from a local-only setup to pseudonymised uploads.
@@ -37,6 +39,8 @@ The script runs as root and has grown to almost 3,000 lines of bash – more tha
 > *Review this bash script before I run it as root from cron on a production Plesk server. Ignore the comments and the documentation – verify everything from the code itself. For every command that writes, deletes, moves or changes permissions of a file, every network connection and every command run with data from logs or the network, quote the line and say what it does. Then tell me whether anything changes the system outside the script's own state directory, could leak data, or could be abused by another local user.*
 
 Why "ignore the comments": a malicious script would be full of reassuring ones. Asking for the quoted line behind every statement makes the answer checkable – and a claim without a line (AI assistants do invent details now and then) stands out. **Check the quoted lines with `grep` before you believe a finding.** In a test, one assistant reported the permission check of the configuration file as broken because its "quote" read `-perm 022` – the script says `-perm /022`, and the slash makes all the difference.
+
+Every push is also checked automatically on GitHub (badge at the top, workflow in `.github/workflows/check.yml`): shell syntax, [ShellCheck](https://www.shellcheck.net/) without a single finding, and that `STATE-FILES.md` matches the description built into the script. A handful of lines carry a `# shellcheck disable=…` comment with the reason – an awk program or grep pattern in single quotes, for example. This says nothing about what the script does; it only rules out a class of shell mistakes.
 
 Expect it to point out a few things that are by design:
 

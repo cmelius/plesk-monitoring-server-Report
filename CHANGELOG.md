@@ -17,6 +17,7 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 - README, *What it found so far*: the spam filter that checked no links.
 
 ### Changed
+- **ShellCheck without a single finding**, checked on every push and pull request by a GitHub workflow (`.github/workflows/check.yml`; badge in the README), together with the shell syntax and that `STATE-FILES.md` is up to date. It uses the ShellCheck preinstalled on GitHub's runners, no third-party actions. Small fixes on the way: quoting, two `local x=$(…)` split so errors are not masked, `tr '[:upper:]' '[:lower:]'`; deliberate cases carry a `# shellcheck disable` comment with the reason.
 - The table "Outgoing deliveries per provider" is now called "… per receiving mail server (provider or MX host)": it always grouped by the mail server, not by the recipient's domain, so a spammer's forged domain shows up under the name of its mail server. `summary.txt` reads both names.
 - **The daily checks run again after any change of the script or the configuration file**, not only after a new version number. Until now an update from `main` with the same version, or a changed setting, showed the old daily results until the next night. `daily_date` now holds a checksum of both.
 - README: the example prompt for the AI review mentions outdated passwords, failed certificate renewals and refused blocklist lookups – if you use the prompt, update your copy.
