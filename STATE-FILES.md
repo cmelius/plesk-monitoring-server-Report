@@ -62,7 +62,8 @@ is always reported). Processes are not stored – they are checked live in every
 | `offsets/` | one file per log, named after a hash of its path; content `inode bytes-read path` | the script reads only the lines added since the last run. The inode identifies the file after a rotation (`maillog` → `maillog.processed`), so the rest of the old file is still read. Delete a file here and that log is read again from its last 20,000 lines. |
 | `journal_since` | Unix time | position in the systemd journal (only if there is no mail log file). |
 | `last_scan` | empty; its modification time counts | new PHP files in upload folders are files changed after this – by file date or by inode change time, so a file with its date set back is found too. |
-| `webshell_scan` | empty; its modification time counts | the daily scan for suspicious code looks only at PHP files changed since then (file date or inode change time). |
+| `webshell_scan` | empty; its modification time counts | the daily scan for suspicious code looks only at PHP files, `.htaccess`, `.user.ini` and `php.ini` changed since then (file date or inode change time). |
+| `webshell_conf_full` | empty | marks that `.htaccess`, `.user.ini` and `php.ini` were scanned completely once. Without it, the next daily scan checks all of them, whatever their date. |
 
 ## Daily checks
 

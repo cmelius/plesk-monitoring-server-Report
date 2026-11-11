@@ -2105,12 +2105,14 @@ check_webshell() {   # recently changed PHP files with typical backdoor code, PH
       hits=$((hits + 1))
       out+="  $f: $ln (file date $(date -r "$f" '+%Y-%m-%d %H:%M'))"$'\n'
       dalert "Web: suspicious PHP setting in recently changed $f: $ln – check it (backdoor?)"
-    done < <(if [[ -f $stamp ]]; then T "$FIND_TIMEOUT" find "$root" -type f \( -name .htaccess -o -name .user.ini -o -name php.ini \) \( -newer "$stamp" -o -cnewer "$stamp" \) 2>/dev/null
-             else T "$FIND_TIMEOUT" find "$root" -type f \( -name .htaccess -o -name .user.ini -o -name php.ini \) \( -mtime -"$WEBSHELL_FIRST_DAYS" -o -ctime -"$WEBSHELL_FIRST_DAYS" \) 2>/dev/null; fi |
+    # these files are few and small: the first scan (and the first after the update that added
+    # them) checks all of them, whatever their date – a backdoor may be older than the script
+    done < <(if [[ -f $stamp && -f $STATE_DIR/webshell_conf_full ]]; then T "$FIND_TIMEOUT" find "$root" -type f \( -name .htaccess -o -name .user.ini -o -name php.ini \) \( -newer "$stamp" -o -cnewer "$stamp" \) 2>/dev/null
+             else T "$FIND_TIMEOUT" find "$root" -type f \( -name .htaccess -o -name .user.ini -o -name php.ini \) 2>/dev/null; fi |
              php_config_backdoors | head -30)
   done < <(docroots)
   # after a timeout the scan was incomplete: keep the old stamp, so the next scan looks again
-  if [[ $(timeouts_seen) == "$nto" ]]; then can_write_state && mv "$new" "$stamp"; fi
+  if [[ $(timeouts_seen) == "$nto" ]]; then can_write_state && { mv "$new" "$stamp"; : >"$STATE_DIR/webshell_conf_full"; }; fi
   [[ -n $out ]] && printf '%s' "$out"
   echo "  $n document root(s) scanned, $hits suspicious file(s)"
 }
@@ -2869,7 +2871,8 @@ is always reported). Processes are not stored – they are checked live in every
 | `offsets/` | one file per log, named after a hash of its path; content `inode bytes-read path` | the script reads only the lines added since the last run. The inode identifies the file after a rotation (`maillog` → `maillog.processed`), so the rest of the old file is still read. Delete a file here and that log is read again from its last 20,000 lines. |
 | `journal_since` | Unix time | position in the systemd journal (only if there is no mail log file). |
 | `last_scan` | empty; its modification time counts | new PHP files in upload folders are files changed after this – by file date or by inode change time, so a file with its date set back is found too. |
-| `webshell_scan` | empty; its modification time counts | the daily scan for suspicious code looks only at PHP files changed since then (file date or inode change time). |
+| `webshell_scan` | empty; its modification time counts | the daily scan for suspicious code looks only at PHP files, `.htaccess`, `.user.ini` and `php.ini` changed since then (file date or inode change time). |
+| `webshell_conf_full` | empty | marks that `.htaccess`, `.user.ini` and `php.ini` were scanned completely once. Without it, the next daily scan checks all of them, whatever their date. |
 
 ## Daily checks
 
