@@ -1509,6 +1509,10 @@ persist_cron() {   # cron lines: "line TAB where TAB line"; autostart files: "fi
 }
 # One line per port. The process name is information only: several processes share a socket
 # (Postfix: master and smtpd), and ss names whichever comes first – it changes from run to run.
+persist_addrs() {   # global IP addresses of the server: "address TAB interface"
+  T "$CMD_TIMEOUT" ip -o addr show scope global 2>/dev/null |
+    awk '$3 == "inet" || $3 == "inet6" { a = $4; sub(/\/.*/, "", a); print a "\t" $2 }'
+}
 persist_ports() {   # TCP ports listening on a non-loopback address: "port TAB process"
   T "$CMD_TIMEOUT" ss -ltnp 2>/dev/null | awk '$1 == "LISTEN" {
     a = $4; p = a; sub(/.*:/, "", p); h = a; sub(/:[^:]*$/, "", h)
@@ -1547,7 +1551,7 @@ persist_procs() {
 check_persistence() {   # SSH keys, accounts, sudo, cron/autostart, suspicious processes, listening ports
   local first w k v c n u what nto pid uid why exe user cmd ports key hit
   local -A gone=() before=() said=()
-  section "ACCESS & PERSISTENCE (SSH keys, accounts, sudo, cron, autostart, processes, ports)"
+  section "ACCESS & PERSISTENCE (SSH keys, accounts, sudo, cron, autostart, processes, ports, addresses)"
   nto=$(timeouts_seen)
 
   # without the account database every key and account would look removed, and new in the next run
@@ -1695,6 +1699,23 @@ check_persistence() {   # SSH keys, accounts, sudo, cron/autostart, suspicious p
       done <"$TMP.o"
       for k in "${!oldp[@]}"; do persist_finding - "listening port $k (${oldp[$k]}) closed"; done
     fi
+  fi
+
+  # --- IP addresses of the server: a hosting provider may switch on IPv6 (or add an address)
+  # without notice, and mail then leaves from an address without reverse DNS and SPF entry
+  if command -v ip >/dev/null; then
+    persist_addrs >"$TMP.o"
+    first=0; baseline_diff addrs "$TMP.o" || first=1
+    out "IP addresses (global): $(awk -F'\t' '{ printf "%s%s (%s)", (NR > 1 ? ", " : ""), $1, $2 }' "$TMP.o")$(persist_first_note "$first")"
+    while IFS=$'\t' read -r k v; do
+      [[ -n $k ]] || continue
+      if [[ $k =~ ^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.|f[cd]) ]]; then
+        persist_finding + "address $k on $v (private network)"
+      else
+        persist_finding + "address $k on $v" "Network: new public address $k on $v – added by you, or by the hosting provider? Mail may now leave from it: check reverse DNS and SPF, or keep the mail server on the old address (Postfix: inet_protocols, smtp_bind_address)"
+      fi
+    done <"$TMP.o.add"
+    while IFS=$'\t' read -r k v; do [[ -n $k ]] && persist_finding - "address $k on $v removed"; done <"$TMP.o.del"
   fi
   return 0
 }
@@ -2846,6 +2867,7 @@ is always reported). Processes are not stored – they are checked live in every
 | `baseline/keys` | `account key-type fingerprint comment` | the SSH keys in the `~/.ssh/authorized_keys` of all accounts. A new key raises "Access: new SSH key for …". |
 | `baseline/access` | `kind name details` | accounts with a login shell or UID 0, members of the groups `sudo`, `wheel` and `admin`, the sudoers files with a checksum, and – only if the file exists, which it normally doesn't – what `/etc/ld.so.preload` loads. New or changed entries raise an alert. |
 | `baseline/cron` | `line where cron-line` or `file path checksum` | the cron jobs of all accounts and of the system (passwords in them masked), and checksums of the autostart files (`/etc/cron.hourly` … `monthly`, `rc.local`, systemd units in `/etc/systemd/system`). New entries are listed; suspicious ones and new entries of root or the system raise an alert. |
+| `baseline/addrs` | `address interface` | the server's global IPv4 and IPv6 addresses. A new public address raises "Network: new public address …" – e.g. IPv6 switched on by the hosting provider; private addresses are listed without alert. |
 | `baseline/ports` | `port process` | TCP ports listening on an address other than loopback. A new port number raises "Ports: new listening TCP port …"; the process name is information only (processes sharing a socket take turns, e.g. Postfix `master` and `smtpd`). |
 
 ## Pseudonyms (only with `MASK_MAILBOXES=1`)
@@ -2938,6 +2960,7 @@ show_state() {
       [[ -f $STATE_DIR/baseline/$f ]] && printf '  %-7s %4d entries, as of %s\n' "$f" "$(wc -l <"$STATE_DIR/baseline/$f")" "$(date -r "$STATE_DIR/baseline/$f" '+%Y-%m-%d %H:%M')"
     done
     [[ -s $STATE_DIR/baseline/keys ]] && { echo "  SSH keys:"; awk -F'\t' '{ printf "    %-16s %s%s\n", $1, $2, ($3 == "" ? "" : "  " $3) }' "$STATE_DIR/baseline/keys"; }
+    [[ -s $STATE_DIR/baseline/addrs ]] && echo "  IP addresses: $(awk -F'\t' '{ printf "%s%s (%s)", (NR > 1 ? ", " : ""), $1, $2 }' "$STATE_DIR/baseline/addrs")"
     [[ -s $STATE_DIR/baseline/ports ]] && echo "  Listening TCP ports: $(sort -n "$STATE_DIR/baseline/ports" | awk -F'\t' '{ printf "%s%s %s", (NR > 1 ? ", " : ""), $1, $2 }')"
     echo ""
   fi
