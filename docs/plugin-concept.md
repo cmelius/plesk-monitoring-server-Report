@@ -245,8 +245,9 @@ the tests in `tests/plugins.bats` and `tests/panel.bats` (with the parity test a
 - Limits: 500 `TEXT` lines, 100 alerts, 10 notes, 2000 bytes per line. The time limit
   is `FIND_TIMEOUT`.
 - `PLUGIN_API` is `0` until step 6.
-- README, CHANGELOG and the release archive follow before 2.0, so that merging `main`
-  into this branch stays simple.
+- The changes of this branch are listed in `CHANGELOG-2.0.md` (branch changelog), not
+  in `CHANGELOG.md`, so that merging `main` into this branch stays simple. README and
+  the release archive follow before 2.0.
 
 ## If third-party plugins are ever wanted
 
