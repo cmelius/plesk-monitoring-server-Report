@@ -2,7 +2,7 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [1.10.0] – not yet released (on `main`)
+## [1.10.0] – 2026-11-12
 
 ### Added
 - **Devices with an outdated mail password – before fail2ban bans them.** Failed logins of one mailbox from an IP that has logged in successfully before (the same mailbox, or another one from the same office connection) raise an alert from `WARN_OLD_PASSWORD` failures in a run (new setting, default 3, `0` = off). Typically a phone or tablet after a password change, which retries until fail2ban bans the whole connection. Until now the report only noticed after the ban.
@@ -14,13 +14,13 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 - **New IP addresses of the server** raise an alert within the hour (access & persistence check, baseline `addrs`): a hosting provider may switch on IPv6 without notice, and Postfix then sends from an address without reverse DNS and SPF entry. Until now only the daily check noticed – after up to a day. Private addresses are listed without alert.
 - **Mail logins from datacenters inside `ALLOWED_COUNTRIES`** are listed for information (no alert): mail apps fetching through their servers, VPNs – or a password used from a rented server.
 - **Missing DMARC record** is listed as a recommendation in the mail authentication check (no alert).
-- README, *What it found so far*: the spam filter that checked no links.
+- README, *What it found so far*: the spam filter that checked no links, and delivery confirmations sent to spammers.
 
 ### Changed
 - **ShellCheck without a single finding**, checked on every push and pull request by a GitHub workflow (`.github/workflows/check.yml`; badge in the README), together with the shell syntax and that `STATE-FILES.md` is up to date. It uses the ShellCheck preinstalled on GitHub's runners, no third-party actions. Small fixes on the way: quoting, two `local x=$(…)` split so errors are not masked, `tr '[:upper:]' '[:lower:]'`; deliberate cases carry a `# shellcheck disable` comment with the reason.
 - The table "Outgoing deliveries per provider" is now called "… per receiving mail server (provider or MX host)": it always grouped by the mail server, not by the recipient's domain, so a spammer's forged domain shows up under the name of its mail server. `summary.txt` reads both names.
 - **The daily checks run again after any change of the script or the configuration file**, not only after a new version number. Until now an update from `main` with the same version, or a changed setting, showed the old daily results until the next night. `daily_date` now holds a checksum of both.
-- README: the example prompt for the AI review mentions outdated passwords, failed certificate renewals and refused blocklist lookups – if you use the prompt, update your copy.
+- README: the example prompt for the AI review mentions outdated passwords, failed certificate renewals, refused blocklist lookups, delivery confirmations to other servers and new IP addresses of the server – if you use the prompt, update your copy.
 
 ## [1.9.0] – 2026-11-11
 
