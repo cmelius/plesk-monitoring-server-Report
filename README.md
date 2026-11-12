@@ -40,9 +40,9 @@ The script runs as root and has grown to almost 3,000 lines of bash – more tha
 
 Why "ignore the comments": a malicious script would be full of reassuring ones. Asking for the quoted line behind every statement makes the answer checkable – and a claim without a line (AI assistants do invent details now and then) stands out. **Check the quoted lines with `grep` before you believe a finding.** In a test, one assistant reported the permission check of the configuration file as broken because its "quote" read `-perm 022` – the script says `-perm /022`, and the slash makes all the difference.
 
-Every push is also checked automatically on GitHub (badge at the top, workflow in `.github/workflows/check.yml`): shell syntax, [ShellCheck](https://www.shellcheck.net/) without a single finding, and that `STATE-FILES.md` matches the description built into the script. A handful of lines carry a `# shellcheck disable=…` comment with the reason – an awk program or grep pattern in single quotes, for example. This says nothing about what the script does; it only rules out a class of shell mistakes.
+Every push is also checked automatically on GitHub (badge at the top, workflow in `.github/workflows/check.yml`): shell syntax, [ShellCheck](https://www.shellcheck.net/) without a single finding, that `STATE-FILES.md` matches the description built into the script, and the tests in `tests/`. A handful of lines carry a `# shellcheck disable=…` comment with the reason – an awk program or grep pattern in single quotes, for example. ShellCheck says nothing about what the script does, it only rules out a class of shell mistakes; what the checks find is covered by the tests.
 
-The same workflow runs the tests in `tests/` (see [Tests](#tests)): the checks fed with anonymized logs of a real server, once with `mawk` (Debian's awk) and once with `gawk` (RHEL's awk). They show that the script still finds what it found there – they don't replace reading it.
+The tests (see [Tests](#tests)) are the checks fed with anonymized logs of a real server, once with `mawk` (Debian's awk) and once with `gawk` (RHEL's awk). They show that the script still finds what it found there – they don't replace reading it.
 
 Expect it to point out a few things that are by design:
 
