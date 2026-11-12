@@ -1997,7 +1997,7 @@ check_mailtls() {   # certificate of the mail server on the mail ports
   echo ""; echo "Mail server certificates for $name:"
   for p in $MAIL_TLS_PORTS; do
     case $p in 25|587) st="-starttls smtp" ;; 143) st="-starttls imap" ;; 110) st="-starttls pop3" ;; *) st="" ;; esac
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2086  # $st is empty or two words ("-starttls smtp") – split on purpose
     c=$(echo | timeout 8 openssl s_client -connect "${PUBIP:-127.0.0.1}:$p" -servername "$name" $st 2>/dev/null | openssl x509 2>/dev/null)
     if [[ -z $c ]]; then echo "  port $p: no TLS certificate (port closed or no TLS)"; continue; fi
     end=$(openssl x509 -noout -enddate <<<"$c" | sed 's/^notAfter=//'); days=$(( ($(date -d "$end" +%s) - $(date +%s)) / 86400 ))
@@ -2309,7 +2309,7 @@ daily_checks() {
   if [[ $(cat "$STATE_DIR/daily_date" 2>/dev/null) != "$stamp" ]]; then
     # mark the day first: if a daily check makes the run abort, the next runs still report hourly
     echo "$stamp" >"$STATE_DIR/daily_date"
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2086  # a list of check names, one argument each – split on purpose
     run_daily $DAILY_CHECKS >"$daily.new" 2>/dev/null; mv "$daily.new" "$daily"
   fi
   section "DAILY CHECKS"
@@ -2499,7 +2499,7 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
   files=$(find "$OUT_DIR" -maxdepth 1 -name 'report-*.txt' -mmin -$(( SUMMARY_HOURS * 60 )) 2>/dev/null | sort)
   [[ -n $files ]] || return 0
   newest=$(tail -n 1 <<<"$files")
-  # shellcheck disable=SC2086
+  # shellcheck disable=SC2086  # a list of report files (names without spaces, made by the script) – split on purpose
   recs=$(summary_records $files)
   rec() { grep "^$1"$'\t' <<<"$recs" | cut -f2-; }
   n=$(rec NRUN)
@@ -3067,7 +3067,7 @@ load_conf() {
     logger -t plesk-server-report "$m" 2>/dev/null
     DONE=1; exit 1
   fi
-  # shellcheck source=/dev/null
+  # shellcheck source=/dev/null  # the configuration file is not in the repository, so ShellCheck cannot follow it
   [[ -r $CONF ]] && . "$CONF"
   return 0
 }
@@ -3206,12 +3206,12 @@ main() {
   if (( ONLY_MODE )); then
     local hourly daily
     hourly=$(only_list "$HOURLY_CHECKS"); daily=$(only_list "$DAILY_CHECKS")
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2086  # a list of check names, one argument each – split on purpose
     [[ -n $hourly ]] && run_hourly $hourly
     if [[ -n $daily ]]; then
       DALERTS=$TMPD/daily_alerts
       section "DAILY CHECKS"
-      # shellcheck disable=SC2086
+      # shellcheck disable=SC2086  # a list of check names, one argument each – split on purpose
       run_daily $daily >>"$BODY" 2>/dev/null
       while IFS= read -r a; do [[ -n $a ]] && alert "$a"; done <"$DALERTS"
     fi
@@ -3221,7 +3221,7 @@ main() {
     return 0
   fi
   write_state_readme
-  # shellcheck disable=SC2086
+  # shellcheck disable=SC2086  # a list of check names, one argument each – split on purpose
   run_hourly $HOURLY_CHECKS
   daily_checks
   timeout_alerts
