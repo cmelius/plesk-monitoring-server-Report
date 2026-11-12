@@ -2,6 +2,16 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
+## [1.11.0] – not yet released (on `main`)
+
+### Added
+- **Full mailboxes:** mail rejected because a mailbox on this server is full raises an alert in every run, naming the mailbox (Plesk: `4.2.2 Mailbox full` from its mail filter; Dovecot and other local delivery: status `4.2.2`/`5.2.2`, "quota exceeded"; deliveries to other servers are left out).
+- **Mailbox fill level** (new daily check `mailboxes`): every mailbox against its size limit, the five fullest listed, a warning from `WARN_MAILBOX_PCT` (new setting, default 95 %, `0` = off). The usage comes from `maildirsize`, the limit on Plesk from its database – the mailbox's own, or the subscription's default –, without Plesk from `maildirsize`.
+- README, *What it found so far*: a full mailbox that rejected mail.
+
+### Changed
+- Every `# shellcheck` directive in the script says why it is there.
+
 ## [1.10.0] – 2026-11-12
 
 ### Added

@@ -64,7 +64,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.10.0
+VERSION=1.11.0
 
 set -uo pipefail
 export LC_ALL=C
@@ -110,6 +110,7 @@ WATCH_RECIPIENT_DOMAINS=""    # space-separated recipient domains whose deliveri
 WARN_BLOCKLIST=1              # remote rejections mentioning a blocklist, reputation, spam or rate limiting
 WARN_QUEUE=200                # messages in the Postfix queue
 WARN_AUTH_FAIL=300            # failed mail logins (SMTP + IMAP/POP3)
+WARN_MAILBOX_PCT=95           # daily: mailbox filled to x % of its size limit; 0 = off (full mailboxes rejecting mail are always reported)
 WARN_DSN=1                    # delivery confirmations (DSN "delivered") sent to other servers – spammers request them to verify addresses; 0 = off
 WARN_OLD_PASSWORD=3           # failed logins of one mailbox from an IP with earlier successful mail logins (outdated password on a device?); 0 = off
 WARN_LOAD_FACTOR=1.5          # 5-min load > CPU cores × factor
@@ -179,7 +180,7 @@ CONF=/etc/plesk-server-report.conf
 # Check names in report order. Hourly checks analyse the log lines since the previous run,
 # daily checks run once a day and are cached in $STATE_DIR/daily.txt.
 HOURLY_CHECKS="mail webmail system fail2ban web uploads logins panel persistence services backups"
-DAILY_CHECKS="updates certificates https serverdns mailtls domaindns exposed webshell mailauth"
+DAILY_CHECKS="updates certificates https serverdns mailtls domaindns exposed webshell mailauth mailboxes"
 
 # =============================================================================
 # Helper functions
@@ -544,6 +545,11 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     # delivery confirmations (DSN NOTIFY=SUCCESS): Postfix creates a new mail to the original sender;
     # sent to another server, they mostly answer spam with a forged sender
     /postfix\/bounce\[/ && / sender delivery status notification: / { c_ = $NF; dsnq[c_] = 1 }
+    # a full mailbox here: Plesk rejects with its milter ("4.2.2 Mailbox full"), Dovecot/local delivery
+    # logs dsn=4.2.2/5.2.2 or "quota exceeded" – RFC 3463: X.2.2 = mailbox full. Deliveries to other
+    # servers (postfix/smtp) are not ours to fix and are left out.
+    !/postfix\/smtp\[/ && match($0, /to=<[^>]+>/) && (/[ =]4\.2\.2[ ;,)]|[ =]5\.2\.2[ ;,)]/ || tolower($0) ~ /mailbox (is )?full|over quota|quota exceeded/) && (/milter-reject|status=(deferred|bounced)/) {
+      u_ = tolower(substr($0, RSTART+4, RLENGTH-5)); mbf[u_]++ }
     / status=(sent|deferred|bounced)/ && /postfix\/smtp\[/ && (qid($0) in dsnq) && !((qid($0)) in dsnx) {
       dsnx[qid($0)] = 1; dsnn++; if (dsnex == "") dsnex = rdom($0) }
     / status=(sent|deferred|bounced)/ && /postfix\/smtp\[/ {
@@ -643,6 +649,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       printf "SADNS\t%d\t%d\t%s\n", sas, sab, rl_
       for (p in pt) printf "PROV\t%d\t%d\t%d\t%d\t%s\n", pt[p], pv[p, 1], pv[p, 2], pv[p, 3], p
       printf "DSNOUT\t%d\t%s\n", dsnn, dsnex
+      for (u in mbf) printf "MBFULL\t%d\t%s\n", mbf[u], u
       nw = split(watch, ww, " "); for (i = 1; i <= nw; i++) { w = tolower(ww[i]); printf "WATCH\t%d\t%d\t%d\t%s\t%s\n", wv[w, 1], wv[w, 2], wv[w, 3], w, wx[w] }
       for (k in iok) { split(k, kk, SUBSEP); printf "IMOK\t%d\t%s\t%s\n", iok[k], kk[1], kk[2] }
       for (k in irs) { split(k, kk, SUBSEP); printf "IMRD\t%d\t%s\t%s\n", ird[k], kk[1], kk[2] }
@@ -681,6 +688,12 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     grep '^PROV' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -10 |
       awk -F'\t' '{printf "  %-22s %5d / %d / %d\n", $6, $3, $4, $5}' >>"$BODY"
   fi
+  # full mailboxes: mail to them is rejected – the customer often notices only days later
+  while IFS=$'\t' read -r _ n k; do
+    [[ -n $k ]] || continue
+    out "Mailbox full: $k – $n delivery attempt(s) rejected"
+    alert "Mail: mailbox $k is full – $n delivery attempt(s) rejected since the last run (senders retry for a few days after 4.2.2, 5.2.2 returns the mail at once). Raise its size limit, or have the customer delete or archive mail"
+  done < <(grep '^MBFULL' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr)
   # delivery confirmations to other servers: Postfix offers DSN to everyone by default
   read -r _ n k <<<"$(grep '^DSNOUT' <<<"$MAILSTATS" | tr '\t' ' ')"
   if (( ${n:-0} > 0 )); then
@@ -2260,6 +2273,52 @@ check_mailauth() {   # SPF / DKIM / DMARC of every domain with mail service
 # =============================================================================
 
 # check_enabled NAME – the on/off switches from the settings (with --only every named check runs)
+# Mailbox fill level: usage from the Maildir++ file maildirsize (Courier and Dovecot keep it up
+# to date), the size limit from Plesk – the mailbox's own, or with -1 the subscription's default
+# (domains inside a subscription use the main domain's). Without Plesk the limit in maildirsize
+# counts. Mailboxes without limit or without maildirsize are left out.
+fmt_bytes() {   # fmt_bytes N – 1.07 GB / 512 MB, in units of 1024 like Plesk shows them
+  awk -v b="$1" 'BEGIN { if (b >= 1073741824) printf "%.2f GB", b/1073741824; else printf "%.0f MB", b/1048576 }'
+}
+maildir_used() {   # maildir_used FILE – bytes used according to a maildirsize file
+  awk 'NR > 1 { s += $1 } END { printf "%.0f\n", s + 0 }' "$1" 2>/dev/null
+}
+check_mailboxes() {
+  local who lim sub f used pct n=0 nolim=0 nofile=0 d mb h
+  echo ""; echo "Mailboxes (fill level of the size limit; warning from WARN_MAILBOX_PCT=$WARN_MAILBOX_PCT %):"
+  if [[ -z $MAILNAMES_DIR || ! -d $MAILNAMES_DIR ]]; then echo "  mailbox directory MAILNAMES_DIR=\"$MAILNAMES_DIR\" not found – skipped"; return 0; fi
+  {
+    if command -v plesk >/dev/null; then
+      T "$CMD_TIMEOUT" plesk db -Ne "SELECT CONCAT(m.mail_name, '@', d.name), m.mbox_quota, IFNULL(l.value, -1) FROM mail m JOIN domains d ON d.id = m.dom_id LEFT JOIN Subscriptions s ON s.object_id = IF(d.webspace_id > 0, d.webspace_id, d.id) AND s.object_type = 'domain' LEFT JOIN SubscriptionProperties sp ON sp.subscription_id = s.id AND sp.name = 'limitsId' LEFT JOIN Limits l ON l.id = sp.value AND l.limit_name = 'mbox_quota' WHERE m.postbox = 'true'" 2>/dev/null
+    else
+      # without Plesk: every <domain>/<mailbox> with a maildirsize file, limit from its first line
+      for f in "$MAILNAMES_DIR"/*/*/Maildir/maildirsize; do
+        [[ -f $f ]] || continue
+        h=${f%/Maildir/maildirsize}; mb=${h##*/}; d=${h%/*}; d=${d##*/}
+        printf '%s@%s\t%s\t-1\n' "$mb" "$d" "$(head -1 "$f" | grep -oE '^[0-9]+' || echo -1)"
+      done
+    fi
+  } >"$TMP.mbx"
+  while IFS=$'\t' read -r who lim sub; do
+    [[ -n $who ]] || continue
+    [[ $lim =~ ^[0-9]+$ ]] && (( lim > 0 )) || lim=$sub
+    if ! [[ $lim =~ ^[0-9]+$ ]] || (( lim <= 0 )); then nolim=$((nolim + 1)); continue; fi
+    f="$MAILNAMES_DIR/${who#*@}/${who%@*}/Maildir/maildirsize"
+    if [[ ! -r $f ]]; then nofile=$((nofile + 1)); continue; fi
+    used=$(maildir_used "$f"); n=$((n + 1))
+    pct=$(( used * 100 / lim ))
+    printf '%d\t%s\t%s\t%s\n' "$pct" "$who" "$(fmt_bytes "$used")" "$(fmt_bytes "$lim")" >>"$TMP.mbp"
+    if (( pct >= WARN_MAILBOX_PCT )); then
+      dalert "Mail: mailbox $who is $pct % full ($(fmt_bytes "$used") of $(fmt_bytes "$lim")) – when it is full, mail to it is rejected. Raise its size limit, or have the customer delete or archive mail"
+    fi
+  done <"$TMP.mbx"
+  if [[ -s $TMP.mbp ]]; then
+    sort -t$'\t' -k1,1nr "$TMP.mbp" | head -5 | awk -F'\t' '{ printf "  %3d %%  %s  (%s of %s)\n", $1, $2, $3, $4 }'
+  fi
+  echo "  $n mailbox(es) checked; $nolim without size limit, $nofile without maildirsize (not counted)"
+  rm -f "$TMP.mbp"
+  return 0
+}
 check_enabled() {
   (( ONLY_MODE )) && return 0
   case $1 in
@@ -2268,6 +2327,7 @@ check_enabled() {
     exposed)   (( EXPOSED_FILES_CHECK )) ;;
     webshell)  (( WEBSHELL_CHECK )) ;;
     mailauth)  (( MAILAUTH_CHECK )) ;;
+    mailboxes) (( WARN_MAILBOX_PCT > 0 )) ;;
     https)     (( HTTPS_CHECK )) ;;
     persistence) (( PERSISTENCE_CHECK )) ;;
     *) return 0 ;;
