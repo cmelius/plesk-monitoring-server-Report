@@ -12,7 +12,7 @@ setup() { load_script; MAILNAMES_DIR="$FIX/mailboxes"; WARN_MAILBOX_PCT=95; }
   run check_mailboxes
   [[ $output == *" 68 %  info@d1.example  (1.07 GB of 1.56 GB)"* ]]
   [[ $output == *" 98 %  boss@d2.example"* ]]
-  [[ $output == *"2 mailbox(es) checked; 1 without size limit, 1 without maildirsize"* ]]
+  [[ $output == *"2 mailbox(es) checked; 1 unlimited (no size limit set in Plesk), 1 without maildirsize"* ]]
   { check_mailboxes || true; } >/dev/null
   run cat "$DALERTS"
   [[ $output == *"mailbox boss@d2.example is 98 % full"* ]]
@@ -23,7 +23,7 @@ setup() { load_script; MAILNAMES_DIR="$FIX/mailboxes"; WARN_MAILBOX_PCT=95; }
   run check_mailboxes
   [[ $output == *" 53 %  info@d1.example"* ]]
   [[ $output == *" 98 %  boss@d2.example"* ]]
-  [[ $output == *"2 mailbox(es) checked; 1 without size limit"* ]]
+  [[ $output == *"2 mailbox(es) checked; 1 unlimited (no size limit set in maildirsize)"* ]]
 }
 
 @test "warning level is configurable" {

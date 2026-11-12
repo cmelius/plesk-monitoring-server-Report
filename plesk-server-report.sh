@@ -2294,7 +2294,7 @@ maildir_used() {   # maildir_used FILE – bytes used according to a maildirsize
   awk 'NR > 1 { s += $1 } END { printf "%.0f\n", s + 0 }' "$1" 2>/dev/null
 }
 check_mailboxes() {
-  local who lim sub f used pct n=0 nolim=0 nofile=0 d mb h
+  local who lim sub f used pct n=0 nolim=0 nofile=0 d mb h where
   echo ""; echo "Mailboxes (fill level of the size limit; warning from WARN_MAILBOX_PCT=$WARN_MAILBOX_PCT %):"
   if [[ -z $MAILNAMES_DIR || ! -d $MAILNAMES_DIR ]]; then echo "  mailbox directory MAILNAMES_DIR=\"$MAILNAMES_DIR\" not found – skipped"; return 0; fi
   {
@@ -2325,7 +2325,8 @@ check_mailboxes() {
   if [[ -s $TMP.mbp ]]; then
     sort -t$'\t' -k1,1nr "$TMP.mbp" | head -5 | awk -F'\t' '{ printf "  %3d %%  %s  (%s of %s)\n", $1, $2, $3, $4 }'
   fi
-  echo "  $n mailbox(es) checked; $nolim without size limit, $nofile without maildirsize (not counted)"
+  where="in Plesk"; command -v plesk >/dev/null || where="in maildirsize"
+  echo "  $n mailbox(es) checked; $nolim unlimited (no size limit set $where), $nofile without maildirsize (not counted)"
   rm -f "$TMP.mbp"
   return 0
 }

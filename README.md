@@ -347,7 +347,7 @@ Mailboxes (fill level of the size limit; warning from WARN_MAILBOX_PCT=95 %):
    78 %  info@salon.example  (809 MB of 1.00 GB)
    77 %  orders@shop.example  (779 MB of 1000 MB)
    64 %  info@shop.example  (1.07 GB of 1.56 GB)
-  89 mailbox(es) checked; 19 without size limit, 5 without maildirsize (not counted)
+  89 mailbox(es) checked; 19 unlimited (no size limit set in Plesk), 5 without maildirsize (not counted)
 
 IP geolocation: DB-IP.com Lite databases (CC BY 4.0)
 ```
