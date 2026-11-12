@@ -339,6 +339,14 @@ Mail authentication (SPF / DKIM / DMARC):
   a single missing/outdated record is a recommendation (DMARC passes if SPF or DKIM passes).
   DNS queried via 1.1.1.1
 
+Mailboxes (fill level of the size limit; warning from WARN_MAILBOX_PCT=95 %):
+   91 %  office@lawfirm.example  (2.75 GB of 3.00 GB)
+   84 %  jane@agency.example  (423 MB of 500 MB)
+   78 %  info@salon.example  (809 MB of 1.00 GB)
+   77 %  orders@shop.example  (779 MB of 1000 MB)
+   64 %  info@shop.example  (1.07 GB of 1.56 GB)
+  89 mailbox(es) checked; 19 without size limit, 5 without maildirsize (not counted)
+
 IP geolocation: DB-IP.com Lite databases (CC BY 4.0)
 ```
 
@@ -385,6 +393,8 @@ Outgoing deliveries per receiving mail server (provider or MX host; total sent /
   apple icloud              41 / 6 / 4
   mailhost.example          37 / 0 / 0
 Watched recipient domain invoices.example.com: 21 sent, 0 deferred, 0 bounced
+Full mailboxes (rejected delivery attempts in total, first – last):
+       7  info@salon.example  2026-10-25 23:05 UTC – 2026-10-26 07:05 UTC
 Spam filter: all mails scanned (limit 3.0 MB = 3145728 bytes)
 DNS blocklists for the server IP: not listed in any run
 

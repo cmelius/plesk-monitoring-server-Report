@@ -7,7 +7,8 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 ### Added
 - **Full mailboxes:** mail rejected because a mailbox on this server is full raises an alert in every run, naming the mailbox (Plesk: `4.2.2 Mailbox full` from its mail filter; Dovecot and other local delivery: status `4.2.2`/`5.2.2`, "quota exceeded"; deliveries to other servers are left out).
 - **Mailbox fill level** (new daily check `mailboxes`): every mailbox against its size limit, the five fullest listed, a warning from `WARN_MAILBOX_PCT` (new setting, default 95 %, `0` = off). The usage comes from `maildirsize`, the limit on Plesk from its database – the mailbox's own, or the subscription's default –, without Plesk from `maildirsize`.
-- README, *What it found so far*: a full mailbox that rejected mail.
+- `summary.txt` lists full mailboxes (rejected delivery attempts, first – last) and delivery confirmations sent to other servers – both were only in the single reports and the alerts so far.
+- README, *What it found so far*: a full mailbox that rejected mail. Example report and summary show the new lines.
 
 ### Changed
 - Every `# shellcheck` directive in the script says why it is there.

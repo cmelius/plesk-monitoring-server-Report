@@ -2430,6 +2430,8 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       if ($0 ~ /^Spam filter: /) { r = $0; sub(/^Spam filter: /, "", r); skt += r + 0
                                    if (match($0, /= [0-9]+ bytes/) || match($0, /limit of [0-9]+/)) { l = substr($0, RSTART, RLENGTH); gsub(/[^0-9]/, "", l); skl = l }; next }
       if ($0 ~ /^DNS blocklists for/ && $0 ~ /LISTED/) { print "BL\t" tm "\t" t($0); next }
+      if ($0 ~ /^Mailbox full: /) { m = $0; sub(/^Mailbox full: /, "", m); n = m; sub(/ .*/, "", m); sub(/^[^ ]* [^ ]* /, "", n); print "MBF\t" tm "\t" (n + 0) "\t" t(m); next }
+      if ($0 ~ /^Delivery confirmations \(DSN\) sent to other servers: /) { n = $0; sub(/.*servers: /, "", n); print "DSNO\t" tm "\t" (n + 0); next }
       if ($0 ~ /^Top senders/) { sub_ = "top"; next }
       if ($0 ~ /^Authenticated mailboxes/) { sub_ = "auth"; next }
       if ($0 ~ /^Mailboxes sending with a foreign/) { sub_ = "mism"; next }
@@ -2589,6 +2591,13 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
     fi
     rec WATCHTOT | awk -F'\t' '{printf "Watched recipient domain %s: %d sent, %d deferred, %d bounced\n", $4, $1, $2, $3}'
     rec WATCHX | awk -F'\t' '{printf "  example (%s): %s\n", $1, $2}'
+    if [[ -n $(rec MBF) ]]; then
+      echo "Full mailboxes (rejected delivery attempts in total, first – last):"
+      rec MBF | awk -F'\t' '{ n[$3] += $2; if (!($3 in f)) f[$3] = $1; l[$3] = $1 }
+        END { for (m in n) printf "  %6d  %s  %s – %s\n", n[m], m, f[m], l[m] }' | sort -k1,1nr
+    fi
+    rec DSNO | awk -F'\t' '{ n += $2; if (f == "") f = $1; l = $1 }
+      END { if (n > 0) printf "Delivery confirmations (DSN) sent to other servers: %d in total (%s – %s)\n", n, f, l }'
     rec SKIPTOT | awk -F'\t' '{ lim = ($2 != "" ? sprintf("limit %.1f MB = %s bytes", $2/1048576, $2) : "") }
       $1 > 0 {printf "Spam filter: %d mail(s) not scanned, larger than the size limit%s\n", $1, (lim != "" ? " (" lim ")" : "")}
       $1 == 0 {printf "Spam filter: all mails scanned%s\n", (lim != "" ? " (" lim ")" : "")}'
