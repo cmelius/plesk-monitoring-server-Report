@@ -63,8 +63,16 @@ is always reported). Processes are not stored – they are checked live in every
 | `offsets/` | one file per log, named after a hash of its path; content `inode bytes-read path` | the script reads only the lines added since the last run. The inode identifies the file after a rotation (`maillog` → `maillog.processed`), so the rest of the old file is still read. Delete a file here and that log is read again from its last 20,000 lines. |
 | `journal_since` | Unix time | position in the systemd journal (only if there is no mail log file). |
 | `last_scan` | empty; its modification time counts | new PHP files in upload folders are files changed after this – by file date or by inode change time, so a file with its date set back is found too. |
-| `webshell_scan` | empty; its modification time counts | the daily scan for suspicious code looks only at PHP files, `.htaccess`, `.user.ini` and `php.ini` changed since then (file date or inode change time). |
-| `webshell_conf_full` | empty | marks that `.htaccess`, `.user.ini` and `php.ini` were scanned completely once. Without it, the next daily scan checks all of them, whatever their date. |
+| `webshell_scan` | empty; its modification time counts | the daily scan for suspicious code looks only at PHP files changed since then (file date or inode change time). |
+
+## Checks that are plugins (`plugins/`)
+
+A plugin never writes here itself: it prints its new state, and the script stores it – only in
+a normal run, not with `--only`. Delete a file and that plugin starts from scratch.
+
+| File | Content (one entry per line) | Used for |
+|---|---|---|
+| `plugins/php-config/state` | `last_scan` and the Unix time (with fractions of a second) of the last complete daily scan | the daily scan of `.htaccess`, `.user.ini` and `php.ini` in the document roots looks only at files changed since then (file date or inode change time). Without it, the scan checks all of them, whatever their date – a backdoor may be older than the script. Taken over from `webshell_scan` of version 1.x. |
 
 ## Daily checks
 

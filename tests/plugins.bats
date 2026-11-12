@@ -35,7 +35,7 @@ notes() { cat "$TMPD/notes" 2>/dev/null; }
     c=$(basename "$f" .sh)
     [[ " $HOURLY_CHECKS $DAILY_CHECKS " == *" $c "* ]]
     ! declare -F "check_$c" >/dev/null
-    plugin_header "$f" "$c" hourly
+    if [[ " $DAILY_CHECKS " == *" $c "* ]]; then plugin_header "$f" "$c" daily; else plugin_header "$f" "$c" hourly; fi
   done
 }
 
@@ -113,6 +113,32 @@ PLUGIN_LOGS="$L_DIR/../$(id)"'
   ALERTS=(); run_plugin t24
   run alerts
   [[ $output == *"the check t24 was not run – header"* ]]
+}
+
+@test "STATE: stored by the main script, handed back as \$PSR_STATE; a daily plugin writes to stdout" {
+  plugin t25 'out "before: $(tr "\n" " " <"$PSR_STATE")"; state "n 1"; state "x \$(id)"; alert "daily alert"'
+  sed -i 's/^PLUGIN_SCHEDULE=.*/PLUGIN_SCHEDULE="daily"/' "$H/plugins/t25.sh"; sums
+  run run_plugin t25 daily
+  [ "$output" = "before: " ]                   # trailing spaces of a line are kept
+  [ "$(cat "$STATE_DIR/plugins/t25/state")" = "n 1"$'\n''x $(id)' ]
+  grep -qx 'daily alert' "$DALERTS"
+  run run_plugin t25 daily
+  [ "$output" = 'before: n 1 x $(id) ' ]
+  ALERTS=(); run_plugin t25 hourly
+  run alerts
+  [[ $output == *"the check t25 was not run – header: PLUGIN_SCHEDULE must be hourly"* ]]
+}
+
+@test "PLUGIN_INPUTS: domains is handed over, anything else is refused" {
+  docroots() { printf 'd1.example\t/var/www/d1\n'; }
+  plugin t26 'while IFS=$(printf "\t") read -r d r; do out "$d at $r"; done <"$PSR_DOMAINS"' 'PLUGIN_INPUTS="domains"'
+  run_plugin t26
+  run report
+  [[ $output == *"d1.example at /var/www/d1"* ]]
+  plugin t27 'out "ran"' 'PLUGIN_INPUTS="passwords"'
+  run_plugin t27
+  run alerts
+  [[ $output == *"the check t27 was not run – header: PLUGIN_INPUTS lists passwords – known: domains"* ]]
 }
 
 @test "a changed plugin is not run" {

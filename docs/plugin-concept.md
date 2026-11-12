@@ -1,7 +1,7 @@
 # Plugin system – concept
 
-Status: concept for a later major version (2.0). Steps 1 to 3 of the order below are
-built (framework, `panel`, `backups`, `webmail`; see "State of the code"). This branch
+Status: concept for a later major version (2.0). Steps 1 to 4 of the order below are
+built (framework, `panel`, `backups`, `webmail`, `php-config`; see "State of the code"). This branch
 (`feature/plugin-system`) carries the work; `main` continues with the 1.x releases
 and is merged into this branch from time to time.
 
@@ -227,9 +227,10 @@ are the same.
 
 ## State of the code
 
-Steps 1 to 3 are built: `lib/plugin-lib.sh` (runs one plugin), `plugins/panel.sh`,
+Steps 1 to 4 are built: `lib/plugin-lib.sh` (runs one plugin), `plugins/panel.sh`,
 `plugins/backups.sh` (no log on stdin; `PLUGIN_READS` names the directories),
-`plugins/webmail.sh` (several logs), the loader
+`plugins/webmail.sh` (several logs), `plugins/php-config.sh` (daily, context `domains`,
+state), the loader
 and the protocol in the main script (`run_plugin`), `tools/update-plugin-sums.sh`, and
 the tests in `tests/plugins.bats` and one file per plugin (with
 parity tests against the old functions in `tests/legacy/`). Where it differs from the text above, for now:
@@ -252,7 +253,16 @@ parity tests against the old functions in `tests/legacy/`). Where it differs fro
   `check_<name>` function is a plugin.
 - Offsets are still kept per log path. The key per plugin comes with step 5, when two
   readers share a log.
-- `STATE`, `PLUGIN_INPUTS` and `PLUGIN_REQUIRES` come with step 4; daily plugins too.
+- Daily plugins print their own heading (`PLUGIN_SECTION` empty), their time limit is
+  three times `FIND_TIMEOUT` (one scan over all document roots instead of one `find`
+  per domain), their alerts go to the daily alerts.
+- State: `STATE` lines are kept only if the plugin ended without error and printed at
+  least one, and only in a normal run. `plugin_state_seed` takes the state over from the
+  files of version 1.x (`php-config`: the time of `webshell_scan`, if
+  `webshell_conf_full` exists); the old file is deleted once the new state exists.
+- `php-config` stores the scan time with nanoseconds (`date +%s.%N`, compared with
+  `find -newermt/-newerct @…`), as precise as the stamp file it replaces.
+- `PLUGIN_REQUIRES` is not built: no plugin needs it yet.
 - Limits: 500 `TEXT` lines, 100 alerts, 10 notes, 2000 bytes per line. The time limit
   is `FIND_TIMEOUT`.
 - Commands inside a plugin have no time limit of their own (`T`); the limit for the

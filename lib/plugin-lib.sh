@@ -11,7 +11,14 @@
 #   ALERT <text>   an alert
 #   ALERT-FOREIGN <ip> <ip> … :: <text>   an alert only if one of the IPs is outside
 #                  ALLOWED_COUNTRIES; {ips} in the text becomes these IPs
-# out, note and alert below print these lines, so a check reads the same inside the main
+#   STATE <line>   a line of its new state; the main script stores it (only in a normal run)
+#                  and gives it back next time as the file $PSR_STATE
+#
+# A daily plugin's TEXT lines go into the daily checks; it prints its own heading.
+# Context files from the main script: $PSR_DOMAINS ("domain<TAB>document root", if the
+# plugin lists domains in PLUGIN_INPUTS).
+#
+# out, note, alert and state below print these lines, so a check reads the same inside the main
 # script and as a plugin. Everything else on stdout is dropped by the main script.
 #
 # A plugin only reads: it writes no files and makes no network connections.
@@ -24,6 +31,7 @@ umask 077
 out()   { printf 'TEXT %s\n' "$*"; }
 note()  { printf 'NOTE %s\n' "$*"; }
 alert() { printf 'ALERT %s\n' "$*"; }
+state() { printf 'STATE %s\n' "$*"; }
 
 # geo_ref IP – stands for "IP (country, operator)": the main script, which has the GeoIP
 # database, replaces it. \037 never comes from a log line (log_clean removes it).
@@ -38,9 +46,9 @@ ignored_domain() { [[ " ${WEB_IGNORE_DOMAINS:-} " == *" $1 "* ]]; }
 # Each log on stdin starts with a line "\036 NUMBER PATH"; logs that could not be read are
 # listed by number in PSR_LOGS_MISSING. PSR_SEP is that first character, for awk -v sep=…
 PSR_SEP=$(printf '\036')
-: "${PSR_LOGS_MISSING:=}"
+: "${PSR_LOGS_MISSING:=}" "${PSR_STATE:=/dev/null}" "${PSR_DOMAINS:=/dev/null}"
 # shellcheck disable=SC2034  # for the plugins
-readonly PSR_SEP PSR_LOGS_MISSING
+readonly PSR_SEP PSR_LOGS_MISSING PSR_STATE PSR_DOMAINS
 
 [[ -r ${1:-} ]] || exit 96
 # shellcheck source=/dev/null  # the plugin file is given by the main script

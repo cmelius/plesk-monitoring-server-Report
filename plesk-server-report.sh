@@ -162,7 +162,7 @@ ATTACK_STATS=1                # SQLi/traversal/RCE/XSS patterns, sensitive-file 
 EXPOSED_FILES_CHECK=1         # daily: .env, .git, SQL dumps, backup archives, config copies in document roots
 # regex on the full path of findings to ignore; default: SQL schema/upgrade files shipped with software
 EXPOSED_FILES_IGNORE='/wp-content/plugins/[^/]+/(sql|schema|install)/|/include/upgrader/streams/|/install(ation)?/schemas/|/doc/[^/]+\.sql$' 
-WEBSHELL_CHECK=1              # daily: recently changed PHP files containing typical backdoor code
+WEBSHELL_CHECK=1              # daily: recently changed PHP files containing typical backdoor code, PHP settings in .htaccess/.user.ini/php.ini
 WEBSHELL_IGNORE=""            # regex on the full path of findings to ignore
 WEBSHELL_FIRST_DAYS=7         # first run: scan PHP files changed within this many days
 # Access & persistence (hourly): what an attacker leaves behind. Only reads, changes nothing
@@ -189,7 +189,7 @@ CONF=/etc/plesk-server-report.conf
 # Check names in report order. Hourly checks analyse the log lines since the previous run,
 # daily checks run once a day and are cached in $STATE_DIR/daily.txt.
 HOURLY_CHECKS="mail webmail system fail2ban web uploads logins panel persistence services backups"
-DAILY_CHECKS="updates certificates https serverdns mailtls domaindns exposed webshell mailauth mailboxes"
+DAILY_CHECKS="updates certificates https serverdns mailtls domaindns exposed webshell php-config mailauth mailboxes"
 
 # Plugins: checks for specific software, each a file of its own in plugins/ next to this script,
 # run in a process of its own (run_plugin). A name in HOURLY_CHECKS without a check_<name>
@@ -202,11 +202,13 @@ PLUGIN_MAX_TEXT=500           # report lines per plugin and run; more is dropped
 PLUGIN_MAX_ALERTS=100
 PLUGIN_MAX_NOTES=10
 PLUGIN_MAX_LINE=2000          # bytes per line
+PLUGIN_MAX_STATE=1048576       # bytes of STATE lines per plugin
 # sha256sum of lib/*.sh and plugins/*.sh – written by tools/update-plugin-sums.sh, checked by the tests
 # >>> plugin sums
-PLUGIN_SUMS='a9e57977cc1a5753cf6a37ca46821574a2c50e6c554bddd6e6e0c596e388b28d  lib/plugin-lib.sh
+PLUGIN_SUMS='c2a7e353d70e1f00e8e97ee5106a51f90854c98a014b69ec6ce2505551b8c377  lib/plugin-lib.sh
 9e7bc59eaf72d53e9aa71dba1cfd8db1589b74342b4139d1f420f462bafb17d9  plugins/backups.sh
 abab3680694f294bac2d2dc5fc52f4cc8090644ce27075cb0fbb35eea64c643a  plugins/panel.sh
+62c05f2ba28f2da961ed0181df78ecd800a9e477e3d10f46fb3432d83d660825  plugins/php-config.sh
 27ab6638bb38af2c4be885dc8d0c74b83cb635fb2e26b313c2b7d8cdd83dd317  plugins/webmail.sh'
 # <<< plugin sums
 
@@ -2008,33 +2010,14 @@ check_exposed() {   # .env, .git, dumps, backups, config copies in document root
 }
 # "Recently changed" = by file date (mtime) or by inode change time (ctime): a backdated file
 # (PHP touch()) still has a fresh ctime.
-# .htaccess / .user.ini / php.ini: settings that make the web server run attacker code – a file
-# loaded before every PHP request (auto_prepend_file/auto_append_file, except known security
-# plugins), PHP executed for image or text files, and the signature of a widespread WordPress
-# malware campaign that blocks every PHP file except its own. Prints "FILE<TAB>LINE" per hit.
-php_config_backdoors() {   # php_config_backdoors < list of files
-  # shellcheck disable=SC2016  # awk program: its $0 is awk's, not the shell's
-  T "$FIND_TIMEOUT" xargs -r -d '\n' awk '
-    FNR == 1 { img = 0; done_ = 0 }
-    done_ { next }
-    { l = tolower($0); sub(/^[ \t]+/, "", l) }
-    l ~ /^[#;]/ { next }
-    l ~ /auto_(prepend|append)_file/ && l !~ /(wordfence-waf|ninjafirewall|sucuri)/ && l !~ /auto_(prepend|append)_file[ \t=]+"?(none)?"?[ \t]*$/ { hit(); next }
-    l ~ /(addhandler|addtype)[^#]*php/ && l ~ /\.(jpe?g|png|gif|ico|bmp|svg|webp|txt)([ \t$]|$)/ { hit(); next }
-    l ~ /<filesmatch[^>]*(jpe?g|png|gif|ico|bmp|svg|webp|txt)/ { img = 1 }
-    img && l ~ /sethandler[^#]*php/ { hit(); next }
-    l ~ /<\/filesmatch/ { img = 0 }
-    l ~ /<filesmatch[^>]*\.\(py\|exe\|php\)/ { hit(); next }
-    function hit() { printf "%s\t%s\n", FILENAME, substr($0, 1, 160); done_ = 1 }
-  ' 2>/dev/null
-}
-check_webshell() {   # recently changed PHP files with typical backdoor code, PHP settings in .htaccess/.user.ini
-  local stamp="$STATE_DIR/webshell_scan" new="$STATE_DIR/webshell_scan.new" dom root out="" n=0 hits=0 f nto ln
+# .htaccess / .user.ini / php.ini: plugins/php-config.sh, run by run_plugin.
+check_webshell() {   # recently changed PHP files with typical backdoor code
+  local stamp="$STATE_DIR/webshell_scan" new="$STATE_DIR/webshell_scan.new" dom root out="" n=0 hits=0 f nto
   # shellcheck disable=SC2016  # a grep pattern: $_POST etc. are PHP, not shell variables
   local re='eval[[:space:]]*\([[:space:]]*(base64_decode|gzinflate|gzuncompress|str_rot13|gzdecode)[[:space:]]*\(|assert[[:space:]]*\([[:space:]]*\$_(POST|GET|REQUEST|COOKIE)|\$_(POST|GET|REQUEST|COOKIE)[[:space:]]*\[[^]]*\][[:space:]]*\(|preg_replace[[:space:]]*\([[:space:]]*["'"'"'][^"'"'"']*/e["'"'"']|create_function[[:space:]]*\([^)]*\$_(POST|GET|REQUEST)|(system|shell_exec|passthru|exec|popen|proc_open)[[:space:]]*\([[:space:]]*\$_(POST|GET|REQUEST|COOKIE)'
   can_write_state && touch "$new"
   nto=$(timeouts_seen)
-  echo ""; echo "Suspicious code in recently changed PHP files, .htaccess and .user.ini (typical webshell/backdoor patterns):"
+  echo ""; echo "Suspicious code in recently changed PHP files (typical webshell/backdoor patterns):"
   while IFS=$'\t' read -r dom root; do
     [[ -d $root ]] || continue
     n=$((n + 1))
@@ -2046,19 +2029,9 @@ check_webshell() {   # recently changed PHP files with typical backdoor code, PH
     done < <(if [[ -f $stamp ]]; then T "$FIND_TIMEOUT" find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) \( -newer "$stamp" -o -cnewer "$stamp" \) 2>/dev/null
              else T "$FIND_TIMEOUT" find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) \( -mtime -"$WEBSHELL_FIRST_DAYS" -o -ctime -"$WEBSHELL_FIRST_DAYS" \) 2>/dev/null; fi |
              T "$FIND_TIMEOUT" xargs -r -d '\n' grep -lE "$re" 2>/dev/null | head -30)
-    while IFS=$'\t' read -r f ln; do
-      [[ -n $WEBSHELL_IGNORE && $f =~ $WEBSHELL_IGNORE ]] && continue
-      hits=$((hits + 1))
-      out+="  $f: $ln (file date $(date -r "$f" '+%Y-%m-%d %H:%M'))"$'\n'
-      dalert "Web: suspicious PHP setting in recently changed $f: $ln – check it (backdoor?)"
-    # these files are few and small: the first scan (and the first after the update that added
-    # them) checks all of them, whatever their date – a backdoor may be older than the script
-    done < <(if [[ -f $stamp && -f $STATE_DIR/webshell_conf_full ]]; then T "$FIND_TIMEOUT" find "$root" -type f \( -name .htaccess -o -name .user.ini -o -name php.ini \) \( -newer "$stamp" -o -cnewer "$stamp" \) 2>/dev/null
-             else T "$FIND_TIMEOUT" find "$root" -type f \( -name .htaccess -o -name .user.ini -o -name php.ini \) 2>/dev/null; fi |
-             php_config_backdoors | head -30)
   done < <(docroots)
   # after a timeout the scan was incomplete: keep the old stamp, so the next scan looks again
-  if [[ $(timeouts_seen) == "$nto" ]]; then can_write_state && { mv "$new" "$stamp"; : >"$STATE_DIR/webshell_conf_full"; }; fi
+  if [[ $(timeouts_seen) == "$nto" ]]; then can_write_state && mv "$new" "$stamp"; fi
   [[ -n $out ]] && printf '%s' "$out"
   echo "  $n document root(s) scanned, $hits suspicious file(s)"
 }
@@ -2204,7 +2177,7 @@ plugin_header() {
     [[ $l =~ ^(PLUGIN_[A-Z]+)=\"([^\"]*)\"[[:space:]]*(#.*)?$ ]] || break
     k=${BASH_REMATCH[1]}; v=${BASH_REMATCH[2]}
     case $k in
-      PLUGIN_NAME|PLUGIN_API|PLUGIN_SCHEDULE|PLUGIN_SECTION|PLUGIN_SETTINGS|PLUGIN_LOGS|PLUGIN_READS|PLUGIN_OS|PLUGIN_MAINTAINER) ;;
+      PLUGIN_NAME|PLUGIN_API|PLUGIN_SCHEDULE|PLUGIN_SECTION|PLUGIN_SETTINGS|PLUGIN_LOGS|PLUGIN_READS|PLUGIN_INPUTS|PLUGIN_OS|PLUGIN_MAINTAINER) ;;
       *) PLUGIN_ERR="header: unknown field $k"; return 1 ;;
     esac
     if ! [[ $v =~ $re ]] || [[ $v == *\$\(* ]] || [[ $k != PLUGIN_LOGS && $v == *\$* ]]; then
@@ -2222,6 +2195,9 @@ plugin_header() {
     PLUGIN_ERR="it is written for plugin API ${PH[PLUGIN_API]}, this script runs API $PLUGIN_API_SUPPORTED"; return 1
   fi
   if [[ ${PH[PLUGIN_SCHEDULE]} != "$3" ]]; then PLUGIN_ERR="header: PLUGIN_SCHEDULE must be $3"; return 1; fi
+  for w in ${PH[PLUGIN_INPUTS]:-}; do
+    if [[ $w != domains ]]; then PLUGIN_ERR="header: PLUGIN_INPUTS lists $w – known: domains"; return 1; fi
+  done
   for w in ${PH[PLUGIN_SETTINGS]:-}; do
     if ! [[ $w =~ ^[A-Z][A-Z0-9_]*$ ]]; then PLUGIN_ERR="header: PLUGIN_SETTINGS lists $w, which is not a setting"; return 1; fi
   done
@@ -2258,24 +2234,48 @@ plugin_foreign() {
   [[ -n $l ]] || return 0
   plugin_expand "${text//\{ips\}/${l% }}"
 }
-# run_plugin NAME – runs plugins/NAME.sh in a process of its own, with an empty environment but
-# the settings it declares. It gets the new lines of its logs on stdin (each log after a line
-# "\036 NUMBER PATH" – log_clean removes \036 from log lines, so a log can't forge it) and
-# answers with TEXT, NOTE, ALERT and ALERT-FOREIGN lines; everything else is dropped. The plugin can't touch
-# the alerts of other checks, the status or the state files.
+# plugin_state_seed NAME FILE – a plugin's first state, taken over from the state files of the
+# version before the check became a plugin, so the first run doesn't start from scratch
+plugin_state_seed() {
+  case $1 in
+    php-config)   # the time of the last daily scan, if that scan covered .htaccess & co. already
+      [[ -f $STATE_DIR/webshell_scan && -f $STATE_DIR/webshell_conf_full ]] &&
+        printf 'last_scan %s\n' "$(stat -c %Y "$STATE_DIR/webshell_scan")" >"$2" ;;
+  esac
+  return 0
+}
+# run_plugin NAME [hourly|daily] – runs plugins/NAME.sh in a process of its own, with an empty
+# environment but the settings it declares. It gets the new lines of its logs on stdin (each log
+# after a line "\036 NUMBER PATH" – log_clean removes \036 from log lines, so a log can't forge
+# it), its last state as a file ($PSR_STATE) and the context files it asks for (PSR_DOMAINS:
+# "domain<TAB>document root"). It answers with TEXT, NOTE, ALERT, ALERT-FOREIGN and STATE
+# lines; everything else is dropped. The plugin can't touch the alerts of other checks, the
+# status or the state files: its new state is stored by this function, and only in a normal run.
+# Hourly plugins write into the report body, daily ones to stdout and $DALERTS (like run_daily).
 run_plugin() {
-  local name=$1 f="$TMPD/plugin-$1.sh" lib="$TMPD/plugin-lib.sh" os=other w v i=0 miss="" rc line kw nt=0 na=0 nn=0 nd=0
+  local name=$1 sched=${2:-hourly} f="$TMPD/plugin-$1.sh" lib="$TMPD/plugin-lib.sh" os=other w v i=0 miss="" rc line kw nt=0 na=0 nn=0 nd=0
+  local sdir="$STATE_DIR/plugins/$1" st="$TMPD/plugin.state" sin="$TMPD/plugin.state-in" ctx="" ns=0 sb=0 lim=$FIND_TIMEOUT
   local -a logs=() envs=()
-  if ! { plugin_fetch lib/plugin-lib.sh "$lib" && plugin_fetch "plugins/$name.sh" "$f" && plugin_header "$f" "$name" hourly; }; then
-    alert "Script: the check $name was not run – $PLUGIN_ERR"
+  emit_text()  { if [[ $sched == daily ]]; then printf '%s\n' "$1"; else out "$1"; fi; }
+  emit_alert() { if [[ $sched == daily ]]; then dalert "$1"; else alert "$1"; fi; }
+  if ! { plugin_fetch lib/plugin-lib.sh "$lib" && plugin_fetch "plugins/$name.sh" "$f" && plugin_header "$f" "$name" "$sched"; }; then
+    emit_alert "Script: the check $name was not run – $PLUGIN_ERR"
     return 0
   fi
+  [[ $sched == daily ]] && lim=$(( FIND_TIMEOUT * 3 ))   # a daily plugin scans all document roots in one go
   [[ -e /etc/debian_version ]] && os=debian
   [[ -e /etc/redhat-release ]] && os=rhel
   if [[ $os != other && " ${PH[PLUGIN_OS]} " != *" $os "* ]]; then
     note "plugin $name: not made for this system ($os) – skipped"; return 0
   fi
-  [[ -n ${PH[PLUGIN_SECTION]:-} ]] && section "${PH[PLUGIN_SECTION]}"
+  [[ $sched == hourly && -n ${PH[PLUGIN_SECTION]:-} ]] && section "${PH[PLUGIN_SECTION]}"
+  # its state: a copy, so the plugin never holds the file the core keeps
+  : >"$sin"; : >"$st"
+  if [[ -f $sdir/state ]]; then cp "$sdir/state" "$sin"; else plugin_state_seed "$name" "$sin"; fi
+  if [[ " ${PH[PLUGIN_INPUTS]:-} " == *" domains "* ]]; then
+    [[ -f $TMPD/ctx-domains ]] || docroots >"$TMPD/ctx-domains"
+    ctx="$TMPD/ctx-domains"
+  fi
   for w in ${PH[PLUGIN_SETTINGS]:-}; do envs+=("$w=${!w:-}"); done
   for w in ${PH[PLUGIN_LOGS]:-}; do
     v=$w
@@ -2291,7 +2291,8 @@ run_plugin() {
       i=$((i + 1)); printf '\036 %d %s\n' "$i" "$v"
       if [[ -n $v ]]; then new_lines "$v" || true; fi
     done
-     } | timeout --foreground -k 10 "$FIND_TIMEOUT" env -i PATH="$PATH" ${TZ+"TZ=$TZ"} PSR_PLUGIN="$name" PSR_LOGS_MISSING="$miss" ${envs[@]+"${envs[@]}"} \
+     } | timeout --foreground -k 10 "$lim" env -i PATH="$PATH" ${TZ+"TZ=$TZ"} PSR_PLUGIN="$name" PSR_LOGS_MISSING="$miss" \
+        PSR_STATE="$sin" PSR_DOMAINS="${ctx:-/dev/null}" ${envs[@]+"${envs[@]}"} \
         bash --noprofile --norc "$lib" "$f" >"$TMPD/plugin.out" 2>"$TMPD/plugin.err"
   then rc=0; else rc=${PIPESTATUS[1]}; fi
   # the answer: tabs and control characters out (\037 marks a geo_ref until plugin_expand)
@@ -2299,23 +2300,30 @@ run_plugin() {
     kw=${line%% *}; line=${line#"$kw"}; line=${line# }
     if (( ${#line} > PLUGIN_MAX_LINE )); then line=${line:0:PLUGIN_MAX_LINE}; line="${line% *} …"; fi
     case $kw in
-      TEXT)  if (( ++nt > PLUGIN_MAX_TEXT )); then nd=$((nd + 1)); else plugin_expand "$line"; out "$PX"; fi ;;
-      ALERT) if (( ++na > PLUGIN_MAX_ALERTS )) || [[ -z $line ]]; then nd=$((nd + 1)); else plugin_expand "$line"; alert "$PX"; fi ;;
+      TEXT)  if (( ++nt > PLUGIN_MAX_TEXT )); then nd=$((nd + 1)); else plugin_expand "$line"; emit_text "$PX"; fi ;;
+      ALERT) if (( ++na > PLUGIN_MAX_ALERTS )) || [[ -z $line ]]; then nd=$((nd + 1)); else plugin_expand "$line"; emit_alert "$PX"; fi ;;
       ALERT-FOREIGN) plugin_foreign "$line"   # an alert only if one of the IPs is in a foreign country
-             if [[ -n $PX ]]; then if (( ++na > PLUGIN_MAX_ALERTS )); then nd=$((nd + 1)); else alert "$PX"; fi; fi ;;
+             if [[ -n $PX ]]; then if (( ++na > PLUGIN_MAX_ALERTS )); then nd=$((nd + 1)); else emit_alert "$PX"; fi; fi ;;
+      STATE) line=${line//$'\037'/}; sb=$(( sb + ${#line} + 1 ))
+             if (( sb > PLUGIN_MAX_STATE )); then nd=$((nd + 1)); else printf '%s\n' "$line" >>"$st"; ns=$((ns + 1)); fi ;;
       NOTE)  if (( ++nn > PLUGIN_MAX_NOTES )) || [[ -z $line ]]; then nd=$((nd + 1)); else plugin_expand "$line"; note "$PX"; fi ;;
       *)     nd=$((nd + 1)) ;;
     esac
   done < <(LC_ALL=C tr '\t' ' ' <"$TMPD/plugin.out" | LC_ALL=C tr -d '\000-\010\013-\036\177')
-  (( nd )) && note "plugin $name: $nd line(s) of its output dropped (not TEXT, NOTE or ALERT, or more than the limit)"
-  if (( rc == 124 || rc == 137 )); then
-    printf 'check %s (plugin) timed out after %ss\n' "$name" "$FIND_TIMEOUT" >>"$TMPD/timeouts"
-  elif (( rc == 97 )); then
-    alert "Script: the check $name was not run – its plugin has no plugin_check function"
-  elif (( rc != 0 )); then
-    alert "Script: the check $name (plugin) ended with an error (exit code $rc) – its section may be incomplete: $(head -3 "$TMPD/plugin.err" 2>/dev/null | LC_ALL=C tr -d '\000-\037\177' | cut -c1-200)"
+  (( nd )) && note "plugin $name: $nd line(s) of its output dropped (not TEXT, NOTE, ALERT or STATE, or more than the limit)"
+  # the new state: only from a plugin that finished, only if it printed one and was not cut
+  # off at the limit, and only in a normal run (not with --only)
+  if (( rc == 0 && ns > 0 && sb <= PLUGIN_MAX_STATE )) && can_write_state; then
+    mkdir -p "$sdir" && mv "$st" "$sdir/state.new" && mv "$sdir/state.new" "$sdir/state"
   fi
-  rm -f "$TMPD/plugin.out" "$TMPD/plugin.err"
+  if (( rc == 124 || rc == 137 )); then
+    printf 'check %s (plugin) timed out after %ss\n' "$name" "$lim" >>"$TMPD/timeouts"
+  elif (( rc == 97 )); then
+    emit_alert "Script: the check $name was not run – its plugin has no plugin_check function"
+  elif (( rc != 0 )); then
+    emit_alert "Script: the check $name (plugin) ended with an error (exit code $rc) – its section may be incomplete: $(head -3 "$TMPD/plugin.err" 2>/dev/null | LC_ALL=C tr -d '\000-\037\177' | cut -c1-200)"
+  fi
+  rm -f "$TMPD/plugin.out" "$TMPD/plugin.err" "$st" "$sin"
   return 0
 }
 
@@ -2389,7 +2397,7 @@ check_enabled() {
     serverdns) (( SERVER_DNS_CHECK )) ;;
     domaindns) (( DOMAIN_DNS_CHECK )) ;;
     exposed)   (( EXPOSED_FILES_CHECK )) ;;
-    webshell)  (( WEBSHELL_CHECK )) ;;
+    webshell|php-config) (( WEBSHELL_CHECK )) ;;
     mailauth)  (( MAILAUTH_CHECK )) ;;
     mailboxes) (( WARN_MAILBOX_PCT > 0 || WARN_MAILBOX_UNLIMITED_GB > 0 )) ;;
     https)     (( HTTPS_CHECK )) ;;
@@ -2418,7 +2426,7 @@ run_daily() {   # run_daily NAME… – section text to stdout, alerts to $DALER
     check_enabled "$c" || continue
     check_needs_dig "$c" && ! command -v dig >/dev/null && continue
     step "daily: $c"
-    "check_$c"
+    if declare -F "check_$c" >/dev/null; then "check_$c"; else run_plugin "$c" daily; fi   # no function: a plugin
   done
   return 0
 }
@@ -3053,8 +3061,16 @@ is always reported). Processes are not stored – they are checked live in every
 | `offsets/` | one file per log, named after a hash of its path; content `inode bytes-read path` | the script reads only the lines added since the last run. The inode identifies the file after a rotation (`maillog` → `maillog.processed`), so the rest of the old file is still read. Delete a file here and that log is read again from its last 20,000 lines. |
 | `journal_since` | Unix time | position in the systemd journal (only if there is no mail log file). |
 | `last_scan` | empty; its modification time counts | new PHP files in upload folders are files changed after this – by file date or by inode change time, so a file with its date set back is found too. |
-| `webshell_scan` | empty; its modification time counts | the daily scan for suspicious code looks only at PHP files, `.htaccess`, `.user.ini` and `php.ini` changed since then (file date or inode change time). |
-| `webshell_conf_full` | empty | marks that `.htaccess`, `.user.ini` and `php.ini` were scanned completely once. Without it, the next daily scan checks all of them, whatever their date. |
+| `webshell_scan` | empty; its modification time counts | the daily scan for suspicious code looks only at PHP files changed since then (file date or inode change time). |
+
+## Checks that are plugins (`plugins/`)
+
+A plugin never writes here itself: it prints its new state, and the script stores it – only in
+a normal run, not with `--only`. Delete a file and that plugin starts from scratch.
+
+| File | Content (one entry per line) | Used for |
+|---|---|---|
+| `plugins/php-config/state` | `last_scan` and the Unix time (with fractions of a second) of the last complete daily scan | the daily scan of `.htaccess`, `.user.ini` and `php.ini` in the document roots looks only at files changed since then (file date or inode change time). Without it, the scan checks all of them, whatever their date – a backdoor may be older than the script. Taken over from `webshell_scan` of version 1.x. |
 
 ## Daily checks
 
@@ -3080,6 +3096,8 @@ EOF
 write_state_readme() {   # keep $STATE_DIR/README.txt in step with this version
   local f="$STATE_DIR/README.txt"
   can_write_state || return 0
+  # of older versions: since 2.0 in plugins/php-config/state (once that exists)
+  [[ -f $STATE_DIR/plugins/php-config/state ]] && rm -f "$STATE_DIR/webshell_conf_full"
   state_readme | cmp -s - "$f" 2>/dev/null || state_readme >"$f"
 }
 
@@ -3093,6 +3111,13 @@ show_state() {
   f=$STATE_DIR/daily_date; [[ -f $f ]] && echo "Daily checks last run on: $(cat "$f") (day, script version, checksum of script and configuration)"
   for f in last_scan webshell_scan; do
     [[ -f $STATE_DIR/$f ]] && echo "$f: $(date -r "$STATE_DIR/$f" '+%Y-%m-%d %H:%M')"
+  done
+  for f in "$STATE_DIR"/plugins/*/state; do
+    [[ -f $f ]] || continue
+    echo "Plugin $(basename "$(dirname "$f")"), state of $(date -r "$f" '+%Y-%m-%d %H:%M'):"
+    while read -r ip t; do
+      if [[ $t =~ ^[0-9]{9,10}(\.[0-9]+)?$ ]]; then echo "  $ip $(d "${t%.*}")"; else echo "  $ip${t:+ $t}"; fi
+    done < <(head -20 "$f")
   done
   f=$STATE_DIR/running; [[ -f $f ]] && echo "Run in progress or not finished: $(tr '\t' ' ' <"$f")"
   echo ""
