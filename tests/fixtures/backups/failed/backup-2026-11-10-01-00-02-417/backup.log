@@ -1,0 +1,6 @@
+[2026-11-10 01:00:02.431|48211] INFO: pmm-ras started : /opt/psa/admin/sbin/pmm-ras --get-dump-list
+[2026-11-10 01:00:05.120|48230] INFO: Backup of domain d44.example started
+[2026-11-10 01:02:41.907|48230] WARNING: Unable to back up the mail content of d44.example: not enough disk space
+[2026-11-10 01:03:10.002|48230] ERROR: Unable to upload the backup to the remote storage: Transport error: unable to send file: Curl error: (55) Failed sending data to the peer
+[2026-11-10 01:03:10.004|48230] ERROR: Backup of domain d116.example failed
+[2026-11-10 01:03:11.250|48211] INFO: pmm-ras finished. Exit code: 121

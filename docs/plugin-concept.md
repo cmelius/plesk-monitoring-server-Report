@@ -1,7 +1,7 @@
 # Plugin system – concept
 
-Status: concept for a later major version (2.0). Step 1 of the order below is built
-(framework and `panel`, see "State of the code"). This branch
+Status: concept for a later major version (2.0). Steps 1 and 2 of the order below are
+built (framework, `panel`, `backups`; see "State of the code"). This branch
 (`feature/plugin-system`) carries the work; `main` continues with the 1.x releases
 and is merged into this branch from time to time.
 
@@ -227,10 +227,11 @@ are the same.
 
 ## State of the code
 
-Step 1 is built: `lib/plugin-lib.sh` (runs one plugin), `plugins/panel.sh`, the loader
+Steps 1 and 2 are built: `lib/plugin-lib.sh` (runs one plugin), `plugins/panel.sh`,
+`plugins/backups.sh` (no log on stdin; `PLUGIN_READS` names the directories), the loader
 and the protocol in the main script (`run_plugin`), `tools/update-plugin-sums.sh`, and
-the tests in `tests/plugins.bats` and `tests/panel.bats` (with the parity test against
-`tests/legacy/check_panel.bash`). Where it differs from the text above, for now:
+the tests in `tests/plugins.bats`, `tests/panel.bats` and `tests/backups.bats` (with
+parity tests against the old functions in `tests/legacy/`). Where it differs from the text above, for now:
 
 - GeoIP stays in the main script. A plugin writes `$(geo_ref IP)` into a line and the
   main script replaces it with "IP (country, operator)". So a plugin needs neither the
@@ -244,6 +245,8 @@ the tests in `tests/plugins.bats` and `tests/panel.bats` (with the parity test a
 - `STATE`, `PLUGIN_INPUTS` and `PLUGIN_REQUIRES` come with step 4; daily plugins too.
 - Limits: 500 `TEXT` lines, 100 alerts, 10 notes, 2000 bytes per line. The time limit
   is `FIND_TIMEOUT`.
+- Commands inside a plugin have no time limit of their own (`T`); the limit for the
+  whole plugin covers them.
 - `PLUGIN_API` is `0` until step 6.
 - The changes of this branch are listed in `CHANGELOG-2.0.md` (branch changelog), not
   in `CHANGELOG.md`, so that merging `main` into this branch stays simple. README and

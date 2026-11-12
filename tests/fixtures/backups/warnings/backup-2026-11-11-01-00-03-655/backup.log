@@ -1,0 +1,3 @@
+[2026-11-11 01:00:03.671|52310] INFO: pmm-ras started : /opt/psa/admin/sbin/pmm-ras --get-dump-list
+[2026-11-11 01:04:18.300|52331] WARNING: Unable to back up the mail content of d44.example: not enough disk space
+[2026-11-11 01:09:52.713|52310] INFO: pmm-ras finished. Exit code: 0

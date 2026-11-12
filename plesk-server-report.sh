@@ -101,6 +101,7 @@ MAIL_LOG=""                   # default: /var/log/maillog or /var/log/mail.log, 
 AUTH_LOG=""                   # SSH logins; default: /var/log/auth.log or /var/log/secure, else the journal
 PLESK_PANEL_LOG=/var/log/plesk/httpsd_access_log   # access log of the Plesk panel (port 8443) – panel logins
 PLESK_ERROR_LOG=/var/log/plesk/panel.log           # Plesk's own log – failed panel logins, failed certificate renewals
+PLESK_BACKUP_LOGS=""          # directory with the logs of Plesk's backups (backup-*/backup.log); default: the usual places
 ROUNDCUBE_LOG_DIR=""          # default: /var/log/plesk-roundcube (or /usr/share/psa-roundcube/logs)
 
 # Alert thresholds – per run (with an hourly cron job: per hour)
@@ -201,6 +202,7 @@ PLUGIN_MAX_LINE=2000          # bytes per line
 # sha256sum of lib/*.sh and plugins/*.sh – written by tools/update-plugin-sums.sh, checked by the tests
 # >>> plugin sums
 PLUGIN_SUMS='9ba71938b18b01dd0f54246c97f72f2637b41a038b8d51717da7a7e8ab6d735a  lib/plugin-lib.sh
+9e7bc59eaf72d53e9aa71dba1cfd8db1589b74342b4139d1f420f462bafb17d9  plugins/backups.sh
 abab3680694f294bac2d2dc5fc52f4cc8090644ce27075cb0fbb35eea64c643a  plugins/panel.sh'
 # <<< plugin sums
 
@@ -1754,43 +1756,7 @@ check_services() {   # failed systemd units, OOM killer
   return 0
 }
 
-check_backups() {   # latest Plesk backup (time, age, errors), Acronis agent – every run, so the age is current
-  local pmm last age st now mt
-  now=$(date +%s)
-  section "BACKUPS"
-  for pmm in /var/log/plesk/PMM /usr/local/psa/PMM/logs /opt/psa/PMM/logs; do [[ -d $pmm ]] && break; pmm=""; done
-  if [[ -n $pmm ]]; then
-    last=$(T "$CMD_TIMEOUT" find -L "$pmm" -maxdepth 2 -type d -name 'backup-*' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)
-    if [[ -n $last ]]; then
-      mt=$(stat -c %Y "$last"); age=$(( (now - mt) / 3600 ))
-      local blog="$last/backup.log" nerr=0 nwarn=0 ec="" ex=""
-      if [[ -r $blog ]]; then
-        nerr=$(grep -cE '\] (ERROR|CRITICAL|FATAL):' "$blog"); nwarn=$(grep -cE '\] WARNING:' "$blog")
-        ec=$(grep -oE 'Exit code: [0-9]+' "$blog" | tail -1 | grep -oE '[0-9]+$')
-        ex=$(grep -m1 -E '\] (ERROR|CRITICAL|FATAL):' "$blog" | cut -c1-220)
-      fi
-      if [[ ! -r $blog ]]; then st="unknown (no backup.log)"
-      elif (( nerr > 0 )) || [[ -n $ec && $ec != 0 ]]; then st="ERROR ($nerr error lines, exit code ${ec:-?})"
-      elif (( nwarn > 0 )); then st="OK with $nwarn warnings"
-      else st="OK (exit code ${ec:-?})"; fi
-      out "Plesk backup: last run $(date -d "@$mt" '+%Y-%m-%d %H:%M %Z') ($age h ago, $(basename "$last")), status: $st"
-      [[ -n $ex ]] && out "  first error: $ex"
-      (( age > WARN_BACKUP_HOURS )) && alert "Backup: latest Plesk backup is $age hours old"
-      [[ $st == ERROR* ]] && alert "Backup: latest Plesk backup finished with errors"
-    else
-      out "Plesk backup: no backup logs found in $pmm"
-    fi
-  else
-    out "Plesk backup: log directory not found"
-  fi
-  # Acronis agent (used by several hosting providers for image backups) – only if installed
-  if pgrep -x aakore >/dev/null || pgrep -f '[a]cronis' >/dev/null; then
-    out "Acronis agent: running"
-  elif [[ -d /usr/lib/Acronis || -d /opt/acronis || -d /var/lib/Acronis ]]; then
-    out "Acronis agent: installed but NOT running"; alert "Backup: Acronis agent is not running"
-  fi
-  return 0
-}
+# plugin: plugins/backups.sh, run by run_plugin.
 
 # =============================================================================
 # Daily checks – write their section text to stdout, alerts via dalert
@@ -2370,7 +2336,7 @@ run_plugin() {
       i=$((i + 1)); printf '\036 %d %s\n' "$i" "$v"
       if [[ -n $v ]]; then new_lines "$v" || true; fi
     done
-     } | timeout --foreground -k 10 "$FIND_TIMEOUT" env -i PATH="$PATH" PSR_PLUGIN="$name" PSR_LOGS_MISSING="$miss" ${envs[@]+"${envs[@]}"} \
+     } | timeout --foreground -k 10 "$FIND_TIMEOUT" env -i PATH="$PATH" ${TZ+"TZ=$TZ"} PSR_PLUGIN="$name" PSR_LOGS_MISSING="$miss" ${envs[@]+"${envs[@]}"} \
         bash --noprofile --norc "$lib" "$f" >"$TMPD/plugin.out" 2>"$TMPD/plugin.err"
   then rc=0; else rc=${PIPESTATUS[1]}; fi
   # the answer: tabs and control characters out (\037 marks a geo_ref until plugin_expand)
