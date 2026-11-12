@@ -4,7 +4,7 @@
 
 A single bash script that writes an **hourly health and security report** for a Plesk server on Linux and (optionally) uploads it to cloud storage with [rclone](https://rclone.org/) or mails it to you – to a mailbox on the same server, if you like, so the reports never leave it.
 
-It is built around the most common way a shared Plesk server gets into trouble: **a compromised mailbox or a hacked website starts sending spam**, the server IP ends up on a blocklist, and every customer's mail bounces. The report is short plain text you can read yourself – but where it really shines is a daily review by an AI assistant: it reads the latest report and a 24-hour summary every morning and tells you in a few lines whether anything needs your attention. The reports are written for exactly that; see [Reading the reports](#reading-the-reports) for an example prompt. If you host for customers, mind data protection: an AI review means handing personal data to the AI and storage provider – see [Privacy](#privacy-gdpr) for the options, from a local-only setup to pseudonymised uploads.
+It is built around the most common way a shared Plesk server gets into trouble: **a compromised mailbox or a hacked website starts sending spam**, the server IP ends up on a blocklist, and every customer's mail bounces. It also catches the quieter trouble that customers notice before you do: a full mailbox rejecting mail, a certificate renewal failing, a phone with an outdated password about to get the whole office banned. The report is short plain text you can read yourself – but where it really shines is a daily review by an AI assistant: it reads the latest report and a 24-hour summary every morning and tells you in a few lines whether anything needs your attention. The reports are written for exactly that; see [Reading the reports](#reading-the-reports) for an example prompt. If you host for customers, mind data protection: an AI review means handing personal data to the AI and storage provider – see [Privacy](#privacy-gdpr) for the options, from a local-only setup to pseudonymised uploads.
 
 The script only **reads** logs and system state. It never changes the server configuration, mail queue or websites.
 
@@ -23,7 +23,7 @@ chmod 700 /usr/local/sbin/plesk-server-report.sh
 echo '5 * * * * root /usr/local/sbin/plesk-server-report.sh' > /etc/cron.d/plesk-server-report
 ```
 
-That's it: from now on a report is written every hour to `/var/lib/plesk-server-report/out/`. Three optional extras are worth the few minutes:
+That's it: from now on a report is written every hour to `/var/lib/plesk-server-report/out/`. Four optional extras are worth the few minutes:
 
 1. **Upload** the reports to cloud storage, so you (or an AI assistant) can read them anywhere – [Storage for the reports](#storage-for-the-reports). Without it, the reports stay on the server.
 2. **Geolocation** of login IPs: `apt install mmdb-bin` – no configuration needed.
@@ -34,7 +34,7 @@ The sections below explain everything in detail; you don't need to read them to 
 
 ### Check it before you run it as root
 
-The script runs as root and has grown to almost 3,000 lines of bash – more than most people will read. Let an AI assistant review it before the first run: attach the file you just downloaded (`/usr/local/sbin/plesk-server-report.sh` – review the exact file you are going to run, not a copy from somewhere else) and ask:
+The script runs as root and has grown to more than 3,000 lines of bash – more than most people will read. Let an AI assistant review it before the first run: attach the file you just downloaded (`/usr/local/sbin/plesk-server-report.sh` – review the exact file you are going to run, not a copy from somewhere else) and ask:
 
 > *Review this bash script before I run it as root from cron on a production Plesk server. Ignore the comments and the documentation – verify everything from the code itself. For every command that writes, deletes, moves or changes permissions of a file, every network connection and every command run with data from logs or the network, quote the line and say what it does. Then tell me whether anything changes the system outside the script's own state directory, could leak data, or could be abused by another local user.*
 
