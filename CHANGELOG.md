@@ -14,6 +14,7 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 
 ### Changed
 - Every `# shellcheck` directive in the script says why it is there.
+- **Hostile log lines:** tabs and control characters are removed from every log line before a check sees it, and from the report, so a login name or user agent can't shift fields or put terminal escape sequences into the report; numbers read from state files are checked before the shell computes with them. Nothing from a log was ever run – a crafted login name stored in a state file could only make a comparison fail. Tested with hostile log lines.
 - The script can be loaded with `source` without running (for the tests); its global arrays are declared with `declare -g`. Running it is unchanged.
 
 ## [1.10.0] – 2026-11-12

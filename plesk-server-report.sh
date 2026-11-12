@@ -320,11 +320,18 @@ rotated_file() {
   return 1
 }
 
+# Log lines are partly written by attackers (login names, addresses, URLs, user agents).
+# log_clean turns tabs into spaces and drops other control characters (terminal escape
+# sequences), so a log line can neither shift the tab-separated fields the checks pass
+# on nor reach the report as anything but text.
+log_clean() { LC_ALL=C tr '\t' ' ' | LC_ALL=C tr -d '\000-\010\013-\037\177'; }
+
 # Print only the lines appended to a log file since the previous run.
 # Handles log rotation: the rest of the rotated file is read as well, found by its inode
 # whatever it is called now (FILE.1, FILE.processed, FILE-date).
 # At most MAX_LOG_MB are read (the newest part); more is reported as a note.
-new_lines() {
+new_lines() { _new_lines "$@" | log_clean; }
+_new_lines() {
   local f=$1 key st ino size off=0 oino="" ooff=0 rest=0 rsize rf="" max=$(( MAX_LOG_MB * 1048576 ))
   [[ -r $f ]] || return 0
   key=$(printf '%s' "$f" | md5sum | cut -c1-16)
@@ -471,7 +478,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     # no log file (no rsyslog): fall back to the journal
     last=$(cat "$STATE_DIR/journal_since" 2>/dev/null || date -d '-1 hour' +%s)
     if command -v journalctl >/dev/null; then
-      T "$CMD_TIMEOUT" journalctl --since "@$last" -o short -u postfix\* -u dovecot -u courier\* 2>/dev/null |
+      T "$CMD_TIMEOUT" journalctl --since "@$last" -o short -u postfix\* -u dovecot -u courier\* 2>/dev/null | log_clean |
         if (( MAX_LOG_MB > 0 )); then head -c "$(( MAX_LOG_MB * 1048576 ))"; else cat; fi >"$TMP"
       (( MAX_LOG_MB > 0 && $(stat -c %s "$TMP") >= MAX_LOG_MB * 1048576 )) &&
         note "mail journal: more than $MAX_LOG_MB MB since the last run – only the first $MAX_LOG_MB MB analysed (MAX_LOG_MB)"
@@ -794,7 +801,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   if [[ -f $KNOWNC ]]; then
     while read -r km kc kt; do
       [[ -n $kc ]] || continue
-      kt=${kt:-$now}
+      kt=${kt:-$now}; [[ $kt =~ ^[0-9]+$ ]] || continue   # only a number may reach (( ))
       (( IMAP_COUNTRY_KEEP_DAYS > 0 && now - kt > IMAP_COUNTRY_KEEP_DAYS * 86400 )) && continue   # expired
       KC["$km $kc"]=$kt
     done <"$KNOWNC"
@@ -897,7 +904,7 @@ old_password_check() {
   (( WARN_OLD_PASSWORD > 0 )) || return 0
   if [[ -r $KM ]]; then
     while read -r ip who t; do
-      [[ -n $t ]] || continue
+      [[ $t =~ ^[0-9]+$ ]] || continue   # only a number may reach (( ))
       KW[$ip]+=" $who "; (( t > ${KT["$ip $who"]:-0} )) && KT["$ip $who"]=$t
     done <"$KM"
   fi
@@ -1051,7 +1058,7 @@ remember_mail_ips() {
   now=$(date +%s)
   if [[ -f $f ]]; then
     while read -r ip who t; do
-      [[ -n $t ]] || continue
+      [[ $t =~ ^[0-9]+$ ]] || continue   # only a number may reach (( ))
       (( KNOWN_MAIL_IP_DAYS > 0 && now - t > KNOWN_MAIL_IP_DAYS * 86400 )) && continue
       M["$ip $who"]=$t
     done <"$f"
@@ -1085,7 +1092,7 @@ check_fail2ban() {
     # IPs with earlier successful logins: mail clients (mailbox, last seen) and SSH/panel
     if [[ -r $KM ]]; then
       while read -r ip who t; do
-        [[ -n $t ]] || continue
+        [[ $t =~ ^[0-9]+$ ]] || continue   # only a number may reach (( ))
         MW[$ip]+="$who, "; (( t > ${ML[$ip]:-0} )) && ML[$ip]=$t
       done <"$KM"
     fi
@@ -1337,7 +1344,7 @@ check_logins() {   # successful SSH and Plesk panel logins, alert for previously
     if [[ -n $AUTH_LOG && -r $AUTH_LOG ]]; then new_lines "$AUTH_LOG"
     elif [[ -r /var/log/auth.log ]]; then new_lines /var/log/auth.log
     elif [[ -r /var/log/secure ]]; then new_lines /var/log/secure
-    elif command -v journalctl >/dev/null; then T "$CMD_TIMEOUT" journalctl --since "@$SINCE" -u ssh -u sshd -o short 2>/dev/null
+    elif command -v journalctl >/dev/null; then T "$CMD_TIMEOUT" journalctl --since "@$SINCE" -u ssh -u sshd -o short 2>/dev/null | log_clean
     else note "logins: no SSH log (/var/log/auth.log, /var/log/secure) and no journal – SSH logins not checked"; fi |
       awk '/sshd.*Accepted / { for (i=1;i<=NF;i++) { if ($i=="Accepted") m=$(i+1); if ($i=="for") u=$(i+1); if ($i=="from") ip=$(i+1) }
                                print "SSH\t" u "\t" ip "\t" m }'
@@ -2395,7 +2402,7 @@ write_report() {
     echo ""
     if (( GEO_OK )); then echo "IP geolocation: DB-IP.com Lite databases (CC BY 4.0)"
     elif [[ -n $GEO_NOTE ]]; then echo "$GEO_NOTE"; fi
-  } >"$REPORT"
+  } | LC_ALL=C tr -d '\000-\010\013-\037\177' >"$REPORT"   # file names and the like: no terminal control sequences
   chmod 600 "$REPORT"
 }
 
