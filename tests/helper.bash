@@ -20,6 +20,10 @@ load_script() {
   _new_lines() { [[ -r $1 ]] && cat "$1"; return 0; }             # whole fixtures, through log_clean
   postqueue() { :; }
   T() { shift; "$@"; }                   # no time limits needed in tests
+  # plugins: the files of a checkout don't belong to root. The ownership rule is tested on its
+  # own (plugins.bats, as real_plugin_file_safe); the checksums are checked as on a server.
+  eval "$(declare -f plugin_file_safe | sed '1s/^plugin_file_safe/real_plugin_file_safe/')"
+  plugin_file_safe() { [[ -f $1 && ! -L $1 ]]; }
 }
 
 # the report text and the alerts of one check, for assertions

@@ -1,6 +1,7 @@
 # Plugin system – concept
 
-Status: concept for a later major version (2.0). No code yet. This branch
+Status: concept for a later major version (2.0). Step 1 of the order below is built
+(framework and `panel`, see "State of the code"). This branch
 (`feature/plugin-system`) carries the work; `main` continues with the 1.x releases
 and is merged into this branch from time to time.
 
@@ -223,6 +224,29 @@ are the same.
 
 - Runtime of step 5: how much longer does a run take when `wordpress` reads the access
   logs a second time? Measure first, then decide whether one stream should be shared.
+
+## State of the code
+
+Step 1 is built: `lib/plugin-lib.sh` (runs one plugin), `plugins/panel.sh`, the loader
+and the protocol in the main script (`run_plugin`), `tools/update-plugin-sums.sh`, and
+the tests in `tests/plugins.bats` and `tests/panel.bats` (with the parity test against
+`tests/legacy/check_panel.bash`). Where it differs from the text above, for now:
+
+- GeoIP stays in the main script. A plugin writes `$(geo_ref IP)` into a line and the
+  main script replaces it with "IP (country, operator)". So a plugin needs neither the
+  database nor the settings for it.
+- `PLUGIN_LOGS` may name a setting (`$PLESK_ERROR_LOG`); the main script resolves it,
+  and only if the setting is listed in `PLUGIN_SETTINGS`.
+- A plugin's name stands in `HOURLY_CHECKS` like every check; a name without a
+  `check_<name>` function is a plugin.
+- Offsets are still kept per log path. The key per plugin comes with step 5, when two
+  readers share a log.
+- `STATE`, `PLUGIN_INPUTS` and `PLUGIN_REQUIRES` come with step 4; daily plugins too.
+- Limits: 500 `TEXT` lines, 100 alerts, 10 notes, 2000 bytes per line. The time limit
+  is `FIND_TIMEOUT`.
+- `PLUGIN_API` is `0` until step 6.
+- README, CHANGELOG and the release archive follow before 2.0, so that merging `main`
+  into this branch stays simple.
 
 ## If third-party plugins are ever wanted
 

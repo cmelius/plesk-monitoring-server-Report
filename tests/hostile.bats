@@ -36,7 +36,7 @@ setup() {
   MAIL_LOG=$PWD/mail.log; AUTH_LOG=$PWD/auth.log; PLESK_PANEL_LOG=/nonexistent
   VHOST_LOGS=$PWD/web; PLESK_ERROR_LOG=$PWD/panel.log
   REPORT=$PWD/report.txt; HOST=host; NOW=now; GEO_NOTE=""
-  { check_mail || true; check_logins || true; check_web || true; check_panel || true
+  { check_mail || true; check_logins || true; check_web || true; run_plugin panel || true
     # second run: the logins of the first are in the state files now
     : >"$BODY"; check_mail || true; check_logins || true; } 2>errors
   run grep -E 'syntax error|bad substitution|command not found' errors

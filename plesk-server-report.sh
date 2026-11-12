@@ -55,6 +55,8 @@
 #
 # Layout: settings → helper functions → one function per check (check_<name>) →
 # report/upload → main(). The order of the report is defined in main().
+# Checks for specific software are plugins: files in plugins/ next to this script, run in a
+# process of their own (run_plugin; the contract is in docs/plugin-concept.md).
 #
 # Safety: the script runs with low CPU/IO priority, every external command that can hang
 # has a time limit (CMD_TIMEOUT, FIND_TIMEOUT), cron runs are stopped after MAX_RUNTIME,
@@ -184,6 +186,23 @@ CONF=/etc/plesk-server-report.conf
 # daily checks run once a day and are cached in $STATE_DIR/daily.txt.
 HOURLY_CHECKS="mail webmail system fail2ban web uploads logins panel persistence services backups"
 DAILY_CHECKS="updates certificates https serverdns mailtls domaindns exposed webshell mailauth mailboxes"
+
+# Plugins: checks for specific software, each a file of its own in plugins/ next to this script,
+# run in a process of its own (run_plugin). A name in HOURLY_CHECKS without a check_<name>
+# function is a plugin. Only the files of this release run: the script compares each with the
+# checksum below before it runs it – a changed or foreign file is not run and raises an alert.
+PLUGINS_OFF=""                # space-separated plugin checks to switch off, e.g. "panel"
+PSR_HOME=$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")
+PLUGIN_API_SUPPORTED="0"      # contract versions this script runs (0 = not frozen yet)
+PLUGIN_MAX_TEXT=500           # report lines per plugin and run; more is dropped, with a note
+PLUGIN_MAX_ALERTS=100
+PLUGIN_MAX_NOTES=10
+PLUGIN_MAX_LINE=2000          # bytes per line
+# sha256sum of lib/*.sh and plugins/*.sh – written by tools/update-plugin-sums.sh, checked by the tests
+# >>> plugin sums
+PLUGIN_SUMS='9ba71938b18b01dd0f54246c97f72f2637b41a038b8d51717da7a7e8ab6d735a  lib/plugin-lib.sh
+abab3680694f294bac2d2dc5fc52f4cc8090644ce27075cb0fbb35eea64c643a  plugins/panel.sh'
+# <<< plugin sums
 
 # =============================================================================
 # Helper functions
@@ -1386,7 +1405,7 @@ check_logins() {   # successful SSH and Plesk panel logins, alert for previously
   local panel_runs=0
   if [[ -r $PLESK_ERROR_LOG ]]; then
     if (( ONLY_MODE )); then [[ " ${ONLY//,/ } " == *" panel "* ]] && panel_runs=1
-    else [[ " $HOURLY_CHECKS " == *" panel "* ]] && panel_runs=1; fi
+    else [[ " $HOURLY_CHECKS " == *" panel "* ]] && check_enabled panel && panel_runs=1; fi
   fi
   (( ! panel_runs )) && [[ -s $TMPD/panel_fail ]] && (( $(cat "$TMPD/panel_fail") > 0 )) &&
     out "  Plesk panel: $(cat "$TMPD/panel_fail") failed login attempt(s) (fail2ban jail plesk-panel)"
@@ -1394,54 +1413,8 @@ check_logins() {   # successful SSH and Plesk panel logins, alert for previously
   return 0
 }
 
-# Plesk's own log (panel.log): failed panel logins with the login name, and failed automatic
-# certificate renewals (Let's Encrypt via SSL It!) with Let's Encrypt's reason. Plesk renews
-# 30 days before expiry and retries daily, so a failure shows up weeks before the certificate
-# check warns – usually a domain whose DNS points elsewhere, or a blocked challenge URL.
-check_panel() {
-  local PL n who ip d r line="" k
-  section "PLESK PANEL LOG"
-  PL=$PLESK_ERROR_LOG
-  if [[ -z $PL || ! -r $PL ]]; then out "Plesk log PLESK_ERROR_LOG=\"$PL\" not found (no Plesk?) – skipped"; return 0; fi
-  new_lines "$PL" | awk -v apo="'" '
-    /\[Action Log\] Failed login attempt with login / {
-      l = $0; sub(".*with login " apo, "", l); sub(apo ".*", "", l)
-      i = $0; sub(/.* from IP /, "", i); sub(/[ ,].*/, "", i)
-      fl[l]++; fi_[i]++; nf++ }
-    # one line per failed renewal; the reason of Lets Encrypt follows as "Type:" and "Detail:"
-    /\[extension\/sslit\] Failed to renew certificate of domain / {
-      d = $0; sub(".*of domain " apo, "", d); sub(apo ".*", "", d); fr[d]++; cur = d; wait = 6; next }
-    wait > 0 { wait--
-      if (/^Detail: /) { r = $0; sub(/^Detail: /, "", r); sub(/: ".*/, "", r); sub(/ - check that .*/, "", r); sub(/; DNS problem.*/, "", r)
-        gsub(/acme-challenge\/[A-Za-z0-9_-]+/, "acme-challenge/…", r); why[cur] = substr(r, 1, 160); wait = 0 }
-      else if (/^\[/) wait = 0 }
-    END {
-      printf "PFAIL\t%d\n", nf
-      for (l in fl) printf "PLOG\t%d\t%s\n", fl[l], l
-      for (i in fi_) printf "PIP\t%d\t%s\n", fi_[i], i
-      for (d in fr) printf "CERT\t%d\t%s\t%s\n", fr[d], d, why[d] }' >"$TMP.panel"
-
-  read -r _ n <<<"$(grep '^PFAIL' "$TMP.panel")"
-  out "Failed panel logins: ${n:-0}"
-  if (( ${n:-0} > 0 )); then
-    out "  login names: $(grep '^PLOG' "$TMP.panel" | sort -t$'\t' -k2,2nr | head -5 | awk -F'\t' '{printf "%s%s ×%d", (NR > 1 ? ", " : ""), $3, $2}')"
-    while IFS=$'\t' read -r _ n ip; do
-      geo "$ip"; line+="${line:+, }$ip${GEO_LABEL:+ ($GEO_LABEL)} ×$n"
-    done < <(grep '^PIP' "$TMP.panel" | sort -t$'\t' -k2,2nr | head -5)
-    out "  top IPs: $line"
-  fi
-  out "Failed automatic certificate renewals (Let's Encrypt):"
-  k=0
-  while IFS=$'\t' read -r _ n d r; do
-    [[ -n $d ]] || continue
-    ignored_domain "$d" && continue
-    k=$((k + 1))
-    out "  $d: ${n}× – ${r:-no reason logged}"
-    alert "Certificate: automatic renewal for $d failed${r:+ – $r}. Let's Encrypt must reach the domain on this server: DNS pointing elsewhere (remove the domain or its certificate), or the challenge URL blocked"
-  done < <(grep '^CERT' "$TMP.panel" | sort -t$'\t' -k3,3)
-  (( k )) || out "  none"
-  return 0
-}
+# The check "panel" (Plesk's own log: failed panel logins, failed certificate renewals) is a
+# plugin: plugins/panel.sh, run by run_plugin.
 
 # ---------------------------------------------------------------- access & persistence
 # What an attacker leaves behind after a break-in, to come back or to use the server: an SSH
@@ -2287,6 +2260,142 @@ check_mailauth() {   # SPF / DKIM / DMARC of every domain with mail service
 # Running the checks, report, upload
 # =============================================================================
 
+# ---------------------------------------------------------------- plugins
+# plugin_file_safe FILE – a regular file (no link) that belongs to root and that nobody else may
+# write, in directories of which the same is true up to /: whoever can write one of them could
+# exchange the file. The same rule as for the configuration file (load_conf).
+plugin_file_safe() {
+  local p=$1
+  [[ -f $p && ! -L $p ]] || return 1
+  while :; do
+    [[ -n $(find "$p" -maxdepth 0 -user root ! -perm /022 2>/dev/null) ]] || return 1
+    [[ $p == / ]] && break
+    p=$(dirname "$p")
+  done
+  return 0
+}
+# plugin_fetch RELPATH COPY – copies a file of this release (lib/…, plugins/…) to COPY, if it is
+# safe and has the checksum from PLUGIN_SUMS. The copy is what was checked and what runs.
+# On failure the reason is in PLUGIN_ERR.
+plugin_fetch() {
+  local src="$PSR_HOME/$1" want got
+  PLUGIN_ERR=""
+  want=$(awk -v f="$1" '$2 == f { print $1; exit }' <<<"$PLUGIN_SUMS")
+  if [[ -z $want ]]; then PLUGIN_ERR="$1 is not part of this release"; return 1; fi
+  if [[ ! -e $src ]]; then PLUGIN_ERR="$src is missing – the script was installed without its plugins; install the complete release archive"; return 1; fi
+  if ! plugin_file_safe "$src"; then PLUGIN_ERR="$src, or a directory above it, does not belong to root or may be written by others (fix: chown root:root, chmod go-w)"; return 1; fi
+  if ! cp -- "$src" "$2" 2>/dev/null; then PLUGIN_ERR="$src could not be read"; return 1; fi
+  got=$(sha256sum <"$2" | cut -d' ' -f1)
+  if [[ $got != "$want" ]]; then PLUGIN_ERR="$src is not the file of this release (checksum differs) – install the release archive again"; return 1; fi
+  return 0
+}
+# plugin_header FILE NAME SCHEDULE – reads the PLUGIN_ header of FILE as text into PH[]: only
+# lines PLUGIN_X="value" at the top of the file, nothing is run or expanded. Checks it against
+# the contract; on failure the reason is in PLUGIN_ERR.
+declare -gA PH=()
+plugin_header() {
+  local l k v w re='^[A-Za-z0-9 ._:/@,&()$+-]*$'
+  PH=(); PLUGIN_ERR=""
+  while IFS= read -r l; do
+    [[ $l =~ ^[[:space:]]*(#.*)?$ ]] && continue
+    [[ $l =~ ^(PLUGIN_[A-Z]+)=\"([^\"]*)\"[[:space:]]*(#.*)?$ ]] || break
+    k=${BASH_REMATCH[1]}; v=${BASH_REMATCH[2]}
+    case $k in
+      PLUGIN_NAME|PLUGIN_API|PLUGIN_SCHEDULE|PLUGIN_SECTION|PLUGIN_SETTINGS|PLUGIN_LOGS|PLUGIN_READS|PLUGIN_OS|PLUGIN_MAINTAINER) ;;
+      *) PLUGIN_ERR="header: unknown field $k"; return 1 ;;
+    esac
+    if ! [[ $v =~ $re ]] || [[ $v == *'$('* ]] || [[ $k != PLUGIN_LOGS && $v == *'$'* ]]; then
+      PLUGIN_ERR="header: $k has a value that is not plain text"; return 1
+    fi
+    PH[$k]=$v
+  done <"$1"
+  for k in PLUGIN_NAME PLUGIN_API PLUGIN_SCHEDULE PLUGIN_SECTION PLUGIN_OS PLUGIN_MAINTAINER; do
+    if [[ -z ${PH[$k]:-} ]]; then PLUGIN_ERR="header: $k is missing"; return 1; fi
+  done
+  if ! [[ ${PH[PLUGIN_NAME]} =~ ^[a-z][a-z0-9-]{1,30}$ ]] || [[ ${PH[PLUGIN_NAME]} != "$2" ]]; then
+    PLUGIN_ERR="header: PLUGIN_NAME must be $2, like the file"; return 1
+  fi
+  if [[ " $PLUGIN_API_SUPPORTED " != *" ${PH[PLUGIN_API]} "* ]]; then
+    PLUGIN_ERR="it is written for plugin API ${PH[PLUGIN_API]}, this script runs API $PLUGIN_API_SUPPORTED"; return 1
+  fi
+  if [[ ${PH[PLUGIN_SCHEDULE]} != "$3" ]]; then PLUGIN_ERR="header: PLUGIN_SCHEDULE must be $3"; return 1; fi
+  for w in ${PH[PLUGIN_SETTINGS]:-}; do
+    if ! [[ $w =~ ^[A-Z][A-Z0-9_]*$ ]]; then PLUGIN_ERR="header: PLUGIN_SETTINGS lists $w, which is not a setting"; return 1; fi
+  done
+  for w in ${PH[PLUGIN_LOGS]:-}; do   # a path, or $SETTING for a path from the settings
+    [[ $w == /* && $w != *'$'* ]] && continue
+    if ! [[ $w =~ ^\$[A-Z][A-Z0-9_]*$ && " ${PH[PLUGIN_SETTINGS]:-} " == *" ${w#\$} "* ]]; then
+      PLUGIN_ERR="header: PLUGIN_LOGS lists $w, which is neither a path nor a setting from PLUGIN_SETTINGS"; return 1
+    fi
+  done
+  return 0
+}
+# plugin_expand TEXT → PX: TEXT with every geo_ref of the plugin ("\037G<ip>\037") replaced by
+# the IP and, with a GeoIP database, its country and operator
+plugin_expand() {
+  local pre rest ip
+  PX=$1
+  while [[ $PX == *$'\037G'*$'\037'* ]]; do
+    pre=${PX%%$'\037G'*}; rest=${PX#*$'\037G'}; ip=${rest%%$'\037'*}; rest=${rest#*$'\037'}
+    geo "$ip"; PX="$pre$ip${GEO_LABEL:+ ($GEO_LABEL)}$rest"
+  done
+  PX=${PX//$'\037'/}
+}
+# run_plugin NAME – runs plugins/NAME.sh in a process of its own, with an empty environment but
+# the settings it declares. It gets the new lines of its logs on stdin (each log after a line
+# "\036 NUMBER PATH" – log_clean removes \036 from log lines, so a log can't forge it) and
+# answers with TEXT, NOTE and ALERT lines; everything else is dropped. The plugin can't touch
+# the alerts of other checks, the status or the state files.
+run_plugin() {
+  local name=$1 f="$TMPD/plugin-$1.sh" lib="$TMPD/plugin-lib.sh" os=other w v i=0 miss="" rc line kw nt=0 na=0 nn=0 nd=0
+  local -a logs=() envs=()
+  if ! { plugin_fetch lib/plugin-lib.sh "$lib" && plugin_fetch "plugins/$name.sh" "$f" && plugin_header "$f" "$name" hourly; }; then
+    alert "Script: the check $name was not run – $PLUGIN_ERR"
+    return 0
+  fi
+  [[ -e /etc/debian_version ]] && os=debian
+  [[ -e /etc/redhat-release ]] && os=rhel
+  if [[ $os != other && " ${PH[PLUGIN_OS]} " != *" $os "* ]]; then
+    note "plugin $name: not made for this system ($os) – skipped"; return 0
+  fi
+  section "${PH[PLUGIN_SECTION]}"
+  for w in ${PH[PLUGIN_SETTINGS]:-}; do envs+=("$w=${!w:-}"); done
+  for w in ${PH[PLUGIN_LOGS]:-}; do
+    v=$w; [[ $w == '$'* ]] && { w=${w#\$}; v=${!w:-}; }
+    logs+=("$v"); i=$((i + 1))
+    [[ -n $v && -r $v ]] || miss+="${miss:+ }$i"
+  done
+  if { i=0
+    for v in ${logs[@]+"${logs[@]}"}; do
+      i=$((i + 1)); printf '\036 %d %s\n' "$i" "$v"
+      if [[ -n $v ]]; then new_lines "$v" || true; fi
+    done
+     } | timeout --foreground -k 10 "$FIND_TIMEOUT" env -i PATH="$PATH" PSR_PLUGIN="$name" PSR_LOGS_MISSING="$miss" ${envs[@]+"${envs[@]}"} \
+        bash --noprofile --norc "$lib" "$f" >"$TMPD/plugin.out" 2>"$TMPD/plugin.err"
+  then rc=0; else rc=${PIPESTATUS[1]}; fi
+  # the answer: tabs and control characters out (\037 marks a geo_ref until plugin_expand)
+  while IFS= read -r line; do
+    kw=${line%% *}; line=${line#"$kw"}; line=${line# }
+    if (( ${#line} > PLUGIN_MAX_LINE )); then line=${line:0:PLUGIN_MAX_LINE}; line="${line% *} …"; fi
+    case $kw in
+      TEXT)  if (( ++nt > PLUGIN_MAX_TEXT )); then nd=$((nd + 1)); else plugin_expand "$line"; out "$PX"; fi ;;
+      ALERT) if (( ++na > PLUGIN_MAX_ALERTS )) || [[ -z $line ]]; then nd=$((nd + 1)); else plugin_expand "$line"; alert "$PX"; fi ;;
+      NOTE)  if (( ++nn > PLUGIN_MAX_NOTES )) || [[ -z $line ]]; then nd=$((nd + 1)); else plugin_expand "$line"; note "$PX"; fi ;;
+      *)     nd=$((nd + 1)) ;;
+    esac
+  done < <(LC_ALL=C tr '\t' ' ' <"$TMPD/plugin.out" | LC_ALL=C tr -d '\000-\010\013-\036\177')
+  (( nd )) && note "plugin $name: $nd line(s) of its output dropped (not TEXT, NOTE or ALERT, or more than the limit)"
+  if (( rc == 124 || rc == 137 )); then
+    printf 'check %s (plugin) timed out after %ss\n' "$name" "$FIND_TIMEOUT" >>"$TMPD/timeouts"
+  elif (( rc == 97 )); then
+    alert "Script: the check $name was not run – its plugin has no plugin_check function"
+  elif (( rc != 0 )); then
+    alert "Script: the check $name (plugin) ended with an error (exit code $rc) – its section may be incomplete: $(head -3 "$TMPD/plugin.err" 2>/dev/null | LC_ALL=C tr -d '\000-\037\177' | cut -c1-200)"
+  fi
+  rm -f "$TMPD/plugin.out" "$TMPD/plugin.err"
+  return 0
+}
+
 # check_enabled NAME – the on/off switches from the settings (with --only every named check runs)
 # Mailbox fill level: usage from the Maildir++ file maildirsize (Courier and Dovecot keep it up
 # to date), the size limit from Plesk – the mailbox's own, or with -1 the subscription's default
@@ -2351,6 +2460,8 @@ check_mailboxes() {
 }
 check_enabled() {
   (( ONLY_MODE )) && return 0
+  # a plugin switched off with PLUGINS_OFF
+  if [[ " $PLUGINS_OFF " == *" $1 "* ]] && ! declare -F "check_$1" >/dev/null; then return 1; fi
   case $1 in
     serverdns) (( SERVER_DNS_CHECK )) ;;
     domaindns) (( DOMAIN_DNS_CHECK )) ;;
@@ -2368,7 +2479,11 @@ check_needs_dig() { [[ $1 == serverdns || $1 == domaindns || $1 == https ]]; }
 
 run_hourly() {   # run_hourly NAME… – checks write directly into the report body
   local c
-  for c in "$@"; do check_enabled "$c" && { step "$c"; "check_$c"; }; done
+  for c in "$@"; do
+    check_enabled "$c" || continue
+    step "$c"
+    if declare -F "check_$c" >/dev/null; then "check_$c"; else run_plugin "$c"; fi   # no function: a plugin
+  done
   return 0
 }
 run_daily() {   # run_daily NAME… – section text to stdout, alerts to $DALERTS

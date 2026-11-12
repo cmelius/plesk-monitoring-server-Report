@@ -1,6 +1,6 @@
 # Checks every push and pull request: shell syntax, shellcheck (no findings allowed),
 # that STATE-FILES.md matches the description built into the script, and the bats tests
-# in tests/ – once with mawk (Debian's awk) and once with gawk (RHEL's awk).
+# in tests/ (they also check the plugins: checksums, header, read-only rule) – once with mawk (Debian's awk) and once with gawk (RHEL's awk).
 # Uses shellcheck and the Ubuntu packages bats, mawk, gawk – no third-party actions.
 name: check
 
@@ -17,11 +17,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Syntax
-        run: bash -n plesk-server-report.sh
+        run: for f in plesk-server-report.sh lib/*.sh plugins/*.sh tools/*.sh; do bash -n "$f"; done
       - name: shellcheck
         run: |
           shellcheck --version
-          shellcheck plesk-server-report.sh
+          shellcheck plesk-server-report.sh lib/*.sh plugins/*.sh tools/*.sh
       - name: STATE-FILES.md up to date
         run: bash plesk-server-report.sh --state-readme | diff -u STATE-FILES.md -
 
