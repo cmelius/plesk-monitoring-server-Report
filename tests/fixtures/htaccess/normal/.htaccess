@@ -1,0 +1,6 @@
+# BEGIN WordPress
+RewriteEngine On
+AddHandler application/x-httpd-php82 .php
+<FilesMatch "\.(jpg|png)$">
+Header set Cache-Control "max-age=3600"
+</FilesMatch>

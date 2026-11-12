@@ -1,0 +1,8 @@
+Nov 10 11:23:34 host psa-pc-remote[830]: 7673B60023: from=<user902@mail.d903.example> to=<user903@d904.example>
+Nov 10 11:23:34 host postfix/qmgr[2080]: 7673B60023: from=<user902@mail.d903.example>, size=22140, nrcpt=1 (queue active)
+Nov 10 11:23:34 host postfix-local[462076]: 7673B60023: from=<user902@mail.d903.example>, to=<user903@d904.example>, dirname=/var/qmail/mailnames
+Nov 10 11:23:35 host postfix/bounce[462089]: 7673B60023: sender delivery status notification: 51B2460193
+Nov 10 11:24:05 host postfix/smtp[462090]: 51B2460193: to=<user902@mail.d903.example>, relay=none, delay=30, delays=0/0.01/30/0, dsn=4.4.1, status=deferred (connect to mail.d903.example[198.18.9.10]:25: Connection timed out)
+Nov 10 11:31:15 host postfix/smtp[472781]: 51B2460193: to=<user902@mail.d903.example>, relay=none, delay=460, delays=430/0.01/30/0, dsn=4.4.1, status=deferred (connect to mail.d903.example[198.18.9.10]:25: Connection timed out)
+Nov 10 11:40:00 host postfix/bounce[2]: 1111111111: sender delivery status notification: 2222222222
+Nov 10 11:40:01 host postfix/pipe[3]: 2222222222: to=<user904@d904.example>, relay=plesk_virtual, delay=1, delays=0.5/0/0/0.5, dsn=2.0.0, status=sent (delivered via plesk_virtual service)

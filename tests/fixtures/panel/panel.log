@@ -1,0 +1,189 @@
+[2026-11-08 02:32:54.524] 3946103:6aefdf21d8509 ERR [extension/wp-toolkit] An error occurred while executing WP-CLI command for instance: WordPress installation #1 ('https://d1.example'): Unable to execute wp-cli command. Please make sure that wp-config.php is not broken.
+[2026-11-08 02:32:54.527] 3946103:6aefdf21d8509 ERR [extension/wp-toolkit] An error occurred while executing WP-CLI command instance info for WordPress installation #1 ('https://d1.example'): Unable to execute wp-cli command. Please make sure that wp-config.php is not broken.
+[2026-11-08 02:32:54.708] 3946103:6aefdf21d8509 ERR [extension/wp-toolkit] An error occurred while executing WP-CLI command for instance: WordPress installation #1 ('https://d1.example'): This WordPress version is too old to work with PHP version 8 and higher. Change your domain PHP handler to the latest available version of PHP 7.
+[2026-11-08 02:32:54.709] 3946103:6aefdf21d8509 ERR [extension/wp-toolkit] An error occurred while executing WP-CLI command instance info for WordPress installation #1 ('https://d1.example'): This WordPress version is too old to work with PHP version 8 and higher. Change your domain PHP handler to the latest available version of PHP 7.
+[2026-11-08 02:32:55.084] 3946103:6aefdf21d8509 ERR [extension/wp-toolkit] Failed to reset cache for the instance #1, reason: This WordPress version is too old to work with PHP version 8 and higher. Change your domain PHP handler to the latest available version of PHP 7.
+[2026-11-08 02:32:55.111] 3946103:6aefdf21d8509 ERR [extension/wp-toolkit] Unable to process auto updates for WordPress installation #1 ('https://d1.example'): Failed to reset cache for the instance #1: This WordPress version is too old to work with PHP version 8 and higher. Change your domain PHP handler to the latest available version of PHP 7.
+[2026-11-08 02:37:13.396] 3952556:6aefe0596014f ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.164
+[2026-11-08 02:37:13.921] 3952556:6aefe0596014f ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-08 04:17:10.013] 4060803:6aeff7be8bc76 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer:
+[2026-11-08 04:17:10.013] 4060803:6aeff7be8bc76 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer
+[2026-11-08 04:18:02.843] 4061337:6aeff7facd348 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.164
+[2026-11-08 04:18:04.753] 4061337:6aeff7facd348 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-08 06:26:31.300] 1051:6af0161748653 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.164
+[2026-11-08 06:26:31.826] 1051:6af0161748653 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-08 06:47:07.537] 98256:6af01ae7ed8b7 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer:
+[2026-11-08 08:17:04.268] 203749:6af02fff1fe8e ERR [panel] Error in cURL request: Recv failure: Connection reset by peer:
+[2026-11-08 08:17:04.269] 203749:6af02fff1fe8e ERR [panel] Error in cURL request: Recv failure: Connection reset by peer
+[2026-11-08 12:23:13.396] 457390:6af069af28aa9 ERR [panel] [Action Log] Failed login attempt with login 'root' from IP 198.18.1.164
+[2026-11-08 12:23:13.446] 457390:6af069af28aa9 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-08 19:17:07.289] 872534:6af0caaede7a7 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer:
+[2026-11-08 19:17:07.289] 872534:6af0caaede7a7 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer
+[2026-11-09 01:50:20.184] 1308317:6af126dc2c593 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.164
+[2026-11-09 01:50:20.710] 1308317:6af126dc2c593 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-09 02:17:07.938] 1333304:6af12d1e838e5 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer:
+[2026-11-09 02:17:07.939] 1333304:6af12d1e838e5 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer
+[2026-11-09 02:32:54.652] 1356346:6af130a1d9b27 ERR [extension/wp-toolkit] An error occurred while executing WP-CLI command for instance: WordPress installation #1 ('https://d1.example'): Unable to execute wp-cli command. Please make sure that wp-config.php is not broken.
+[2026-11-09 02:32:54.655] 1356346:6af130a1d9b27 ERR [extension/wp-toolkit] An error occurred while executing WP-CLI command instance info for WordPress installation #1 ('https://d1.example'): Unable to execute wp-cli command. Please make sure that wp-config.php is not broken.
+[2026-11-09 02:32:54.830] 1356346:6af130a1d9b27 ERR [extension/wp-toolkit] An error occurred while executing WP-CLI command for instance: WordPress installation #1 ('https://d1.example'): This WordPress version is too old to work with PHP version 8 and higher. Change your domain PHP handler to the latest available version of PHP 7.
+[2026-11-09 02:32:54.831] 1356346:6af130a1d9b27 ERR [extension/wp-toolkit] An error occurred while executing WP-CLI command instance info for WordPress installation #1 ('https://d1.example'): This WordPress version is too old to work with PHP version 8 and higher. Change your domain PHP handler to the latest available version of PHP 7.
+[2026-11-09 02:32:55.198] 1356346:6af130a1d9b27 ERR [extension/wp-toolkit] Failed to reset cache for the instance #1, reason: This WordPress version is too old to work with PHP version 8 and higher. Change your domain PHP handler to the latest available version of PHP 7.
+[2026-11-09 02:32:55.223] 1356346:6af130a1d9b27 ERR [extension/wp-toolkit] Unable to process auto updates for WordPress installation #1 ('https://d1.example'): Failed to reset cache for the instance #1: This WordPress version is too old to work with PHP version 8 and higher. Change your domain PHP handler to the latest available version of PHP 7.
+[2026-11-09 05:17:09.912] 1526826:6af1574e7a0ad ERR [panel] Error in cURL request: Recv failure: Connection reset by peer:
+[2026-11-09 05:17:09.913] 1526826:6af1574e7a0ad ERR [panel] Error in cURL request: Recv failure: Connection reset by peer
+[2026-11-09 05:33:20.238] 1543287:6af15b2039984 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.164
+[2026-11-09 05:33:22.088] 1543287:6af15b2039984 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-09 11:24:27.076] 287557:6af1ad68da335 ERR [panel] [Action Log] Failed login attempt with login 'root' from IP 198.18.1.164
+[2026-11-09 11:24:27.593] 287557:6af1ad68da335 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-09 12:09:48.332] 341253:6af1b80a3f0e3 ERR [panel] [Action Log] Failed login attempt with login 'root' from IP 198.18.1.164
+[2026-11-09 12:09:48.381] 341253:6af1b80a3f0e3 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-09 15:17:08.122] 562000:6af1e3eeb1ea2 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer:
+[2026-11-09 15:17:08.122] 562000:6af1e3eeb1ea2 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer
+[2026-11-09 17:17:05.210] 683060:6af2000ed64cb ERR [panel] Error in cURL request: Recv failure: Connection reset by peer:
+[2026-11-09 17:17:05.210] 683060:6af2000ed64cb ERR [panel] Error in cURL request: Recv failure: Connection reset by peer
+[2026-11-09 21:17:05.855] 952275:6af2384e79b13 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer:
+[2026-11-09 21:17:05.855] 952275:6af2384e79b13 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer
+[2026-11-09 22:17:07.486] 1010180:6af2465f1a73e ERR [panel] Error in cURL request: Recv failure: Connection reset by peer:
+[2026-11-09 22:17:07.487] 1010180:6af2465f1a73e ERR [panel] Error in cURL request: Recv failure: Connection reset by peer
+[2026-11-09 23:17:10.523] 1071173:6af2546f1b563 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer:
+[2026-11-09 23:17:10.523] 1071173:6af2546f1b563 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer
+[2026-11-09 23:46:00.968] 1096137:6af25b38eb974 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.164
+[2026-11-09 23:46:01.495] 1096137:6af25b38eb974 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-10 02:32:54.556] 1274789:6af282211fffb ERR [extension/wp-toolkit] An error occurred while executing WP-CLI command for instance: WordPress installation #1 ('https://d1.example'): Unable to execute wp-cli command. Please make sure that wp-config.php is not broken.
+[2026-11-10 02:32:54.560] 1274789:6af282211fffb ERR [extension/wp-toolkit] An error occurred while executing WP-CLI command instance info for WordPress installation #1 ('https://d1.example'): Unable to execute wp-cli command. Please make sure that wp-config.php is not broken.
+[2026-11-10 02:32:54.738] 1274789:6af282211fffb ERR [extension/wp-toolkit] An error occurred while executing WP-CLI command for instance: WordPress installation #1 ('https://d1.example'): This WordPress version is too old to work with PHP version 8 and higher. Change your domain PHP handler to the latest available version of PHP 7.
+[2026-11-10 02:32:54.740] 1274789:6af282211fffb ERR [extension/wp-toolkit] An error occurred while executing WP-CLI command instance info for WordPress installation #1 ('https://d1.example'): This WordPress version is too old to work with PHP version 8 and higher. Change your domain PHP handler to the latest available version of PHP 7.
+[2026-11-10 02:32:55.133] 1274789:6af282211fffb ERR [extension/wp-toolkit] Failed to reset cache for the instance #1, reason: This WordPress version is too old to work with PHP version 8 and higher. Change your domain PHP handler to the latest available version of PHP 7.
+[2026-11-10 02:32:55.162] 1274789:6af282211fffb ERR [extension/wp-toolkit] Unable to process auto updates for WordPress installation #1 ('https://d1.example'): Failed to reset cache for the instance #1: This WordPress version is too old to work with PHP version 8 and higher. Change your domain PHP handler to the latest available version of PHP 7.
+[2026-11-10 06:35:21.192] 1548653:6af2bb292e507 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.164
+[2026-11-10 06:35:22.994] 1548653:6af2bb292e507 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-10 15:22:01.302] 747937:6af336994909b ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.165
+[2026-11-10 15:22:01.839] 747937:6af336994909b ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-10 16:17:12.275] 819255:6af3437eab818 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer:
+[2026-11-10 16:17:12.275] 819255:6af3437eab818 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer
+[2026-11-10 18:12:19.159] 960394:6af35e810701e ERR [panel] [Action Log] Failed login attempt with login 'root' from IP 198.18.1.164
+[2026-11-10 18:12:19.209] 960394:6af35e810701e ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-11 00:25:22.093] 1346514:6af3b5f216090 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.164
+[2026-11-11 00:25:22.621] 1346514:6af3b5f216090 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-11 01:57:40.732] 1438801:6af3cb929f1ec ERR [panel] [Action Log] Failed login attempt with login 'root' from IP 198.18.1.166
+[2026-11-11 01:57:40.779] 1438801:6af3cb929f1ec ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-11 02:15:42.908] 1458019:6af3cfcc18770 ERR [panel] [Action Log] Failed login attempt with login 'root' from IP 198.18.1.166
+[2026-11-11 02:15:42.952] 1458019:6af3cfcc18770 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-11 02:18:13.625] 1458919:6af3d062e9252 ERR [panel] [Action Log] Failed login attempt with login 'root' from IP 198.18.1.166
+[2026-11-11 02:18:13.677] 1458919:6af3d062e9252 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-11 02:32:45.512] 1476546:6af3d3a163e94 ERR [extension/wp-toolkit] An error occurred while executing WP-CLI command for instance: WordPress installation #1 ('https://d1.example'): Unable to execute wp-cli command. Please make sure that wp-config.php is not broken.
+[2026-11-11 02:32:45.515] 1476546:6af3d3a163e94 ERR [extension/wp-toolkit] An error occurred while executing WP-CLI command instance info for WordPress installation #1 ('https://d1.example'): Unable to execute wp-cli command. Please make sure that wp-config.php is not broken.
+[2026-11-11 02:32:45.710] 1476546:6af3d3a163e94 ERR [extension/wp-toolkit] An error occurred while executing WP-CLI command for instance: WordPress installation #1 ('https://d1.example'): This WordPress version is too old to work with PHP version 8 and higher. Change your domain PHP handler to the latest available version of PHP 7.
+[2026-11-11 02:32:45.711] 1476546:6af3d3a163e94 ERR [extension/wp-toolkit] An error occurred while executing WP-CLI command instance info for WordPress installation #1 ('https://d1.example'): This WordPress version is too old to work with PHP version 8 and higher. Change your domain PHP handler to the latest available version of PHP 7.
+[2026-11-11 02:32:46.107] 1476546:6af3d3a163e94 ERR [extension/wp-toolkit] Failed to reset cache for the instance #1, reason: This WordPress version is too old to work with PHP version 8 and higher. Change your domain PHP handler to the latest available version of PHP 7.
+[2026-11-11 02:32:46.134] 1476546:6af3d3a163e94 ERR [extension/wp-toolkit] Unable to process auto updates for WordPress installation #1 ('https://d1.example'): Failed to reset cache for the instance #1: This WordPress version is too old to work with PHP version 8 and higher. Change your domain PHP handler to the latest available version of PHP 7.
+[2026-11-11 02:35:32.147] 1481641:6af3d472d9472 ERR [panel] [Action Log] Failed login attempt with login 'root' from IP 198.18.1.166
+[2026-11-11 02:35:32.463] 1481641:6af3d472d9472 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-11 07:31:20.154] 1920302:6af419c6ac917 ERR [panel] [Action Log] Failed login attempt with login 'root' from IP 198.18.1.166
+[2026-11-11 07:31:20.200] 1920302:6af419c6ac917 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-11 07:51:38.594] 1955232:6af41e88d2517 ERR [panel] [Action Log] Failed login attempt with login 'root' from IP 198.18.1.166
+[2026-11-11 07:51:38.652] 1955232:6af41e88d2517 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-11 08:07:58.987] 1979524:6af4225ef10bf ERR [panel.ui] The superuser (root or administrator account) is forbidden to log in to Plesk for security reasons.
+[2026-11-11 08:15:40.426] 1989443:6af4242c5f9ff ERR [panel.ui] The superuser (root or administrator account) is forbidden to log in to Plesk for security reasons.
+[2026-11-11 08:16:05.812] 1989443:6af42445bf47d ERR [panel.ui] The superuser (root or administrator account) is forbidden to log in to Plesk for security reasons.
+[2026-11-11 08:42:35.960] 2022584:6af42a7be3806 ERR [panel.ui] The superuser (root or administrator account) is forbidden to log in to Plesk for security reasons.
+[2026-11-11 08:58:54.687] 2034825:6af42e4ea09c8 ERR [panel.ui] The superuser (root or administrator account) is forbidden to log in to Plesk for security reasons.
+[2026-11-11 09:14:28.374] 2052897:6af431f45ad7e ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.166
+[2026-11-11 09:14:28.898] 2052897:6af431f45ad7e ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-11 09:17:06.259] 2054000:6af4328edcf21 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer:
+[2026-11-11 09:17:06.259] 2054000:6af4328edcf21 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer
+[2026-11-11 10:14:54.018] 2138107:6af4401df1b40 ERR [panel.ui] The superuser (root or administrator account) is forbidden to log in to Plesk for security reasons.
+[2026-11-11 10:21:25.327] 2151715:6af441a54f5bd ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.166
+[2026-11-11 10:21:25.852] 2151715:6af441a54f5bd ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-11 10:34:51.130] 2173839:6af444cb1f206 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.166
+[2026-11-11 10:34:51.655] 2173839:6af444cb1f206 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-11 13:48:23.206] 2414140:6af4722731d9e ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.166
+[2026-11-11 13:48:23.731] 2414140:6af4722731d9e ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-11 14:54:16.327] 2494460:6af481984f2fc ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.166
+[2026-11-11 14:54:16.852] 2494460:6af481984f2fc ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-11 15:41:07.670] 2564765:6af48c93a307d ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.166
+[2026-11-11 15:41:08.207] 2564765:6af48c93a307d ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-11 16:23:20.725] 2622282:6af49678b0636 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.166
+[2026-11-11 16:23:21.248] 2622282:6af49678b0636 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-11 17:53:50.185] 2728573:6af4abae2cba2 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.166
+[2026-11-11 17:53:50.709] 2728573:6af4abae2cba2 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-11 18:17:49.476] 2754529:6af4b14d73ada ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.166
+[2026-11-11 18:17:50.000] 2754529:6af4b14d73ada ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-11 20:17:06.007] 2878448:6af4cd3e9bd81 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer:
+[2026-11-11 20:17:06.007] 2878448:6af4cd3e9bd81 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer
+[2026-11-11 21:35:46.483] 2953662:6af4dfb275514 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.165
+[2026-11-11 21:35:47.007] 2953662:6af4dfb275514 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-11 21:51:32.889] 2970459:6af4e364d8934 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.166
+[2026-11-11 21:51:33.415] 2970459:6af4e364d8934 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-11 22:23:26.545] 3002709:6af4eade8462e ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.166
+[2026-11-11 22:23:27.068] 3002709:6af4eade8462e ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-11 23:33:06.725] 3065369:6af4fb32b07a1 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.166
+[2026-11-11 23:33:07.249] 3065369:6af4fb32b07a1 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-12 00:05:09.141] 3096214:6af502b521d26 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.1.166
+[2026-11-12 00:05:09.666] 3096214:6af502b521d26 ERR [panel.ui] Incorrect username or password. Try again.
+[2026-11-12 00:17:06.549] 3114339:6af5057f2d929 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer:
+[2026-11-12 00:17:06.550] 3114339:6af5057f2d929 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer
+[2026-11-12 02:12:55.753] 3232707:6af520a7af4d2 ERR [panel.ui] The superuser (root or administrator account) is forbidden to log in to Plesk for security reasons.
+[2026-11-12 02:32:43.068] 3256871:6af525218c268 ERR [extension/wp-toolkit] An error occurred while executing WP-CLI command for instance: WordPress installation #1 ('https://d1.example'): Unable to execute wp-cli command. Please make sure that wp-config.php is not broken.
+[2026-11-12 02:32:43.071] 3256871:6af525218c268 ERR [extension/wp-toolkit] An error occurred while executing WP-CLI command instance info for WordPress installation #1 ('https://d1.example'): Unable to execute wp-cli command. Please make sure that wp-config.php is not broken.
+[2026-11-12 02:32:43.258] 3256871:6af525218c268 ERR [extension/wp-toolkit] An error occurred while executing WP-CLI command for instance: WordPress installation #1 ('https://d1.example'): This WordPress version is too old to work with PHP version 8 and higher. Change your domain PHP handler to the latest available version of PHP 7.
+[2026-11-12 02:32:43.259] 3256871:6af525218c268 ERR [extension/wp-toolkit] An error occurred while executing WP-CLI command instance info for WordPress installation #1 ('https://d1.example'): This WordPress version is too old to work with PHP version 8 and higher. Change your domain PHP handler to the latest available version of PHP 7.
+[2026-11-12 02:32:43.670] 3256871:6af525218c268 ERR [extension/wp-toolkit] Failed to reset cache for the instance #1, reason: This WordPress version is too old to work with PHP version 8 and higher. Change your domain PHP handler to the latest available version of PHP 7.
+[2026-11-12 02:32:43.695] 3256871:6af525218c268 ERR [extension/wp-toolkit] Unable to process auto updates for WordPress installation #1 ('https://d1.example'): Failed to reset cache for the instance #1: This WordPress version is too old to work with PHP version 8 and higher. Change your domain PHP handler to the latest available version of PHP 7.
+[2026-11-12 03:22:54.108] 3306710:6af5310e13bce ERR [panel.ui] The superuser (root or administrator account) is forbidden to log in to Plesk for security reasons.
+[2026-11-12 03:49:01.899] 3334278:6af5372d50d88 ERR [extension/composer] Could not update plugin on the domain 'd2.example': Domain d2.example has standard forwarding configured. This operation is available only for domains with web hosting..
+[2026-11-12 03:49:03.703] 3334278:6af5372d50d88 ERR [extension/composer] Could not update plugin on the domain 'd3.example': Domain d3.example has standard forwarding configured. This operation is available only for domains with web hosting..
+[2026-11-12 03:49:03.703] 3334278:6af5372d50d88 ERR [extension/composer] Could not update plugin on the domain 'd4.example': Domain d4.example has standard forwarding configured. This operation is available only for domains with web hosting..
+[2026-11-12 03:49:03.759] 3334278:6af5372d50d88 ERR [extension/composer] Could not allow integration plugin for d5.example: PHP support is disabled on the domain 'd5.example'. To run Composer and your application, go to Websites & Domains > your domain > PHP settings and turn on PHP support.
+[2026-11-12 03:49:03.759] 3334278:6af5372d50d88 ERR [extension/composer] Could not update plugin on the domain 'd5.example': PHP support is disabled on the domain 'd5.example'. To run Composer and your application, go to Websites & Domains > your domain > PHP settings and turn on PHP support..
+[2026-11-12 03:49:04.237] 3334278:6af5372d50d88 ERR [extension/composer] Could not update plugin on the domain 'd6.example': Domain d6.example has standard forwarding configured. This operation is available only for domains with web hosting..
+[2026-11-12 03:49:04.237] 3334278:6af5372d50d88 ERR [extension/composer] Could not update plugin on the domain 'd7.example': Domain d7.example has standard forwarding configured. This operation is available only for domains with web hosting..
+[2026-11-12 03:49:05.136] 3334278:6af5372d50d88 ERR [extension/composer] Could not update plugin on the domain 'd8.example': Domain d8.example has standard forwarding configured. This operation is available only for domains with web hosting..
+[2026-11-12 03:49:09.030] 3334278:6af5372d50d88 ERR [extension/composer] Could not update plugin on the domain 'd9.example': Domain d9.example has standard forwarding configured. This operation is available only for domains with web hosting..
+[2026-11-12 03:49:09.501] 3334278:6af5372d50d88 ERR [extension/composer] Could not update plugin on the domain 'd10.example': Domain d10.example has standard forwarding configured. This operation is available only for domains with web hosting..
+[2026-11-12 03:49:09.929] 3334278:6af5372d50d88 ERR [extension/composer] Could not update plugin on the domain 'd11.example': Domain d11.example has standard forwarding configured. This operation is available only for domains with web hosting..
+[2026-11-12 03:49:10.782] 3334278:6af5372d50d88 ERR [extension/composer] Could not update plugin on the domain 'd12.example': There is no web hosting configured on domain d12.example..
+[2026-11-12 08:17:06.383] 3739661:6af575ff09a5a ERR [panel] Error in cURL request: Recv failure: Connection reset by peer:
+[2026-11-12 08:17:06.383] 3739661:6af575ff09a5a ERR [panel] Error in cURL request: Recv failure: Connection reset by peer
+[2026-11-12 08:18:13.895] 3739992:6af57639a8b2d ERR [extension/sslit] Could not unassign the certificate from webmail: Failed to set WebMail certificate: domain with id "15" has no mail service
+[2026-11-12 11:17:04.951] 4020701:6af5a02e99826 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer:
+[2026-11-12 11:17:04.951] 4020701:6af5a02e99826 ERR [panel] Error in cURL request: Recv failure: Connection reset by peer
+[2026-09-11 20:19:20.406] 3699872:6aa46248623b4 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.0.1
+[2026-09-11 20:19:33.703] 3699872:6aa46255abafa ERR [panel] [Action Log] Failed login attempt with login 'administrator' from IP 198.18.0.2
+[2026-09-25 05:34:58.119] 2448668:6ab607ffa99f3 ERR [panel] [Action Log] Failed login attempt with login 'root' from IP 198.18.0.3
+[2026-09-25 13:06:02.560] 2999191:6ab671ba87e26 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.0.4
+[2026-09-25 13:11:13.543] 3005722:6ab672f1841a1 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.0.5
+[2026-09-25 13:12:23.312] 3005916:6ab673374b71c ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.0.4
+[2026-09-25 13:16:39.160] 3007437:6ab6743726466 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.0.6
+[2026-09-25 13:17:21.375] 3007716:6ab674615aff7 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.0.7
+[2026-09-25 13:17:30.565] 3007716:6ab6746a89329 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.0.8
+[2026-09-25 13:18:29.133] 3007958:6ab674a51fb10 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.0.9
+[2026-09-25 13:19:17.216] 3015734:6ab674d53413e ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.0.5
+[2026-09-25 13:19:24.308] 3015734:6ab674dc4ac12 ERR [panel] [Action Log] Failed login attempt with login 'admin' from IP 198.18.0.10
+Detail: 198.18.0.12: Invalid response from https://d116.example/.well-known/acme-challenge/TOKEN: "<!doctype html>…"
+
+[2026-03-24 12:18:09.370] 282227:69c280fa11a60 ERR [extension/sslit] Failed to renew certificate of domain 'd116.example': Invalid response from https://acme-v02.api.letsencrypt.org/acme/authz/181560490/677898323901
+Details:
+Type: urn:ietf:params:acme:error:unauthorized
+Status: 403
+Detail: 198.18.0.12: Invalid response from https://d116.example/.well-known/acme-challenge/TOKEN: "<!doctype html>…"
+
+[2026-03-24 12:30:42.847] 286584:69c283f2cc56d ERR [panel] [69c283f2cc4e3] Result of interface implementation call: failure: Can not find domain by GUID 'TOKEN'
+Detail: 198.18.0.12: Invalid response from https://d44.example/.well-known/acme-challenge/TOKEN: "<!doctype html>…"
+
+[2026-04-05 11:18:08.560] 3455419:69d244e9ef8fa ERR [extension/sslit] Failed to renew certificate of domain 'd44.example': Invalid response from https://acme-v02.api.letsencrypt.org/acme/authz/181560490/683569759421
+Details:
+Type: urn:ietf:params:acme:error:unauthorized
+Status: 403
+Detail: 198.18.0.12: Invalid response from https://d44.example/.well-known/acme-challenge/TOKEN: "<!doctype html>…"
+
+[2026-04-05 14:18:08.084] 3475880:69d26f1973dd7 ERR [extension/letsencrypt] Domain validation failed for d44.example: Invalid response from https://acme-v02.api.letsencrypt.org/acme/authz/181560490/683625404811
+Detail: 198.18.0.12: Invalid response from https://d44.example/.well-known/acme-challenge/TOKEN: "<!doctype html>…"
+
+[2026-04-05 14:18:08.101] 3475880:69d26f1973dd7 ERR [extension/sslit] Failed to renew certificate of domain 'd44.example': Invalid response from https://acme-v02.api.letsencrypt.org/acme/authz/181560490/683625404811
+Details:
+Type: urn:ietf:params:acme:error:unauthorized
+Status: 403
+Detail: 198.18.0.12: Invalid response from https://d44.example/.well-known/acme-challenge/TOKEN: "<!doctype html>…"
+
+[2026-04-05 14:53:21.782] 3481251:69d27761bee57 ERR [extension/monitoring] Http client exception: Read timed out after 20 seconds

@@ -42,6 +42,8 @@ Why "ignore the comments": a malicious script would be full of reassuring ones. 
 
 Every push is also checked automatically on GitHub (badge at the top, workflow in `.github/workflows/check.yml`): shell syntax, [ShellCheck](https://www.shellcheck.net/) without a single finding, and that `STATE-FILES.md` matches the description built into the script. A handful of lines carry a `# shellcheck disable=…` comment with the reason – an awk program or grep pattern in single quotes, for example. This says nothing about what the script does; it only rules out a class of shell mistakes.
 
+The same workflow runs the tests in `tests/` (see [Tests](#tests)): the checks fed with anonymized logs of a real server, once with `mawk` (Debian's awk) and once with `gawk` (RHEL's awk). They show that the script still finds what it found there – they don't replace reading it.
+
 Expect it to point out a few things that are by design:
 
 - **It runs as root** – to read all logs, `/proc`, crontabs and `authorized_keys`. It changes nothing on the server: no IP is blocked, no process stopped, no file removed.
@@ -753,6 +755,8 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 | `MAX_LOG_MB` | 200 | read at most this many MB of new lines per log file and run, the newest part. Protects against huge logs after a long pause or a log that was truncated in place; the skipped part is mentioned in the report. 0 = no limit |
 | `STATE_DIR` | `/var/lib/plesk-server-report` | log offsets, known login IPs, daily cache, local reports |
 | `VHOST_LOGS` | `/var/www/vhosts/system` | Plesk per-domain log directories |
+| `MAIL_LOG` | auto | mail log; default `/var/log/maillog` or `/var/log/mail.log`, else the systemd journal |
+| `AUTH_LOG` | auto | log of SSH logins; default `/var/log/auth.log` or `/var/log/secure`, else the systemd journal |
 | `PLESK_PANEL_LOG` | `/var/log/plesk/httpsd_access_log` | access log of the Plesk panel (port 8443), used to detect panel logins |
 | `PLESK_ERROR_LOG` | `/var/log/plesk/panel.log` | Plesk's own log: failed panel logins with login name, failed certificate renewals (section `PLESK PANEL LOG`) |
 | `ROUNDCUBE_LOG_DIR` | auto | Roundcube log directory, default `/var/log/plesk-roundcube` or `/usr/share/psa-roundcube/logs` |
@@ -879,6 +883,24 @@ rclone cat reports:server-reports/HOSTNAME/report-YYYYMMDD-HHMM.txt | plesk-serv
 To see what the AI would get before you switch it on – nothing is uploaded: `plesk-server-report.sh --pseudonymise /var/lib/plesk-server-report/out/summary.txt | less`
 
 Limits: pseudonymised data is still personal data (GDPR Art. 4(5)) – it lowers the risk, the agreements above are still needed. The domain stays visible (needed to tell which customer is affected), and a one-person domain still points to that person. IP addresses are not masked, because the reports need them to tell a customer from an attacker. Bare user names without a domain (attackers often try `office` instead of `office@…`) stay as they are. If your AI prompt lists known exceptions by mailbox, use the pseudonyms there.
+
+---
+
+## Tests
+
+`tests/` holds [bats](https://github.com/bats-core/bats-core) tests and their fixtures: logs of the author's server, anonymized, plus a few made-up lines for other mail setups – an hour of mail traffic, the cases from [What it found so far](#what-it-found-so-far) (a tablet with an outdated password, refused blocklist lookups, delivery confirmations, a full mailbox, failed certificate renewals), web logs, `.htaccess` files and mailbox sizes. Each test loads the script's functions without running it and points one check at a fixture; nothing outside a temporary directory is touched, no root needed.
+
+```bash
+apt install bats            # RHEL family: dnf install bats (EPEL)
+bats tests/
+```
+
+`tests/anonymize.py` made the fixtures: it replaces domains, mailbox names, IPs, host names and tokens consistently, so the patterns the script looks for survive. Use it if you contribute logs (from a server with another mail setup, say), and read the result before you post it – anonymizing is best effort:
+
+```bash
+python3 -I tests/anonymize.py --server-ip <SERVER_IP> --hostname <HOSTNAME> \
+  --own-domains domains.txt --out-dir anon/ excerpt.log
+```
 
 ---
 

@@ -1,6 +1,7 @@
 # Checks every push and pull request: shell syntax, shellcheck (no findings allowed),
-# and that STATE-FILES.md matches the description built into the script.
-# Uses only the shellcheck preinstalled on GitHub's Ubuntu runners – no third-party actions.
+# that STATE-FILES.md matches the description built into the script, and the bats tests
+# in tests/ – once with mawk (Debian's awk) and once with gawk (RHEL's awk).
+# Uses shellcheck and the Ubuntu packages bats, mawk, gawk – no third-party actions.
 name: check
 
 on:
@@ -23,3 +24,19 @@ jobs:
           shellcheck plesk-server-report.sh
       - name: STATE-FILES.md up to date
         run: bash plesk-server-report.sh --state-readme | diff -u STATE-FILES.md -
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        awk: [mawk, gawk]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bats and ${{ matrix.awk }}
+        run: sudo apt-get update -q && sudo apt-get install -y -q bats mawk gawk
+      - name: bats with ${{ matrix.awk }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/awk"
+          ln -s "$(command -v ${{ matrix.awk }})" "$RUNNER_TEMP/awk/awk"
+          AWK_DIR="$RUNNER_TEMP/awk" bats tests/

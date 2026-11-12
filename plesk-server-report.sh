@@ -95,6 +95,8 @@ KNOWN_MAIL_IP_DAYS=30         # remember IPs with successful mail logins this lo
 KNOWN_LOGIN_IP_DAYS=90        # forget an SSH/Plesk login IP after x days without a login from it (0 = never)
 MAX_LOG_MB=200                # read at most x MB of new lines per log file and run, the newest part (0 = no limit)
 VHOST_LOGS=/var/www/vhosts/system        # Plesk per-domain log directories
+MAIL_LOG=""                   # default: /var/log/maillog or /var/log/mail.log, else the journal
+AUTH_LOG=""                   # SSH logins; default: /var/log/auth.log or /var/log/secure, else the journal
 PLESK_PANEL_LOG=/var/log/plesk/httpsd_access_log   # access log of the Plesk panel (port 8443) – panel logins
 PLESK_ERROR_LOG=/var/log/plesk/panel.log           # Plesk's own log – failed panel logins, failed certificate renewals
 ROUNDCUBE_LOG_DIR=""          # default: /var/log/plesk-roundcube (or /usr/share/psa-roundcube/logs)
@@ -253,7 +255,7 @@ geo_init() {
     GEO_NOTE="GeoIP: off – install mmdblookup (Debian/Ubuntu: apt install mmdb-bin)"
   fi
 }
-declare -A GEO_CACHE=()
+declare -gA GEO_CACHE=()
 # geo IP – sets GEO_CC, GEO_ORG and GEO_LABEL ("DE, Deutsche Telekom AG" / "US, Amazon.com [datacenter]")
 geo() {
   local ip=$1 v cc="" org=""
@@ -461,7 +463,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   local MAILLOG f last MAILSTATS SENT DEF BOU BL SF DF QUEUE REV BLRES bl r SAIP n nip who line k c ip ex uid user home
   section "MAIL"
   MAILLOG=""
-  for f in /var/log/maillog /var/log/mail.log; do [[ -r $f ]] && { MAILLOG=$f; break; }; done
+  for f in ${MAIL_LOG:-/var/log/maillog /var/log/mail.log}; do [[ -r $f ]] && { MAILLOG=$f; break; }; done
 
   if [[ -n $MAILLOG ]]; then
     new_lines "$MAILLOG" >"$TMP"
@@ -1332,7 +1334,8 @@ check_logins() {   # successful SSH and Plesk panel logins, alert for previously
     note "logins: Plesk panel log PLESK_PANEL_LOG=\"$PLESK_PANEL_LOG\" not found – panel logins not checked"
   FIRST_LOGIN_RUN=0; [[ -f $KNOWN ]] || { FIRST_LOGIN_RUN=1; can_write_state && : >"$KNOWN"; }
   {
-    if [[ -r /var/log/auth.log ]]; then new_lines /var/log/auth.log
+    if [[ -n $AUTH_LOG && -r $AUTH_LOG ]]; then new_lines "$AUTH_LOG"
+    elif [[ -r /var/log/auth.log ]]; then new_lines /var/log/auth.log
     elif [[ -r /var/log/secure ]]; then new_lines /var/log/secure
     elif command -v journalctl >/dev/null; then T "$CMD_TIMEOUT" journalctl --since "@$SINCE" -u ssh -u sshd -o short 2>/dev/null
     else note "logins: no SSH log (/var/log/auth.log, /var/log/secure) and no journal – SSH logins not checked"; fi |
@@ -1879,7 +1882,7 @@ script_update_check() {
 
 # Certificates of all sites, fetched live from the server's public IP (cached for this run):
 # CERT_INFO[domain] = openssl output (end date, issuer, SAN) or empty; LE_DOMAINS = Let's Encrypt sites
-declare -A CERT_INFO=()
+declare -gA CERT_INFO=()
 cert_scan() {
   local d port
   [[ -n ${LE_DOMAINS+x} ]] && return 0
@@ -2173,7 +2176,7 @@ check_webshell() {   # recently changed PHP files with typical backdoor code, PH
 }
 
 # Plesk domain aliases: ALIAS_OF[alias]=primary domain, ALIAS_MAIL[alias]=true|false (mail service of the alias)
-declare -A ALIAS_OF=() ALIAS_MAIL=()
+declare -gA ALIAS_OF=() ALIAS_MAIL=()
 load_aliases() {
   local a m p
   command -v plesk >/dev/null || return 0
@@ -3305,6 +3308,9 @@ main() {
   (( LOCAL_KEEP_DAYS > 0 )) && find "$OUT_DIR" -name 'report-*.txt' -mmin +$(( LOCAL_KEEP_DAYS * 1440 )) -delete
   echo "$RUN_START" >"$STATE_DIR/last_run"
 }
+
+# Sourced (by the tests in tests/): define the functions and settings, run nothing.
+[[ ${BASH_SOURCE[0]} != "$0" ]] && return 0
 
 LOCKED_OUT=0; DONE=0; STEP=""; RUNFILE=""; SUMMARY_ONLY=0; ONLY_MODE=0; SHOW_STATE=0; TEST_MAIL=0; DECODE=0; DECODE_ARGS=(); PSEUDO_FILE=""
 main "$@"

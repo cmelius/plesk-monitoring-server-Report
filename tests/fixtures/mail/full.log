@@ -1,0 +1,7 @@
+Nov 12 06:46:51 host psa-pc-remote[830]: C29BF603F2: check-quota: stderr: DATA REPLY:452:4.2.2 Mailbox full
+Nov 12 06:46:51 host postfix/cleanup[3603305]: C29BF603F2: milter-reject: END-OF-MESSAGE from unknown[198.18.0.223]: 4.2.2 Mailbox full; from=<info@d140.example> to=<info@d12.example> proto=ESMTP helo=<mail.d141.example>
+Nov 12 06:50:10 host psa-pc-remote[830]: 8C370603F2: check-quota: stderr: DATA REPLY:452:4.2.2 Mailbox full
+Nov 12 06:50:10 host postfix/cleanup[3624260]: 8C370603F2: milter-reject: END-OF-MESSAGE from unknown[198.18.0.113]: 4.2.2 Mailbox full; from=<bounce-X@sub.sub.d143.example> to=<info@d12.example> proto=ESMTP helo=<sub.sub.d145.example>
+Nov 12 06:54:47 host psa-pc-remote[830]: 8A8286018A: check-quota: stderr: DATA REPLY:452:4.2.2 Mailbox full
+Nov 12 10:35:00 host postfix/lmtp[2201]: AA10000001: to=<user900@d901.example>, relay=host.example.com[private/dovecot-lmtp], delay=0.1, delays=0.05/0/0/0.05, dsn=4.2.2, status=deferred (host host.example.com[private/dovecot-lmtp] said: 452 4.2.2 <user900@d901.example> Quota exceeded (mailbox for user is full) (in reply to end of DATA command))
+Nov 12 10:36:00 host postfix/smtp[2202]: BB10000001: to=<user901@d902.example>, relay=mail.d902.example[198.18.9.9]:25, delay=1.2, delays=0.1/0/0.6/0.5, dsn=4.2.2, status=deferred (host mail.d902.example[198.18.9.9] said: 452 4.2.2 Mailbox full (in reply to RCPT TO command))

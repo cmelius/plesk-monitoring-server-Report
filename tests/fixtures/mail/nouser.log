@@ -1,0 +1,8 @@
+Nov 12 06:40:08 host sysuser[3534145]: No such user 'user17@d122.example' in mail authorization database
+Nov 12 06:40:52 host sysuser[3534145]: No such user 'user21@d122.example' in mail authorization database
+Nov 12 06:41:31 host sysuser[3559432]: No such user 'user27@d122.example' in mail authorization database
+Nov 12 06:44:20 host authpsa[802]: No such user 'info@d2.example' in mail authorization database
+Nov 12 06:44:34 host sysuser[3584620]: No such user 'user36@d122.example' in mail authorization database
+Nov 12 06:45:38 host sysuser[3596224]: No such user 'user40@d67.example' in mail authorization database
+Nov 12 06:46:13 host authpsa[805]: No such user 'user42@d2.example' in mail authorization database
+Nov 12 06:48:03 host sysuser[3605059]: No such user 'user46@d122.example' in mail authorization database

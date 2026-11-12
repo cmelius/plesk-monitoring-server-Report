@@ -1,0 +1,305 @@
+Nov  2 07:40:04 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 07:40:15 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 08:40:01 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 08:40:11 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 09:42:14 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 09:42:24 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 10:28:40 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63948], protocol=IMAP, starttls=1
+Nov  2 10:28:40 host courier-imaps[1885671]: LOGOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63948], headers=0, body=0, rcvd=112, sent=460, time=0, starttls=1
+Nov  2 10:28:45 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60114], protocol=IMAP, starttls=1
+Nov  2 10:28:53 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63554], protocol=IMAP, starttls=1
+Nov  2 10:28:54 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59937], protocol=IMAP, starttls=1
+Nov  2 10:28:57 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60954], protocol=IMAP, starttls=1
+Nov  2 10:28:57 host courier-imaps[1885671]: LOGOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60954], headers=0, body=0, rcvd=34, sent=320, time=0, starttls=1
+Nov  2 10:31:55 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60792], protocol=IMAP, starttls=1
+Nov  2 10:31:55 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[64312], protocol=IMAP, starttls=1
+Nov  2 10:31:55 host courier-imaps[1885671]: ip=[::ffff:198.18.0.11], couriertls: read: error:0A000126:SSL routines::unexpected eof while reading
+Nov  2 10:31:55 host courier-imaps[1885671]: DISCONNECTED, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[64312], headers=0, body=0, rcvd=70, sent=330, time=0, starttls=1
+Nov  2 10:31:55 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[61876], protocol=IMAP, starttls=1
+Nov  2 10:31:56 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59252], protocol=IMAP, starttls=1
+Nov  2 10:31:56 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[64485], protocol=IMAP, starttls=1
+Nov  2 10:31:57 host courier-imaps[1885671]: LOGOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[64485], headers=0, body=0, rcvd=34, sent=320, time=1, starttls=1
+Nov  2 10:32:24 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63617], protocol=IMAP, starttls=1
+Nov  2 10:32:24 host courier-imaps[1885671]: LOGOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63617], headers=0, body=0, rcvd=34, sent=320, time=0, starttls=1
+Nov  2 10:33:28 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63227], protocol=IMAP, starttls=1
+Nov  2 10:33:28 host courier-imaps[1885671]: LOGOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63227], headers=0, body=0, rcvd=34, sent=320, time=0, starttls=1
+Nov  2 10:33:28 host courier-imaps[1885671]: ip=[::ffff:198.18.0.11], couriertls: read: error:0A000126:SSL routines::unexpected eof while reading
+Nov  2 10:40:26 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 10:40:36 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 10:48:50 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60462], protocol=IMAP, starttls=1
+Nov  2 10:49:32 host courier-imaps[1885671]: ip=[::ffff:198.18.0.11], couriertls: read: Connection timed out
+Nov  2 10:49:32 host courier-imaps[1885671]: DISCONNECTED, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59937], headers=0, body=0, rcvd=86, sent=54355, time=1238, starttls=1
+Nov  2 10:56:34 host courier-imaps[1885671]: ip=[::ffff:198.18.0.11], couriertls: read: Connection timed out
+Nov  2 10:56:34 host courier-imaps[1885671]: DISCONNECTED, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[61876], headers=0, body=0, rcvd=1184, sent=163597, time=1479, starttls=1
+Nov  2 10:58:56 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[64941], protocol=IMAP, starttls=1
+Nov  2 10:58:57 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59083], protocol=IMAP, starttls=1
+Nov  2 10:59:19 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60114], headers=0, body=0, rcvd=156, sent=514, time=1834, starttls=1
+Nov  2 11:02:44 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59252], headers=0, body=0, rcvd=183, sent=575, time=1848, starttls=1
+Nov  2 11:02:48 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63554], headers=0, body=1086728, rcvd=1149, sent=1152152, time=2035, starttls=1
+Nov  2 11:13:15 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60792], headers=0, body=0, rcvd=1675, sent=133523, time=2480, starttls=1
+Nov  2 11:24:30 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60366], protocol=IMAP, starttls=1
+Nov  2 11:24:30 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63688], protocol=IMAP, starttls=1
+Nov  2 11:24:30 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63063], protocol=IMAP, starttls=1
+Nov  2 11:24:30 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59657], protocol=IMAP, starttls=1
+Nov  2 11:24:30 host courier-imaps[1885671]: LOGOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59657], headers=0, body=0, rcvd=34, sent=320, time=0, starttls=1
+Nov  2 11:24:30 host courier-imaps[1885671]: ip=[::ffff:198.18.0.11], couriertls: read: error:0A000126:SSL routines::unexpected eof while reading
+Nov  2 11:28:57 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59083], headers=0, body=0, rcvd=19, sent=287, time=1800, starttls=1
+Nov  2 11:28:57 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[64941], headers=0, body=0, rcvd=610, sent=2048, time=1801, starttls=1
+Nov  2 11:39:21 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60462], headers=0, body=0, rcvd=215, sent=601, time=3031, starttls=1
+Nov  2 11:39:56 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 11:40:06 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 11:44:07 host courier-imaps[1885671]: ip=[::ffff:198.18.0.11], couriertls: read: Connection timed out
+Nov  2 11:44:07 host courier-imaps[1885671]: DISCONNECTED, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60366], headers=0, body=214359, rcvd=502, sent=317480, time=1177, starttls=1
+Nov  2 11:48:15 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[61193], protocol=IMAP, starttls=1
+Nov  2 12:00:39 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63688], headers=0, body=68744, rcvd=662, sent=73967, time=2169, starttls=1
+Nov  2 12:03:06 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63063], headers=0, body=0, rcvd=124, sent=488, time=2316, starttls=1
+Nov  2 12:03:32 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59131], protocol=IMAP, starttls=1
+Nov  2 12:03:33 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60976], protocol=IMAP, starttls=1
+Nov  2 12:03:37 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[62611], protocol=IMAP, starttls=1
+Nov  2 12:18:15 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[61193], headers=0, body=0, rcvd=97, sent=427, time=1800, starttls=1
+Nov  2 12:19:10 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60846], protocol=IMAP, starttls=1
+Nov  2 12:33:33 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59131], headers=0, body=0, rcvd=610, sent=2048, time=1801, starttls=1
+Nov  2 12:33:33 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60976], headers=0, body=0, rcvd=19, sent=287, time=1800, starttls=1
+Nov  2 12:33:37 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[62611], headers=0, body=0, rcvd=65, sent=401, time=1800, starttls=1
+Nov  2 12:34:56 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[64914], protocol=IMAP, starttls=1
+Nov  2 12:34:56 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59669], protocol=IMAP, starttls=1
+Nov  2 12:34:56 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59637], protocol=IMAP, starttls=1
+Nov  2 12:34:57 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63411], protocol=IMAP, starttls=1
+Nov  2 12:34:57 host courier-imaps[1885671]: LOGOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63411], headers=0, body=0, rcvd=34, sent=320, time=0, starttls=1
+Nov  2 12:39:55 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 12:40:05 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 12:49:10 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60846], headers=0, body=0, rcvd=65, sent=401, time=1800, starttls=1
+Nov  2 12:50:28 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60087], protocol=IMAP, starttls=1
+Nov  2 12:53:27 host courier-imaps[1885671]: ip=[::ffff:198.18.0.11], couriertls: read: Connection timed out
+Nov  2 12:53:27 host courier-imaps[1885671]: DISCONNECTED, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[64914], headers=0, body=364286, rcvd=464, sent=469282, time=1111, starttls=1
+Nov  2 13:04:57 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59669], headers=0, body=0, rcvd=65, sent=401, time=1801, starttls=1
+Nov  2 13:08:27 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[61615], protocol=IMAP, starttls=1
+Nov  2 13:08:27 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[62756], protocol=IMAP, starttls=1
+Nov  2 13:08:28 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[61326], protocol=IMAP, starttls=1
+Nov  2 13:20:29 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60087], headers=0, body=0, rcvd=97, sent=427, time=1801, starttls=1
+Nov  2 13:24:05 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59195], protocol=IMAP, starttls=1
+Nov  2 13:34:57 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59637], headers=0, body=50218, rcvd=684, sent=54289, time=3601, starttls=1
+Nov  2 13:35:57 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[65104], protocol=IMAP, starttls=1
+Nov  2 13:35:57 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[61635], protocol=IMAP, starttls=1
+Nov  2 13:38:27 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[61615], headers=0, body=0, rcvd=610, sent=2048, time=1800, starttls=1
+Nov  2 13:38:28 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[62756], headers=0, body=0, rcvd=19, sent=287, time=1801, starttls=1
+Nov  2 13:38:32 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[61326], headers=0, body=0, rcvd=124, sent=488, time=1804, starttls=1
+Nov  2 13:40:29 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 13:40:39 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 14:03:00 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[61310], protocol=IMAP, starttls=1
+Nov  2 14:03:01 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[62725], protocol=IMAP, starttls=1
+Nov  2 14:03:01 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63514], protocol=IMAP, starttls=1
+Nov  2 14:03:01 host courier-imaps[1885671]: LOGOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63514], headers=0, body=0, rcvd=34, sent=320, time=0, starttls=1
+Nov  2 14:03:01 host courier-imaps[1885671]: ip=[::ffff:198.18.0.11], couriertls: read: error:0A000126:SSL routines::unexpected eof while reading
+Nov  2 14:05:57 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[61635], headers=0, body=0, rcvd=518, sent=1128, time=1800, starttls=1
+Nov  2 14:15:14 host courier-imaps[1885671]: ip=[::ffff:198.18.0.11], couriertls: read: Connection timed out
+Nov  2 14:15:14 host courier-imaps[1885671]: DISCONNECTED, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[65104], headers=0, body=2364916, rcvd=719, sent=2496499, time=2357, starttls=1
+Nov  2 14:18:03 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63904], protocol=IMAP, starttls=1
+Nov  2 14:18:03 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60275], protocol=IMAP, starttls=1
+Nov  2 14:18:06 host courier-imaps[1885671]: ip=[::ffff:198.18.0.11], couriertls: read: error:0A000126:SSL routines::unexpected eof while reading
+Nov  2 14:18:06 host courier-imaps[1885671]: DISCONNECTED, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[61310], headers=0, body=6076, rcvd=415, sent=104747, time=906, starttls=1
+Nov  2 14:18:09 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60764], protocol=IMAP, starttls=1
+Nov  2 14:33:00 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59195], headers=0, body=0, rcvd=548, sent=1108, time=4135, starttls=1
+Nov  2 14:33:20 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[62725], headers=0, body=53359, rcvd=657, sent=56923, time=1819, starttls=1
+Nov  2 14:36:34 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63488], protocol=IMAP, starttls=1
+Nov  2 14:40:56 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 14:41:06 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 14:48:03 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60275], headers=0, body=0, rcvd=19, sent=287, time=1800, starttls=1
+Nov  2 14:48:09 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60764], headers=0, body=0, rcvd=65, sent=401, time=1800, starttls=1
+Nov  2 14:51:57 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[62701], protocol=IMAP, starttls=1
+Nov  2 14:51:57 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[62871], protocol=IMAP, starttls=1
+Nov  2 14:51:57 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[65096], protocol=IMAP, starttls=1
+Nov  2 14:53:44 host courier-imaps[1885671]: ip=[::ffff:198.18.0.11], couriertls: read: Connection timed out
+Nov  2 14:53:44 host courier-imaps[1885671]: DISCONNECTED, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63904], headers=0, body=66580, rcvd=835, sent=124002, time=2141, starttls=1
+Nov  2 15:06:34 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63488], headers=0, body=0, rcvd=65, sent=401, time=1800, starttls=1
+Nov  2 15:07:22 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60634], protocol=IMAP, starttls=1
+Nov  2 15:21:57 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[62701], headers=0, body=0, rcvd=65, sent=401, time=1800, starttls=1
+Nov  2 15:22:42 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[64201], protocol=IMAP, starttls=1
+Nov  2 15:22:42 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59410], protocol=IMAP, starttls=1
+Nov  2 15:22:45 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59473], protocol=IMAP, starttls=1
+Nov  2 15:37:22 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60634], headers=0, body=0, rcvd=65, sent=401, time=1800, starttls=1
+Nov  2 15:41:26 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 15:41:33 host courier-imaps[1885671]: ip=[::ffff:198.18.0.11], couriertls: read: Connection timed out
+Nov  2 15:41:33 host courier-imaps[1885671]: DISCONNECTED, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[65096], headers=0, body=171736, rcvd=867, sent=222117, time=2976, starttls=1
+Nov  2 15:41:36 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 15:51:58 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[62871], headers=0, body=143197, rcvd=554, sent=244885, time=3601, starttls=1
+Nov  2 15:52:42 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[64201], headers=0, body=0, rcvd=610, sent=2048, time=1800, starttls=1
+Nov  2 15:52:43 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59410], headers=0, body=0, rcvd=19, sent=287, time=1801, starttls=1
+Nov  2 15:52:44 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63016], protocol=IMAP, starttls=1
+Nov  2 15:52:44 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[61206], protocol=IMAP, starttls=1
+Nov  2 15:52:44 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[64135], protocol=IMAP, starttls=1
+Nov  2 16:07:34 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59473], headers=0, body=0, rcvd=276, sent=690, time=2689, starttls=1
+Nov  2 16:12:15 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[65146], protocol=IMAP, starttls=1
+Nov  2 16:14:48 host courier-imaps[1885671]: ip=[::ffff:198.18.0.11], couriertls: read: Connection timed out
+Nov  2 16:14:48 host courier-imaps[1885671]: DISCONNECTED, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63016], headers=0, body=4627, rcvd=399, sent=104470, time=1324, starttls=1
+Nov  2 16:26:56 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60341], protocol=IMAP, starttls=1
+Nov  2 16:26:57 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63305], protocol=IMAP, starttls=1
+Nov  2 16:27:06 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[61206], headers=0, body=0, rcvd=124, sent=488, time=2062, starttls=1
+Nov  2 16:41:19 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 16:41:29 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 16:52:45 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[64135], headers=0, body=856364, rcvd=794, sent=876763, time=3601, starttls=1
+Nov  2 16:53:44 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60718], protocol=IMAP, starttls=1
+Nov  2 16:53:44 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60953], protocol=IMAP, starttls=1
+Nov  2 16:53:44 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59628], protocol=IMAP, starttls=1
+Nov  2 16:53:44 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[64197], protocol=IMAP, starttls=1
+Nov  2 16:53:44 host courier-imaps[1885671]: LOGOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[59628], headers=0, body=0, rcvd=626, sent=2082, time=0, starttls=1
+Nov  2 16:53:44 host courier-imaps[1885671]: ip=[::ffff:198.18.0.11], couriertls: read: error:0A000126:SSL routines::unexpected eof while reading
+Nov  2 16:56:57 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60341], headers=0, body=0, rcvd=610, sent=2048, time=1801, starttls=1
+Nov  2 16:56:57 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[63305], headers=0, body=0, rcvd=19, sent=287, time=1800, starttls=1
+Nov  2 17:08:35 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[65146], headers=0, body=0, rcvd=183, sent=575, time=3380, starttls=1
+Nov  2 17:09:08 host courier-imaps[1885671]: LOGIN, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[61598], protocol=IMAP, starttls=1
+Nov  2 17:22:37 host courier-imaps[1885671]: ip=[::ffff:198.18.0.11], couriertls: read: Connection timed out
+Nov  2 17:22:37 host courier-imaps[1885671]: DISCONNECTED, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60718], headers=0, body=119023, rcvd=298, sent=221054, time=1733, starttls=1
+Nov  2 17:23:44 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[60953], headers=0, body=0, rcvd=65, sent=401, time=1800, starttls=1
+Nov  2 17:23:45 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[64197], headers=0, body=0, rcvd=19, sent=287, time=1801, starttls=1
+Nov  2 17:39:08 host courier-imaps[1885671]: TIMEOUT, user=info@d113.example, ip=[::ffff:198.18.0.11], port=[61598], headers=0, body=0, rcvd=97, sent=427, time=1800, starttls=1
+Nov  2 17:42:17 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 17:42:27 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 18:03:54 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 18:04:05 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 18:40:11 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 18:40:21 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 19:40:33 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 19:40:44 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 20:39:50 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 20:40:00 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 21:39:55 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 21:40:05 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 22:40:03 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 22:40:13 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 23:40:48 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  2 23:40:58 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 00:39:51 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 00:40:01 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 01:40:03 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 01:40:13 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 02:40:17 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 02:40:28 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 03:40:12 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 03:40:22 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 04:40:33 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 04:40:43 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 05:40:13 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 05:40:23 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 06:39:59 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 06:40:09 host courier-pop3s[1885732]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 07:30:46 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 07:30:56 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 07:40:48 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 07:40:52 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 07:40:58 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 07:41:02 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 07:51:49 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 07:51:59 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 08:11:01 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 08:11:11 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 08:40:12 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 08:40:22 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 09:41:06 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 09:41:17 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 10:40:09 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 10:40:20 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 11:39:54 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 11:40:05 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 12:40:02 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 12:40:12 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 13:40:17 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 13:40:27 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 14:41:17 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 14:41:27 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 15:39:50 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 15:40:00 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 16:40:02 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 16:40:12 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 17:41:47 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 17:41:57 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 18:02:53 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 18:03:03 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 18:40:02 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 18:40:12 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 19:39:48 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 19:39:58 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 20:40:46 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 20:40:57 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 21:40:09 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 21:40:19 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 22:40:45 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 22:40:56 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 23:40:39 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  3 23:40:49 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 00:40:01 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 00:40:12 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 01:39:56 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 01:40:06 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 02:40:38 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 02:40:48 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 03:40:39 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 03:40:49 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 04:40:01 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 04:40:11 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 05:39:53 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 05:40:04 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 06:40:01 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 06:40:11 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 07:40:46 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 07:40:56 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 08:07:51 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 08:08:01 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 08:40:10 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 08:40:21 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 09:39:51 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 09:40:01 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 10:40:19 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 10:40:29 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 11:40:15 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 11:40:26 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 12:40:13 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 12:40:23 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 13:40:37 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 13:40:47 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 14:40:22 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 14:40:33 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 15:39:53 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 15:40:03 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 16:32:02 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 16:32:12 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 16:39:50 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 16:40:00 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 16:41:38 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 16:41:49 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 17:03:31 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 17:03:42 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 17:34:06 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 17:34:16 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 17:40:13 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 17:40:23 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 17:41:20 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 18:02:56 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 18:03:07 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 18:06:23 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 18:06:34 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 18:37:23 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 18:37:34 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 18:40:36 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 18:40:46 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 19:34:33 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 19:34:43 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 19:36:12 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 19:36:17 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 19:37:14 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 19:37:24 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 19:39:51 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 19:40:02 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 19:43:52 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 20:39:02 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 20:39:12 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 20:40:45 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 20:40:55 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 22:40:55 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 23:34:30 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 23:34:40 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  4 23:40:39 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  5 03:41:17 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  5 04:38:39 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  5 04:38:49 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]
+Nov  5 04:40:02 host courier-pop3s[814]: LOGIN FAILED, user=user16@d113.example, ip=[::ffff:198.18.0.11]

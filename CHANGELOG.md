@@ -9,9 +9,12 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 - **Mailbox fill level** (new daily check `mailboxes`): every mailbox against its size limit, the five fullest listed, a warning from `WARN_MAILBOX_PCT` (new setting, default 95 %, `0` = off). The usage comes from `maildirsize`, the limit on Plesk from its database – the mailbox's own, or the subscription's default –, without Plesk from `maildirsize`.
 - `summary.txt` lists full mailboxes (rejected delivery attempts, first – last) and delivery confirmations sent to other servers – both were only in the single reports and the alerts so far.
 - README, *What it found so far*: a full mailbox that rejected mail. Example report and summary show the new lines.
+- **Tests** (`tests/`, [bats](https://github.com/bats-core/bats-core)): the mail, panel, web, login, mailbox and backdoor checks fed with anonymized logs of a real server, run by the GitHub workflow on every push – once with `mawk` and once with `gawk`. `tests/anonymize.py` anonymizes logs for new fixtures. README: section *Tests*.
+- `MAIL_LOG` and `AUTH_LOG` (new settings, default empty = as before): the mail log and the SSH login log, for systems that keep them elsewhere.
 
 ### Changed
 - Every `# shellcheck` directive in the script says why it is there.
+- The script can be loaded with `source` without running (for the tests); its global arrays are declared with `declare -g`. Running it is unchanged.
 
 ## [1.10.0] – 2026-11-12
 
