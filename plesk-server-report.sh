@@ -2304,7 +2304,7 @@ plugin_header() {
       PLUGIN_NAME|PLUGIN_API|PLUGIN_SCHEDULE|PLUGIN_SECTION|PLUGIN_SETTINGS|PLUGIN_LOGS|PLUGIN_READS|PLUGIN_OS|PLUGIN_MAINTAINER) ;;
       *) PLUGIN_ERR="header: unknown field $k"; return 1 ;;
     esac
-    if ! [[ $v =~ $re ]] || [[ $v == *'$('* ]] || [[ $k != PLUGIN_LOGS && $v == *'$'* ]]; then
+    if ! [[ $v =~ $re ]] || [[ $v == *\$\(* ]] || [[ $k != PLUGIN_LOGS && $v == *\$* ]]; then
       PLUGIN_ERR="header: $k has a value that is not plain text"; return 1
     fi
     PH[$k]=$v
