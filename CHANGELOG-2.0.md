@@ -17,5 +17,7 @@ The design is described in [docs/plugin-concept.md](docs/plugin-concept.md).
 ### Changed
 - **`panel` is a plugin** (`plugins/panel.sh`). Section `PLESK PANEL LOG`, its lines and its alerts are unchanged; a test compares them with the output of the old function. The name for `--only` and `--list` stays `panel`.
 - **`backups` is a plugin** (`plugins/backups.sh`), the first one without a log on stdin. Section `BACKUPS`, its lines and its alerts are unchanged, so `summary.txt` shows the backup status as before. New tests with hand-written backup logs (`tests/backups.bats`).
+- **`webmail` is a plugin** (`plugins/webmail.sh`), the first one with several logs. Its lines stay in the section `MAIL` and its alerts are unchanged, so `summary.txt` counts failed webmail logins as before. New tests with hand-written Roundcube logs (`tests/webmail.bats`); the test with hostile log lines covers it.
+- For plugins: a plugin may leave out `PLUGIN_SECTION` and continue the section before it; `PLUGIN_LOGS` may name a file below a directory from the settings (`$SETTING/file`); `ALERT-FOREIGN` (`alert_foreign`) raises an alert only if one of the given IPs is outside `ALLOWED_COUNTRIES` – the main script, which has the GeoIP database, decides.
 - A plugin runs with the time zone (`TZ`) of the main script.
 - The script no longer consists of one file: `lib/` and `plugins/` must be installed next to it. Installation from a release archive and the README section for it follow before 2.0.

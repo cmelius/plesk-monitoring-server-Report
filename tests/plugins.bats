@@ -87,6 +87,34 @@ PLUGIN_LOGS="$A_LOG $B_LOG"'
   [[ $output == *"from 127.0.0.1 (this server) and 198.18.0.1."* ]]
 }
 
+@test "alert_foreign: an alert only for IPs abroad, naming them" {
+  GEO_OK=1; ALLOWED_COUNTRIES="DE"; GEO_TRUSTED_ORGS=""
+  geo() { GEO_ORG=""; case $1 in 198.18.5.*) GEO_CC=US ;; *) GEO_CC=DE ;; esac; GEO_LABEL=$GEO_CC; }
+  plugin t22 'alert_foreign "198.18.0.1 198.18.5.2 x\$(id) 198.18.5.3" "from outside $ALLOWED_COUNTRIES: {ips} – check"; alert_foreign "198.18.0.1" "never {ips}"; echo "ALERT-FOREIGN 198.18.5.9 no separator"' 'PLUGIN_SETTINGS="ALLOWED_COUNTRIES"'
+  run_plugin t22
+  run alerts
+  [ "$output" = "from outside DE: 198.18.5.2 (US) 198.18.5.3 (US) – check" ]
+  GEO_OK=0; ALERTS=(); run_plugin t22
+  [ "${#ALERTS[@]}" -eq 0 ]                     # no GeoIP database: no country alerts
+}
+
+@test "a plugin without PLUGIN_SECTION continues the section before it; \$SETTING/file names a log" {
+  mkdir logs; echo "a line" >logs/x.log; L_DIR=$PWD/logs; EMPTY_DIR=""
+  plugin t23 'out "missing=$PSR_LOGS_MISSING"; awk -v sep="$PSR_SEP" "substr(\$0, 1, 1) == sep { print \"TEXT log \" \$2 \" \" \$3; next } { print \"TEXT   \" \$0 }"' \
+    'PLUGIN_SETTINGS="L_DIR EMPTY_DIR"
+PLUGIN_LOGS="$L_DIR/x.log $EMPTY_DIR/x.log"'
+  sed -i 's/^PLUGIN_SECTION=.*/PLUGIN_SECTION=""/' "$H/plugins/t23.sh"; sums
+  section "BEFORE"; run_plugin t23
+  run report
+  [[ $output == *"== BEFORE =="*"missing=2"*"log 1 $PWD/logs/x.log"*"  a line"*"log 2"* ]]
+  [ "$(grep -c '^== ' <<<"$output")" -eq 1 ]
+  plugin t24 'out "ran"' 'PLUGIN_SETTINGS="L_DIR"
+PLUGIN_LOGS="$L_DIR/../$(id)"'
+  ALERTS=(); run_plugin t24
+  run alerts
+  [[ $output == *"the check t24 was not run – header"* ]]
+}
+
 @test "a changed plugin is not run" {
   plugin t5 'out "ran"'
   echo 'echo "TEXT changed" ; : >changed' >>"$H/plugins/t5.sh"

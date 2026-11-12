@@ -29,16 +29,22 @@ setup() {
     echo "198.18.0.10 - - [12/Nov/2026:10:00:0$i +0000] \"POST /wp-login.php?$P1 HTTP/1.1\" 200 1 \"-\" \"$P3$E[2J$TAB$P2\""
   done >web/d1.example/logs/access_ssl_log
   echo "[Thu Nov 12 10:00:00 2026] [php:error] PHP Fatal error: $P1$E[2J$P3" >web/d1.example/logs/error_log
+  mkdir rc; P4='x[$(id>pwned4)]'
+  for i in 1 2 3 4 5 6; do
+    echo "[12-Nov-2026 10:00:0$i +0100]: <s> User $P4@d1.example [198.18.0.12]; Message <$P2> for $P3@d2.example,$TAB$P1; 250: ok$E[2J"
+    echo "[12-Nov-2026 10:00:0$i +0100]: <s> IMAP Error: Login failed for $P4@d1.example$E[31m against localhost from 198.18.0.12. $P2 :: {ips}"
+  done >rc/sendmail.tmp
+  grep ' User ' rc/sendmail.tmp >rc/sendmail; grep 'Login failed' rc/sendmail.tmp >rc/errors
   echo "[2026-11-12 10:00:00.000] 1:1 ERR [panel] Failed login attempt with username '$P3$E[2J$TAB$P1' from 198.18.0.11" >panel.log
 }
 
 @test "hostile log lines run nothing and leave no control characters in the report" {
   MAIL_LOG=$PWD/mail.log; AUTH_LOG=$PWD/auth.log; PLESK_PANEL_LOG=/nonexistent
-  VHOST_LOGS=$PWD/web; PLESK_ERROR_LOG=$PWD/panel.log
+  VHOST_LOGS=$PWD/web; PLESK_ERROR_LOG=$PWD/panel.log; ROUNDCUBE_LOG_DIR=$PWD/rc; WARN_LOGIN_BRUTE_FAILS=1
   REPORT=$PWD/report.txt; HOST=host; NOW=now; GEO_NOTE=""
   { check_mail || true; check_logins || true; check_web || true; run_plugin panel || true
     # second run: the logins of the first are in the state files now
-    : >"$BODY"; check_mail || true; check_logins || true; } 2>errors
+    : >"$BODY"; check_mail || true; check_logins || true; run_plugin webmail || true; } 2>errors
   run grep -E 'syntax error|bad substitution|command not found' errors
   [ -z "$output" ]                                              # no payload reached the shell's arithmetic
   write_report
@@ -46,5 +52,6 @@ setup() {
   [ -z "$output" ]                                              # nothing was executed
   run bash -c "LC_ALL=C grep -c \$'[\\x01-\\x08\\x0b-\\x1f\\x7f]' report.txt"
   [ "$output" = 0 ]                                             # no ESC, no stray control chars
+  grep -qF '1 IPs  x[$(id>pwned4)]@d1.example' report.txt           # the webmail plugin reports it as text too
   grep -q 'touch pwned' report.txt                              # the payloads are reported as text
 }

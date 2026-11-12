@@ -1,0 +1,12 @@
+[12-Nov-2026 10:01:05 +0100]: <k3v9q2m1> User office@d44.example [198.18.0.12]; Message <1003.1@d44.example> for a@example.com; 250: 2.0.0 Ok: queued as 4X00001Z
+[12-Nov-2026 10:04:05 +0100]: <k3v9q2m1> User office@d44.example [198.18.0.12]; Message <2006.2@d44.example> for a@example.com, b@example.org; 250: 2.0.0 Ok: queued as 4X00002Z
+[12-Nov-2026 10:09:05 +0100]: <k3v9q2m1> User office@d44.example [198.18.0.40]; Message <3009.3@d44.example> for c@example.net; 250: 2.0.0 Ok: queued as 4X00003Z
+[12-Nov-2026 10:13:11 +0100]: <k3v9q2m1> User sales@d44.example [198.18.5.77]; Message <400c.4@d44.example> for r0@example.com, r1@example.com, r2@example.com; 250: 2.0.0 Ok: queued as 4X00004Z
+[12-Nov-2026 10:14:11 +0100]: <k3v9q2m1> User sales@d44.example [198.18.5.77]; Message <500f.5@d44.example> for r3@example.com, r4@example.com, r5@example.com; 250: 2.0.0 Ok: queued as 4X00005Z
+[12-Nov-2026 10:15:11 +0100]: <k3v9q2m1> User sales@d44.example [198.18.5.77]; Message <6012.6@d44.example> for r6@example.com, r7@example.com, r8@example.com; 250: 2.0.0 Ok: queued as 4X00006Z
+[12-Nov-2026 10:16:11 +0100]: <k3v9q2m1> User sales@d44.example [198.18.5.77]; Message <7015.7@d44.example> for r9@example.com, r10@example.com, r11@example.com; 250: 2.0.0 Ok: queued as 4X00007Z
+[12-Nov-2026 10:17:11 +0100]: <k3v9q2m1> User sales@d44.example [198.18.5.77]; Message <8018.8@d44.example> for r12@example.com, r13@example.com, r14@example.com; 250: 2.0.0 Ok: queued as 4X00008Z
+[12-Nov-2026 10:18:11 +0100]: <k3v9q2m1> User sales@d44.example [198.18.5.77]; Message <901b.9@d44.example> for r15@example.com, r16@example.com, r17@example.com; 250: 2.0.0 Ok: queued as 4X00009Z
+[12-Nov-2026 10:19:11 +0100]: <k3v9q2m1> User sales@d44.example [198.18.5.77]; Message <a01e.10@d44.example> for r18@example.com, r19@example.com, r20@example.com; 250: 2.0.0 Ok: queued as 4X00010Z
+[12-Nov-2026 10:20:11 +0100]: <k3v9q2m1> User sales@d44.example [198.18.5.77]; Message <b021.11@d44.example> for r21@example.com, r22@example.com, r23@example.com; 250: 2.0.0 Ok: queued as 4X00011Z
+[12-Nov-2026 10:30:02 +0100]: <k3v9q2m1> User info@d116.example [127.0.0.1]; Message <c024.12@d116.example> for d@example.org; 250: 2.0.0 Ok: queued as 4X00012Z

@@ -1,7 +1,7 @@
 # Plugin system – concept
 
-Status: concept for a later major version (2.0). Steps 1 and 2 of the order below are
-built (framework, `panel`, `backups`; see "State of the code"). This branch
+Status: concept for a later major version (2.0). Steps 1 to 3 of the order below are
+built (framework, `panel`, `backups`, `webmail`; see "State of the code"). This branch
 (`feature/plugin-system`) carries the work; `main` continues with the 1.x releases
 and is merged into this branch from time to time.
 
@@ -227,17 +227,27 @@ are the same.
 
 ## State of the code
 
-Steps 1 and 2 are built: `lib/plugin-lib.sh` (runs one plugin), `plugins/panel.sh`,
-`plugins/backups.sh` (no log on stdin; `PLUGIN_READS` names the directories), the loader
+Steps 1 to 3 are built: `lib/plugin-lib.sh` (runs one plugin), `plugins/panel.sh`,
+`plugins/backups.sh` (no log on stdin; `PLUGIN_READS` names the directories),
+`plugins/webmail.sh` (several logs), the loader
 and the protocol in the main script (`run_plugin`), `tools/update-plugin-sums.sh`, and
-the tests in `tests/plugins.bats`, `tests/panel.bats` and `tests/backups.bats` (with
+the tests in `tests/plugins.bats` and one file per plugin (with
 parity tests against the old functions in `tests/legacy/`). Where it differs from the text above, for now:
 
 - GeoIP stays in the main script. A plugin writes `$(geo_ref IP)` into a line and the
   main script replaces it with "IP (country, operator)". So a plugin needs neither the
   database nor the settings for it.
-- `PLUGIN_LOGS` may name a setting (`$PLESK_ERROR_LOG`); the main script resolves it,
-  and only if the setting is listed in `PLUGIN_SETTINGS`.
+- `PLUGIN_LOGS` may name a setting (`$PLESK_ERROR_LOG`) or a file below a directory
+  from the settings (`$ROUNDCUBE_LOG_DIR/sendmail`); the main script resolves it, and
+  only if the setting is listed in `PLUGIN_SETTINGS`. `webmail` lists the logs of every
+  place Roundcube may log to and takes those of the directory in use.
+- Country alerts: a plugin prints `ALERT-FOREIGN <ips> :: <text>` (`alert_foreign`); the
+  main script raises the alert only if one of the IPs is outside `ALLOWED_COUNTRIES`,
+  and puts those IPs into the text. Among each other these alerts now come in the order
+  of the mailboxes in the report (before: in no fixed order).
+- `webmail` has no section of its own, other than planned: it leaves out
+  `PLUGIN_SECTION` and continues `== MAIL ==`, so the report and `summary.txt` stay as
+  they are. A section of its own can follow with 2.0 if wanted.
 - A plugin's name stands in `HOURLY_CHECKS` like every check; a name without a
   `check_<name>` function is a plugin.
 - Offsets are still kept per log path. The key per plugin comes with step 5, when two

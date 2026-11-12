@@ -103,6 +103,7 @@ PLESK_PANEL_LOG=/var/log/plesk/httpsd_access_log   # access log of the Plesk pan
 PLESK_ERROR_LOG=/var/log/plesk/panel.log           # Plesk's own log – failed panel logins, failed certificate renewals
 # shellcheck disable=SC2034  # used by the plugin backups
 PLESK_BACKUP_LOGS=""          # directory with the logs of Plesk's backups (backup-*/backup.log); default: the usual places
+# shellcheck disable=SC2034  # used by the plugin webmail
 ROUNDCUBE_LOG_DIR=""          # default: /var/log/plesk-roundcube (or /usr/share/psa-roundcube/logs)
 
 # Alert thresholds – per run (with an hourly cron job: per hour)
@@ -203,9 +204,10 @@ PLUGIN_MAX_NOTES=10
 PLUGIN_MAX_LINE=2000          # bytes per line
 # sha256sum of lib/*.sh and plugins/*.sh – written by tools/update-plugin-sums.sh, checked by the tests
 # >>> plugin sums
-PLUGIN_SUMS='9ba71938b18b01dd0f54246c97f72f2637b41a038b8d51717da7a7e8ab6d735a  lib/plugin-lib.sh
+PLUGIN_SUMS='a9e57977cc1a5753cf6a37ca46821574a2c50e6c554bddd6e6e0c596e388b28d  lib/plugin-lib.sh
 9e7bc59eaf72d53e9aa71dba1cfd8db1589b74342b4139d1f420f462bafb17d9  plugins/backups.sh
-abab3680694f294bac2d2dc5fc52f4cc8090644ce27075cb0fbb35eea64c643a  plugins/panel.sh'
+abab3680694f294bac2d2dc5fc52f4cc8090644ce27075cb0fbb35eea64c643a  plugins/panel.sh
+27ab6638bb38af2c4be885dc8d0c74b83cb635fb2e26b313c2b7d8cdd83dd317  plugins/webmail.sh'
 # <<< plugin sums
 
 # =============================================================================
@@ -964,74 +966,7 @@ old_password_check() {
   return 0
 }
 
-check_webmail() {   # Roundcube: mails sent per mailbox with real client IP, failed webmail logins
-  local RC_DIR d WEBMAIL WSIP n nr who nip line k c ip fails WFL
-  # Roundcube connects to Postfix/Dovecot from localhost, so the mail log shows neither
-  # the real client IP nor (on Plesk) the mailbox. Roundcube's own logs have both:
-  #   sendmail: "User <mailbox> [<ip>]; Message <id> for <rcpt>, <rcpt>; 250: ..."
-  #   errors:   "Login failed for <mailbox> against localhost from <ip>."
-  RC_DIR=$ROUNDCUBE_LOG_DIR
-  if [[ -z $RC_DIR ]]; then
-    for d in /var/log/plesk-roundcube /usr/share/psa-roundcube/logs; do [[ -d $d ]] && { RC_DIR=$d; break; }; done
-  fi
-  out ""; out "Webmail (Roundcube) – mails sent (mails, recipients, IPs):"
-  if [[ -n $RC_DIR && -d $RC_DIR ]]; then
-    WEBMAIL=$( { new_lines "$RC_DIR/sendmail" | sed 's/^/S /'; new_lines "$RC_DIR/errors" | sed 's/^/E /'; } | awk '
-      $1 == "S" && / User [^ ]+ \[[0-9a-fA-F:.]+\]; Message / {
-        u=$0; sub(/.* User /, "", u); ip=u; sub(/ .*/, "", u); sub(/^[^[]*\[/, "", ip); sub(/\].*/, "", ip)
-        r=$0; sub(/.*; Message [^ ]+ for /, "", r); sub(/; [0-9][0-9][0-9]:.*/, "", r); nr=split(r, x, ",")
-        ms[u]++; rcp[u]+=nr; mip[u SUBSEP ip]++
-      }
-      $1 == "E" && /Login failed for .* from / {
-        u=$0; sub(/.*Login failed for /, "", u); sub(/ against .*/, "", u); u=tolower(u)
-        ip=$0; sub(/.* from /, "", ip); sub(/ .*/, "", ip); sub(/\.$/, "", ip)
-        fl++; fip[ip]++; fu[u]++; fui[u SUBSEP ip]++
-      }
-      END {
-        printf "WTOT\t%d\n", fl
-        for (u in ms) printf "WSND\t%d\t%d\t%s\n", ms[u], rcp[u], u
-        for (k in mip) { split(k, kk, SUBSEP); printf "WSIP\t%d\t%s\t%s\t%d\n", mip[k], kk[1], kk[2], fui[k] + 0 }
-        for (i in fip) printf "WFIP\t%d\t%s\n", fip[i], i
-        for (u in fu)  printf "WFUS\t%d\t%s\n", fu[u], u
-      }')
-    WSIP=$(grep '^WSIP' <<<"$WEBMAIL" | sort -t$'\t' -k2,2nr)
-    while IFS=$'\t' read -r _ n nr who; do
-      nip=$(awk -F'\t' -v u="$who" '$3 == u' <<<"$WSIP" | grep -c .)
-      printf '  %6d  %5d rcpt  %2d IPs  %s\n' "$n" "$nr" "$nip" "$who" >>"$BODY"
-      line=""; k=0
-      while IFS=$'\t' read -r _ c _ ip _; do
-        k=$((k + 1)); (( k > 5 )) && { line+=", …"; break; }
-        geo "$ip"; line+="${line:+, }$ip${GEO_LABEL:+ ($GEO_LABEL)} ×$c"
-      done < <(awk -F'\t' -v u="$who" '$3 == u' <<<"$WSIP")
-      [[ -n $line ]] && printf '          %s\n' "$line" >>"$BODY"
-      (( n > WARN_MAILS_PER_SASL )) && alert "Mail: webmail user $who sent $n mails"
-      (( nr > WARN_MAILS_PER_SENDER )) && alert "Mail: webmail user $who sent to $nr recipients"
-      (( nip > WARN_IPS_PER_MAILBOX )) && alert "Mail: webmail user $who used from $nip different IPs – password compromised?"
-    done < <(grep '^WSND' <<<"$WEBMAIL" | sort -t$'\t' -k2,2nr | head -10)
-    local -A WFOREIGN=()
-    while IFS=$'\t' read -r _ c who ip fails; do
-      [[ -n $ip ]] || continue
-      geo "$ip"
-      geo_foreign && WFOREIGN[$who]+="$ip ($GEO_LABEL) "
-      (( fails >= WARN_LOGIN_BRUTE_FAILS )) &&
-        alert "Mail: webmail user $who sent $c mails from $ip${GEO_LABEL:+ ($GEO_LABEL)} after $fails failed logins from that IP – password guessed?"
-    done <<<"$WSIP"
-    for who in "${!WFOREIGN[@]}"; do
-      alert "Mail: webmail user $who sent mails from outside $ALLOWED_COUNTRIES: ${WFOREIGN[$who]% } – password compromised?"
-    done
-    WFL=$(grep '^WTOT' <<<"$WEBMAIL" | cut -f2)
-    out "Failed webmail logins: ${WFL:-0} – top IPs:"
-    (( ${WFL:-0} > WARN_AUTH_FAIL )) && alert "Mail: ${WFL} failed webmail logins (brute force?)"
-    while IFS=$'\t' read -r _ c ip; do
-      geo "$ip"; printf '  %6d  %s%s\n' "$c" "$ip" "${GEO_LABEL:+ ($GEO_LABEL)}" >>"$BODY"
-    done < <(grep '^WFIP' <<<"$WEBMAIL" | sort -t$'\t' -k2,2nr | head -5)
-    out "Most attacked mailboxes (failed webmail logins):"
-    grep '^WFUS' <<<"$WEBMAIL" | sort -t$'\t' -k2,2nr | head -5 | awk -F'\t' '{printf "  %6d  %s\n", $2, $3}' >>"$BODY"
-  else
-    out "  (no Roundcube log directory found)"
-    note "webmail: no Roundcube log directory found (ROUNDCUBE_LOG_DIR) – webmail not checked"
-  fi
-}
+# plugin: plugins/webmail.sh, run by run_plugin.
 
 check_system() {   # load, CPU per system user, top processes, RAM, filesystems
   local CORES L1 L5 L15 LIMIT pct user MEM MT MA MP SWAP mnt p ip
@@ -2277,7 +2212,7 @@ plugin_header() {
     fi
     PH[$k]=$v
   done <"$1"
-  for k in PLUGIN_NAME PLUGIN_API PLUGIN_SCHEDULE PLUGIN_SECTION PLUGIN_OS PLUGIN_MAINTAINER; do
+  for k in PLUGIN_NAME PLUGIN_API PLUGIN_SCHEDULE PLUGIN_OS PLUGIN_MAINTAINER; do   # no PLUGIN_SECTION: no section of its own
     if [[ -z ${PH[$k]:-} ]]; then PLUGIN_ERR="header: $k is missing"; return 1; fi
   done
   if ! [[ ${PH[PLUGIN_NAME]} =~ ^[a-z][a-z0-9-]{1,30}$ ]] || [[ ${PH[PLUGIN_NAME]} != "$2" ]]; then
@@ -2290,9 +2225,10 @@ plugin_header() {
   for w in ${PH[PLUGIN_SETTINGS]:-}; do
     if ! [[ $w =~ ^[A-Z][A-Z0-9_]*$ ]]; then PLUGIN_ERR="header: PLUGIN_SETTINGS lists $w, which is not a setting"; return 1; fi
   done
-  for w in ${PH[PLUGIN_LOGS]:-}; do   # a path, or $SETTING for a path from the settings
-    [[ $w == /* && $w != *'$'* ]] && continue
-    if ! [[ $w =~ ^\$[A-Z][A-Z0-9_]*$ && " ${PH[PLUGIN_SETTINGS]:-} " == *" ${w#\$} "* ]]; then
+  for w in ${PH[PLUGIN_LOGS]:-}; do   # a path, $SETTING for a path from the settings, or $SETTING/file
+    [[ $w == /* && $w != *\$* ]] && continue
+    k=${w%%/*}
+    if ! [[ $w =~ ^\$[A-Z][A-Z0-9_]*(/[A-Za-z0-9._/-]+)?$ && " ${PH[PLUGIN_SETTINGS]:-} " == *" ${k#\$} "* ]]; then
       PLUGIN_ERR="header: PLUGIN_LOGS lists $w, which is neither a path nor a setting from PLUGIN_SETTINGS"; return 1
     fi
   done
@@ -2309,10 +2245,23 @@ plugin_expand() {
   done
   PX=${PX//$'\037'/}
 }
+# plugin_foreign "IP IP … :: TEXT" → PX: TEXT with {ips} replaced by those of the IPs that are
+# outside ALLOWED_COUNTRIES, each with country and operator; empty if none is (or no GeoIP)
+plugin_foreign() {
+  local ips=${1%% :: *} text=${1#* :: } ip l=""
+  PX=""
+  [[ $1 == *" :: "* ]] || return 0
+  for ip in $ips; do
+    [[ $ip =~ ^[0-9a-fA-F:.]+$ ]] || continue
+    geo "$ip"; geo_foreign && l+="$ip ($GEO_LABEL) "
+  done
+  [[ -n $l ]] || return 0
+  plugin_expand "${text//\{ips\}/${l% }}"
+}
 # run_plugin NAME – runs plugins/NAME.sh in a process of its own, with an empty environment but
 # the settings it declares. It gets the new lines of its logs on stdin (each log after a line
 # "\036 NUMBER PATH" – log_clean removes \036 from log lines, so a log can't forge it) and
-# answers with TEXT, NOTE and ALERT lines; everything else is dropped. The plugin can't touch
+# answers with TEXT, NOTE, ALERT and ALERT-FOREIGN lines; everything else is dropped. The plugin can't touch
 # the alerts of other checks, the status or the state files.
 run_plugin() {
   local name=$1 f="$TMPD/plugin-$1.sh" lib="$TMPD/plugin-lib.sh" os=other w v i=0 miss="" rc line kw nt=0 na=0 nn=0 nd=0
@@ -2326,10 +2275,14 @@ run_plugin() {
   if [[ $os != other && " ${PH[PLUGIN_OS]} " != *" $os "* ]]; then
     note "plugin $name: not made for this system ($os) – skipped"; return 0
   fi
-  section "${PH[PLUGIN_SECTION]}"
+  [[ -n ${PH[PLUGIN_SECTION]:-} ]] && section "${PH[PLUGIN_SECTION]}"
   for w in ${PH[PLUGIN_SETTINGS]:-}; do envs+=("$w=${!w:-}"); done
   for w in ${PH[PLUGIN_LOGS]:-}; do
-    v=$w; [[ $w == '$'* ]] && { w=${w#\$}; v=${!w:-}; }
+    v=$w
+    if [[ $w == \$* ]]; then   # $SETTING or $SETTING/file; nothing if the setting is empty
+      v=${w%%/*}; v=${v#\$}; v=${!v:-}
+      [[ -n $v && $w == */* ]] && v="${v%/}/${w#*/}"
+    fi
     logs+=("$v"); i=$((i + 1))
     [[ -n $v && -r $v ]] || miss+="${miss:+ }$i"
   done
@@ -2348,6 +2301,8 @@ run_plugin() {
     case $kw in
       TEXT)  if (( ++nt > PLUGIN_MAX_TEXT )); then nd=$((nd + 1)); else plugin_expand "$line"; out "$PX"; fi ;;
       ALERT) if (( ++na > PLUGIN_MAX_ALERTS )) || [[ -z $line ]]; then nd=$((nd + 1)); else plugin_expand "$line"; alert "$PX"; fi ;;
+      ALERT-FOREIGN) plugin_foreign "$line"   # an alert only if one of the IPs is in a foreign country
+             if [[ -n $PX ]]; then if (( ++na > PLUGIN_MAX_ALERTS )); then nd=$((nd + 1)); else alert "$PX"; fi; fi ;;
       NOTE)  if (( ++nn > PLUGIN_MAX_NOTES )) || [[ -z $line ]]; then nd=$((nd + 1)); else plugin_expand "$line"; note "$PX"; fi ;;
       *)     nd=$((nd + 1)) ;;
     esac

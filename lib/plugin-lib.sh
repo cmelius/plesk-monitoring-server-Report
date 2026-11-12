@@ -9,6 +9,8 @@
 #   TEXT <line>    a line of its section in the report
 #   NOTE <text>    a note below the STATUS line (missing data source)
 #   ALERT <text>   an alert
+#   ALERT-FOREIGN <ip> <ip> … :: <text>   an alert only if one of the IPs is outside
+#                  ALLOWED_COUNTRIES; {ips} in the text becomes these IPs
 # out, note and alert below print these lines, so a check reads the same inside the main
 # script and as a plugin. Everything else on stdout is dropped by the main script.
 #
@@ -26,6 +28,10 @@ alert() { printf 'ALERT %s\n' "$*"; }
 # geo_ref IP – stands for "IP (country, operator)": the main script, which has the GeoIP
 # database, replaces it. \037 never comes from a log line (log_clean removes it).
 geo_ref() { printf '\037G%s\037' "$1"; }
+
+# alert_foreign "IP IP …" TEXT – an alert only if one of the IPs is outside ALLOWED_COUNTRIES
+# (the main script decides); {ips} in TEXT becomes those IPs with country and operator
+alert_foreign() { local ips=$1; shift; printf 'ALERT-FOREIGN %s :: %s\n' "$ips" "$*"; }
 
 ignored_domain() { [[ " ${WEB_IGNORE_DOMAINS:-} " == *" $1 "* ]]; }
 
