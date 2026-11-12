@@ -15,7 +15,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Syntax
         run: bash -n plesk-server-report.sh
       - name: shellcheck
@@ -32,7 +32,7 @@ jobs:
       matrix:
         awk: [mawk, gawk]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install bats and ${{ matrix.awk }}
         run: sudo apt-get update -q && sudo apt-get install -y -q bats mawk gawk
       - name: bats with ${{ matrix.awk }}
