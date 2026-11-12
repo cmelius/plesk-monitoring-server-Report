@@ -149,7 +149,7 @@ MAIL_TLS_NAME=""              # host name mail clients connect to (default: serv
 MAIL_TLS_PORTS="25 465 587 993 995"   # ports whose certificate is checked (25/587 via STARTTLS)
 # Daily per-domain DNS checks (all Plesk domains)
 DOMAIN_DNS_CHECK=1            # A/AAAA still pointing here, CAA vs. Let's Encrypt, broken DNSSEC, domain blocklists
-DOMAIN_BLOCKLISTS="dbl.spamhaus.org multi.surbl.org"   # queried via the local resolver (public ones are refused)
+DOMAIN_BLOCKLISTS="dbl.spamhaus.org multi.surbl.org multi.uribl.com"   # queried via the local resolver (public ones are refused)
 HTTPS_CHECK=1                 # daily: HSTS header and http→https redirect on domains with a valid certificate (recommendation, no alert)
 # Web attack statistics (hourly) and document-root scans (daily)
 ATTACK_STATS=1                # SQLi/traversal/RCE/XSS patterns, sensitive-file probes, peaks, ModSecurity
@@ -468,7 +468,7 @@ dig_status() {   # dig_status NAME TYPE → NOERROR | NXDOMAIN | SERVFAIL | … 
 # =============================================================================
 
 check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed logins, DNS blocklists
-  local MAILLOG f last MAILSTATS SENT DEF BOU BL SF DF QUEUE REV BLRES bl r SAIP n nip who line k c ip ex uid user home
+  local MAILLOG f last MAILSTATS SENT DEF BOU BL SF DF QUEUE REV BLRES bl r t SAIP n nip who line k c ip ex uid user home
   section "MAIL"
   MAILLOG=""
   for f in ${MAIL_LOG:-/var/log/maillog /var/log/mail.log}; do [[ -r $f ]] && { MAILLOG=$f; break; }; done
@@ -740,9 +740,13 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     REV=$(awk -F. '{print $4"."$3"."$2"."$1}' <<<"$PUBIP")
     BLRES=""
     for bl in $DNSBL_LISTS; do
+      # the test entry 127.0.0.2 (RFC 5782) must be listed – no answer means the list doesn't
+      # answer this server (not registered, rate limited, resolver blocked), not "clean"
+      t=$(getent ahostsv4 "2.0.0.127.$bl" 2>/dev/null | awk 'NR==1{print $1}')
       r=$(getent ahostsv4 "$REV.$bl" 2>/dev/null | awk 'NR==1{print $1}')
-      if [[ -z $r ]]; then BLRES+=" $bl:clean"
-      elif [[ $r == 127.255.255.* ]]; then BLRES+=" $bl:query-refused"
+      if [[ $t == 127.255.255.* || $r == 127.255.255.* ]]; then BLRES+=" $bl:query-refused"
+      elif [[ -z $t ]]; then BLRES+=" $bl:no-answer"
+      elif [[ -z $r ]]; then BLRES+=" $bl:clean"
       else BLRES+=" $bl:LISTED($r)"; alert "Mail: server IP $PUBIP is listed on $bl"
       fi
     done
@@ -2078,7 +2082,7 @@ check_domaindns() {   # still pointing here?, CAA vs. Let's Encrypt, DNSSEC, dom
       r=$(getent ahostsv4 "$d.$bl" 2>/dev/null | awk 'NR==1{print $1}')
       [[ -z $r ]] && continue
       case "$bl:$r" in
-        *:127.255.255.*|dbl.spamhaus.org:127.0.1.255|multi.surbl.org:127.0.0.1) BL_REFUSED+=" $bl" ;;
+        *:127.255.255.*|dbl.spamhaus.org:127.0.1.255|multi.surbl.org:127.0.0.1|multi.uribl.com:127.0.0.1) BL_REFUSED+=" $bl" ;;
         *) out+="  $d: LISTED on $bl ($r)"$'\n'
            dalert "DNS: domain $d is listed on $bl ($r) – mails mentioning it get rejected; check the website for malware/phishing" ;;
       esac
