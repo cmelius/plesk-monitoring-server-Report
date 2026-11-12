@@ -23,6 +23,14 @@ body:
 
         The command keeps the *same* IP mapped to the *same* placeholder, so it stays visible which requests came from the same client. IPv6 addresses are not replaced, so remove them by hand.
 
+        **More thorough (optional):** [`tests/anonymize.py`](https://github.com/cmelius/plesk-monitoring-server-Report/blob/main/tests/anonymize.py) from this repository also replaces IPv6 addresses, mailbox and user names (in URLs like `/author/name/` too), other domains in the referer and tokens – consistently, like the command above. It only reads the files and prints, Python 3 is enough:
+
+        ```bash
+        python3 -I anonymize.py --server-ip <SERVER_IP> --own-domains domains.txt excerpt.log
+        ```
+
+        `domains.txt`: your hosted domains, one per line (`plesk bin domain --list`). Check the result before posting – anonymizing is best effort.
+
   - type: input
     id: software
     attributes:
