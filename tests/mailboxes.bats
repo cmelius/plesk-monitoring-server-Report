@@ -12,7 +12,7 @@ setup() { load_script; MAILNAMES_DIR="$FIX/mailboxes"; WARN_MAILBOX_PCT=95; }
   run check_mailboxes
   [[ $output == *" 68 %  info@d1.example  (1.07 GB of 1.56 GB)"* ]]
   [[ $output == *" 98 %  boss@d2.example"* ]]
-  [[ $output == *"2 mailbox(es) checked; 1 unlimited (no size limit set in Plesk), 1 without maildirsize"* ]]
+  [[ $output == *"2 mailbox(es) checked; 1 unlimited (no size limit set in Plesk; largest: office@d1.example "*", all together "*"), 1 without maildirsize"* ]]
   { check_mailboxes || true; } >/dev/null
   run cat "$DALERTS"
   [[ $output == *"mailbox boss@d2.example is 98 % full"* ]]
@@ -23,11 +23,25 @@ setup() { load_script; MAILNAMES_DIR="$FIX/mailboxes"; WARN_MAILBOX_PCT=95; }
   run check_mailboxes
   [[ $output == *" 53 %  info@d1.example"* ]]
   [[ $output == *" 98 %  boss@d2.example"* ]]
-  [[ $output == *"2 mailbox(es) checked; 1 unlimited (no size limit set in maildirsize)"* ]]
+  [[ $output == *"2 mailbox(es) checked; 1 unlimited (no size limit set in maildirsize; largest: office@d1.example"* ]]
 }
 
 @test "warning level is configurable" {
   WARN_MAILBOX_PCT=50
   { check_mailboxes || true; } >/dev/null
   [ "$(grep -c 'Mail: mailbox' "$DALERTS")" -eq 2 ]
+}
+
+@test "mailboxes without a limit: size from du, warning above WARN_MAILBOX_UNLIMITED_GB" {
+  # du reports 6 GB for office@d1.example (no limit), the fixture itself is tiny
+  du() { [[ $2 == */d1.example/office/Maildir ]] && printf '6291456\t%s\n' "$2" || command du "$@"; }
+  run check_mailboxes
+  [[ $output == *"largest: office@d1.example 6.00 GB, all together 6.00 GB"* ]]
+  { check_mailboxes || true; } >/dev/null
+  run cat "$DALERTS"
+  [[ $output == *"mailbox office@d1.example has no size limit and holds 6.00 GB (more than 5 GB)"* ]]
+  : >"$DALERTS"; WARN_MAILBOX_UNLIMITED_GB=0
+  { check_mailboxes || true; } >/dev/null
+  run grep -c 'no size limit and holds' "$DALERTS"
+  [ "$output" = 0 ]
 }

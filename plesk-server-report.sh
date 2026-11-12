@@ -113,6 +113,7 @@ WARN_BLOCKLIST=1              # remote rejections mentioning a blocklist, reputa
 WARN_QUEUE=200                # messages in the Postfix queue
 WARN_AUTH_FAIL=300            # failed mail logins (SMTP + IMAP/POP3)
 WARN_MAILBOX_PCT=95           # daily: mailbox filled to x % of its size limit; 0 = off (full mailboxes rejecting mail are always reported)
+WARN_MAILBOX_UNLIMITED_GB=5   # daily: mailbox without size limit larger than x GB (disk, backups); 0 = off
 WARN_DSN=1                    # delivery confirmations (DSN "delivered") sent to other servers – spammers request them to verify addresses; 0 = off
 WARN_OLD_PASSWORD=3           # failed logins of one mailbox from an IP with earlier successful mail logins (outdated password on a device?); 0 = off
 WARN_LOAD_FACTOR=1.5          # 5-min load > CPU cores × factor
@@ -2294,8 +2295,8 @@ maildir_used() {   # maildir_used FILE – bytes used according to a maildirsize
   awk 'NR > 1 { s += $1 } END { printf "%.0f\n", s + 0 }' "$1" 2>/dev/null
 }
 check_mailboxes() {
-  local who lim sub f used pct n=0 nolim=0 nofile=0 d mb h where
-  echo ""; echo "Mailboxes (fill level of the size limit; warning from WARN_MAILBOX_PCT=$WARN_MAILBOX_PCT %):"
+  local who lim sub f used pct n=0 nolim=0 nofile=0 d mb h where kb utot=0 umax=0 uwho="" big
+  echo ""; echo "Mailboxes (fill level of the size limit; warning from WARN_MAILBOX_PCT=$WARN_MAILBOX_PCT %, without a limit from WARN_MAILBOX_UNLIMITED_GB=$WARN_MAILBOX_UNLIMITED_GB GB):"
   if [[ -z $MAILNAMES_DIR || ! -d $MAILNAMES_DIR ]]; then echo "  mailbox directory MAILNAMES_DIR=\"$MAILNAMES_DIR\" not found – skipped"; return 0; fi
   {
     if command -v plesk >/dev/null; then
@@ -2312,13 +2313,26 @@ check_mailboxes() {
   while IFS=$'\t' read -r who lim sub; do
     [[ -n $who ]] || continue
     [[ $lim =~ ^[0-9]+$ ]] && (( lim > 0 )) || lim=$sub
-    if ! [[ $lim =~ ^[0-9]+$ ]] || (( lim <= 0 )); then nolim=$((nolim + 1)); continue; fi
+    if ! [[ $lim =~ ^[0-9]+$ ]] || (( lim <= 0 )); then
+      # no limit: size of the Maildir folder (maildirsize is often missing or stale without a quota)
+      nolim=$((nolim + 1))
+      d="$MAILNAMES_DIR/${who#*@}/${who%@*}/Maildir"
+      [[ -d $d ]] || continue
+      kb=$(T "$FIND_TIMEOUT" du -sk "$d" 2>/dev/null | awk 'NR == 1 { print $1 }')
+      [[ $kb =~ ^[0-9]+$ ]] || continue
+      used=$(( kb * 1024 )); utot=$(( utot + used ))
+      (( used > umax )) && { umax=$used; uwho=$who; }
+      if (( WARN_MAILBOX_UNLIMITED_GB > 0 && used > WARN_MAILBOX_UNLIMITED_GB * 1073741824 )); then
+        dalert "Mail: mailbox $who has no size limit and holds $(fmt_bytes "$used") (more than $WARN_MAILBOX_UNLIMITED_GB GB) – it fills the disk and the backups. Set a size limit, or have the customer delete or archive mail"
+      fi
+      continue
+    fi
     f="$MAILNAMES_DIR/${who#*@}/${who%@*}/Maildir/maildirsize"
     if [[ ! -r $f ]]; then nofile=$((nofile + 1)); continue; fi
     used=$(maildir_used "$f"); n=$((n + 1))
     pct=$(( used * 100 / lim ))
     printf '%d\t%s\t%s\t%s\n' "$pct" "$who" "$(fmt_bytes "$used")" "$(fmt_bytes "$lim")" >>"$TMP.mbp"
-    if (( pct >= WARN_MAILBOX_PCT )); then
+    if (( WARN_MAILBOX_PCT > 0 && pct >= WARN_MAILBOX_PCT )); then
       dalert "Mail: mailbox $who is $pct % full ($(fmt_bytes "$used") of $(fmt_bytes "$lim")) – when it is full, mail to it is rejected. Raise its size limit, or have the customer delete or archive mail"
     fi
   done <"$TMP.mbx"
@@ -2326,7 +2340,8 @@ check_mailboxes() {
     sort -t$'\t' -k1,1nr "$TMP.mbp" | head -5 | awk -F'\t' '{ printf "  %3d %%  %s  (%s of %s)\n", $1, $2, $3, $4 }'
   fi
   where="in Plesk"; command -v plesk >/dev/null || where="in maildirsize"
-  echo "  $n mailbox(es) checked; $nolim unlimited (no size limit set $where), $nofile without maildirsize (not counted)"
+  big=""; [[ -n $uwho ]] && big="; largest: $uwho $(fmt_bytes "$umax"), all together $(fmt_bytes "$utot")"
+  echo "  $n mailbox(es) checked; $nolim unlimited (no size limit set $where$big), $nofile without maildirsize (not counted)"
   rm -f "$TMP.mbp"
   return 0
 }
@@ -2338,7 +2353,7 @@ check_enabled() {
     exposed)   (( EXPOSED_FILES_CHECK )) ;;
     webshell)  (( WEBSHELL_CHECK )) ;;
     mailauth)  (( MAILAUTH_CHECK )) ;;
-    mailboxes) (( WARN_MAILBOX_PCT > 0 )) ;;
+    mailboxes) (( WARN_MAILBOX_PCT > 0 || WARN_MAILBOX_UNLIMITED_GB > 0 )) ;;
     https)     (( HTTPS_CHECK )) ;;
     persistence) (( PERSISTENCE_CHECK )) ;;
     *) return 0 ;;

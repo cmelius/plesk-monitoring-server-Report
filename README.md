@@ -94,7 +94,7 @@ Just as useful: the reports confirmed what is *fine*. Reverse DNS, HELO name and
 | Area | Checks | Alerts when … |
 |---|---|---|
 | **Outgoing mail / spam** | recipients per sender, mails per authenticated mailbox, distinct client IPs per mailbox, **login ≠ sender domain**, mails injected by scripts (PHP `mail()`, per Plesk subscription), **mail sent through Roundcube webmail** (mailbox, real client IP, recipients), failed webmail logins, deferred/bounced, queue size | a mailbox suddenly sends a lot, is used from many IPs, sends with foreign `From` domains, a website's scripts send mass mail, or a webmail user sends after repeated failed logins |
-| **Full mailboxes** | mail rejected because a mailbox here is full (Plesk: `4.2.2 Mailbox full`; Dovecot and others: status `4.2.2`/`5.2.2`, "quota exceeded"); once a day the fill level of every mailbox against its size limit | a mailbox rejects mail, or is filled to `WARN_MAILBOX_PCT` (default 95 %) |
+| **Full mailboxes** | mail rejected because a mailbox here is full (Plesk: `4.2.2 Mailbox full`; Dovecot and others: status `4.2.2`/`5.2.2`, "quota exceeded"); once a day the fill level of every mailbox against its size limit, and the size of mailboxes without a limit | a mailbox rejects mail, is filled to `WARN_MAILBOX_PCT` (default 95 %), or has no limit and is larger than `WARN_MAILBOX_UNLIMITED_GB` (default 5 GB) |
 | **Reputation** | server IP against Spamhaus, SpamCop, Barracuda, PSBL; remote rejections mentioning blocklists, reputation, spam or rate limits (including the wording of Gmail, Microsoft, Apple iCloud, Yahoo, GMX/web.de and T-Online, e.g. "likely unsolicited", "unusual rate", "local policy" [CS01]/[HM08], "excessive volume", "policy restrictions", DMARC rejections), with examples; mails the spam filter skipped because of their size, and **blocklist lookups of the spam filter that were refused** (`URIBL_BLOCKED` – the DNS resolver is shared and over the lists' free limit); **outgoing deliveries per provider** (sent / deferred / bounced for Microsoft, Google, Apple, GMX/web.de/IONOS, T-Online, …) and **watched recipient domains** | the server IP is listed, recipients reject or throttle mail because of reputation, a delivery to a watched domain fails, or the spam filter's blocklist lookups are refused |
 | **Brute force** | failed SMTP/IMAP/POP3 logins, most attacked mailboxes (login names that don't exist marked), fail2ban jails, failed Plesk panel logins with login name and IP | failures spike, **a mailbox fails again and again from an IP that logged in successfully before** (a customer's device with an outdated password – reported before fail2ban bans the whole connection), or a jail bans such an IP |
 | **Intrusion** | successful SSH and Plesk panel logins, **new PHP files in `wp-content/uploads`**, **successful WordPress logins during a brute-force attack** | a login comes from a never-seen IP, a PHP file appears in an upload folder (also one whose file date was set back to look old), or an IP logs in to WordPress after repeated failures |
@@ -341,13 +341,13 @@ Mail authentication (SPF / DKIM / DMARC):
   a single missing/outdated record is a recommendation (DMARC passes if SPF or DKIM passes).
   DNS queried via 1.1.1.1
 
-Mailboxes (fill level of the size limit; warning from WARN_MAILBOX_PCT=95 %):
+Mailboxes (fill level of the size limit; warning from WARN_MAILBOX_PCT=95 %, without a limit from WARN_MAILBOX_UNLIMITED_GB=5 GB):
    91 %  office@lawfirm.example  (2.75 GB of 3.00 GB)
    84 %  jane@agency.example  (423 MB of 500 MB)
    78 %  info@salon.example  (809 MB of 1.00 GB)
    77 %  orders@shop.example  (779 MB of 1000 MB)
    64 %  info@shop.example  (1.07 GB of 1.56 GB)
-  89 mailbox(es) checked; 19 unlimited (no size limit set in Plesk), 5 without maildirsize (not counted)
+  89 mailbox(es) checked; 19 unlimited (no size limit set in Plesk; largest: info@bakery.example 3.21 GB, all together 12.48 GB), 5 without maildirsize (not counted)
 
 IP geolocation: DB-IP.com Lite databases (CC BY 4.0)
 ```
@@ -697,6 +697,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 | `WARN_BLOCKLIST` | 1 | remote rejections or deferrals mentioning a blocklist, bad reputation, spam or rate limiting (wording of Gmail, Microsoft, Apple iCloud, Yahoo, GMX/web.de and T-Online included). Up to three examples with recipient domain and reply are listed below the count |
 | `WARN_AUTH_FAIL` | 300 | failed mail logins (SMTP + IMAP/POP3) and, separately, failed webmail logins. Raise it if routine brute-force noise (already handled by fail2ban) triggers it regularly |
 | `WARN_MAILBOX_PCT` | 95 | daily: warn when a mailbox is filled to x % of its size limit, `0` = off. A full mailbox that rejects mail is reported every run regardless |
+| `WARN_MAILBOX_UNLIMITED_GB` | 5 | daily: warn when a mailbox without size limit holds more than x GB – it can't become full, but fills the disk and the backups. Measured with `du` on its Maildir folder. `0` = off; the report line still names the largest one |
 | `WARN_DSN` | 1 | delivery confirmations (DSN "delivered") sent to other servers – alert from this many in a run, `0` = off |
 | `WARN_OLD_PASSWORD` | 3 | failed logins of one mailbox from an IP that logged in successfully before (a device with an outdated password?) – alert from this many in a run, `0` = off |
 | `DNSBL_LISTS` | Spamhaus ZEN, SpamCop, Barracuda, PSBL | IP blocklists checked for the server IP |
