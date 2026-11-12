@@ -101,6 +101,7 @@ MAIL_LOG=""                   # default: /var/log/maillog or /var/log/mail.log, 
 AUTH_LOG=""                   # SSH logins; default: /var/log/auth.log or /var/log/secure, else the journal
 PLESK_PANEL_LOG=/var/log/plesk/httpsd_access_log   # access log of the Plesk panel (port 8443) – panel logins
 PLESK_ERROR_LOG=/var/log/plesk/panel.log           # Plesk's own log – failed panel logins, failed certificate renewals
+# shellcheck disable=SC2034  # used by the plugin backups
 PLESK_BACKUP_LOGS=""          # directory with the logs of Plesk's backups (backup-*/backup.log); default: the usual places
 ROUNDCUBE_LOG_DIR=""          # default: /var/log/plesk-roundcube (or /usr/share/psa-roundcube/logs)
 
@@ -131,6 +132,7 @@ WARN_PHP_FATAL=20             # PHP fatal errors per domain
 WARN_REQ_PER_MIN=600          # peak requests per minute for one domain (load spike / L7 flood)
 WARN_DISTRIBUTED_IPS=100      # one URL requested by at least this many different IPs (botnet pattern)
 WARN_CERT_DAYS=14             # certificate expires in less than x days
+# shellcheck disable=SC2034  # used by the plugin backups
 WARN_BACKUP_HOURS=26          # latest Plesk backup older than x hours
 
 # Daily SPF/DKIM/DMARC check of all domains with mail service (needs dig)
