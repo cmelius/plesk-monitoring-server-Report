@@ -1,0 +1,55 @@
+# Builds a release as a draft – started by hand: Actions, "release", Run workflow, on main.
+# Checks that the version entered is VERSION= of the script, runs tools/build-release.sh and
+# puts plesk-server-report.tar.gz and SHA256SUMS on the draft release vX.Y.Z, with the notes
+# of that version from CHANGELOG.md. The signing key is never on GitHub: the maintainer signs
+# SHA256SUMS on their own computer, adds SHA256SUMS.sig to the draft and publishes it.
+# --self-update refuses a release without a valid signature.
+# Uses only the GitHub CLI of the runner – no third-party actions.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version, as in VERSION= of the script (e.g. 2.0.0)"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency: release
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Version
+        env:
+          V: ${{ inputs.version }}
+        run: |
+          [[ $V =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::the version must look like 2.0.0"; exit 1; }
+          s=$(sed -n 's/^VERSION=//p' plesk-server-report.sh)
+          [[ $s == "$V" ]] || { echo "::error::the script on $GITHUB_REF_NAME is version $s, not $V"; exit 1; }
+      - name: Build
+        run: tools/build-release.sh dist
+      - name: Draft release
+        env:
+          V: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          awk -v v="$V" '/^## \[/ { if (p) exit; if (index($0, "[" v "]")) { p = 1; next } } p' CHANGELOG.md >dist/notes.md
+          [[ -s dist/notes.md ]] || echo "See CHANGELOG.md." >dist/notes.md
+          if draft=$(gh release view "v$V" --json isDraft -q .isDraft 2>/dev/null); then
+            [[ $draft == true ]] || { echo "::error::release v$V is already published"; exit 1; }
+            # built again: an old signature belongs to the old SHA256SUMS
+            gh release delete-asset "v$V" SHA256SUMS.sig -y 2>/dev/null || true
+            gh release upload "v$V" dist/plesk-server-report.tar.gz dist/SHA256SUMS --clobber
+          else
+            gh release create "v$V" --draft --target "$GITHUB_SHA" --title "v$V" \
+              --notes-file dist/notes.md dist/plesk-server-report.tar.gz dist/SHA256SUMS
+          fi
+          {
+            echo "Draft release v$V is ready. Sign SHA256SUMS, add SHA256SUMS.sig, then publish:"
+            echo '```'; cat dist/SHA256SUMS; echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"

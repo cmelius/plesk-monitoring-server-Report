@@ -220,6 +220,9 @@ are the same.
   root, installs a release: signature of `SHA256SUMS` (SSH key of the maintainer,
   `RELEASE_KEY`), checksum, plain files only, self-test of the new version (`--verify`),
   question, then the folders are swapped; the previous one stays as `.old`.
+- Releases: the workflow `release` (started by hand) builds the archive and `SHA256SUMS`
+  on GitHub as a draft release. The private key is never on GitHub: the maintainer signs
+  `SHA256SUMS` on their own computer, adds `SHA256SUMS.sig` and publishes the draft.
 - README: the review prompt names every file of the archive; the sentence about
   sandboxed plugins is replaced.
 
