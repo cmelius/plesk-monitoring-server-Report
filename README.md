@@ -151,7 +151,7 @@ Outgoing deliveries per receiving mail server (provider or MX host; sent / defer
 Watched recipient domain invoices.example.com: 3 sent, 0 deferred, 0 bounced
 Spam filter: all mails scanned – none above the size limit (limit 3.0 MB = 3145728 bytes, Plesk: SA_MAX_MAIL_SIZE in /etc/psa/psa.conf)
 Spam filter: blocklist lookups answered (412 mail(s) scanned)
-DNS blocklists for 203.0.113.10: zen.spamhaus.org:clean bl.spamcop.net:clean psbl.surriel.com:clean (queried via 127.0.0.1)
+DNS blocklists for 203.0.113.10 (all queried via 127.0.0.1): zen.spamhaus.org:clean bl.spamcop.net:clean psbl.surriel.com:clean
 
 Top senders (total recipients):
      700  support@bank-secure.example

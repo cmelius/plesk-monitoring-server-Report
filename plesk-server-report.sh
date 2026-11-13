@@ -777,7 +777,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       else BLRES+=" $bl:LISTED($r)"; alert "Mail: server IP $PUBIP is listed on $bl"
       fi
     done
-    out "DNS blocklists for $PUBIP:$BLRES (queried via $BL_VIA)"
+    out "DNS blocklists for $PUBIP (all queried via $BL_VIA):$BLRES"
   fi
 
   out ""; out "Top senders (total recipients):"
