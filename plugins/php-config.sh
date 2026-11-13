@@ -21,10 +21,12 @@ PLUGIN_MAINTAINER="core"
 # State: "last_scan <Unix time with nanoseconds>" – printed only after a complete scan; a scan cut off by the
 # time limit prints none, so the next one looks again.
 
-# php_config_backdoors < list of files – prints "FILE<TAB>LINE" per hit
+# php_config_backdoors < file names, each ending with NUL – prints "FILE<TAB>LINE" per hit; a
+# line break or tab in the name is shown as ?, so a folder name can neither hide a file nor
+# break the list
 php_config_backdoors() {
   # shellcheck disable=SC2016  # awk program: its $0 is awk's, not the shell's
-  xargs -r -d '\n' awk '
+  xargs -r -0 awk '
     FNR == 1 { img = 0; done_ = 0 }
     done_ { next }
     { l = tolower($0); sub(/^[ \t]+/, "", l) }
@@ -35,7 +37,7 @@ php_config_backdoors() {
     img && l ~ /sethandler[^#]*php/ { hit(); next }
     l ~ /<\/filesmatch/ { img = 0 }
     l ~ /<filesmatch[^>]*\.\(py\|exe\|php\)/ { hit(); next }
-    function hit() { printf "%s\t%s\n", FILENAME, substr($0, 1, 160); done_ = 1 }
+    function hit() { fn = FILENAME; gsub(/[\n\t]/, "?", fn); printf "%s\t%s\n", fn, substr($0, 1, 160); done_ = 1 }
   ' 2>/dev/null
 }
 
@@ -50,10 +52,10 @@ plugin_check() {
     while IFS=$'\t' read -r f ln; do
       [[ -n $WEBSHELL_IGNORE && $f =~ $WEBSHELL_IGNORE ]] && continue
       hits=$((hits + 1))
-      out "  $f: $ln (file date $(date -r "$f" '+%Y-%m-%d %H:%M'))"
+      out "  $f: $ln (file date $(date -r "$f" '+%Y-%m-%d %H:%M' 2>/dev/null))"
       alert "Web: suspicious PHP setting in recently changed $f: $ln – check it (backdoor?)"
-    done < <(if [[ -n $last ]]; then find "$root" -type f \( -name .htaccess -o -name .user.ini -o -name php.ini \) \( -newermt "@$last" -o -newerct "@$last" \) 2>/dev/null
-             else find "$root" -type f \( -name .htaccess -o -name .user.ini -o -name php.ini \) 2>/dev/null; fi |
+    done < <(if [[ -n $last ]]; then find "$root" -type f \( -name .htaccess -o -name .user.ini -o -name php.ini \) \( -newermt "@$last" -o -newerct "@$last" \) -print0 2>/dev/null
+             else find "$root" -type f \( -name .htaccess -o -name .user.ini -o -name php.ini \) -print0 2>/dev/null; fi |
              php_config_backdoors | head -30)
   done <"$PSR_DOMAINS"
   out "  $n document root(s) scanned, $hits suspicious file(s)"

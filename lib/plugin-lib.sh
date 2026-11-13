@@ -28,10 +28,13 @@ set -uo pipefail
 export LC_ALL=C
 umask 077
 
-out()   { printf 'TEXT %s\n' "$*"; }
-note()  { printf 'NOTE %s\n' "$*"; }
-alert() { printf 'ALERT %s\n' "$*"; }
-state() { printf 'STATE %s\n' "$*"; }
+# one protocol line each: a line break inside the text (a file name can hold one) becomes a
+# space, so nothing a plugin prints can start a line of its own
+_line() { local t="$*"; t=${t//$'\n'/ }; printf '%s\n' "${t//$'\r'/ }"; }
+out()   { _line "TEXT $*"; }
+note()  { _line "NOTE $*"; }
+alert() { _line "ALERT $*"; }
+state() { _line "STATE $*"; }
 
 # geo_ref IP – stands for "IP (country, operator)": the main script, which has the GeoIP
 # database, replaces it. \037 never comes from a log line (log_clean removes it).
@@ -39,7 +42,7 @@ geo_ref() { printf '\037G%s\037' "$1"; }
 
 # alert_foreign "IP IP …" TEXT – an alert only if one of the IPs is outside ALLOWED_COUNTRIES
 # (the main script decides); {ips} in TEXT becomes those IPs with country and operator
-alert_foreign() { local ips=$1; shift; printf 'ALERT-FOREIGN %s :: %s\n' "$ips" "$*"; }
+alert_foreign() { local ips=$1; shift; _line "ALERT-FOREIGN $ips :: $*"; }
 
 ignored_domain() { [[ " ${WEB_IGNORE_DOMAINS:-} " == *" $1 "* ]]; }
 

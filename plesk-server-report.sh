@@ -220,12 +220,12 @@ PLUGIN_MAX_LINE=2000          # bytes per line
 PLUGIN_MAX_STATE=1048576       # bytes of STATE lines per plugin
 # sha256sum of lib/*.sh and plugins/*.sh – written by tools/update-plugin-sums.sh, checked by the tests
 # >>> plugin sums
-PLUGIN_SUMS='c2a7e353d70e1f00e8e97ee5106a51f90854c98a014b69ec6ce2505551b8c377  lib/plugin-lib.sh
+PLUGIN_SUMS='09b5edfe1346f7b427a6ef6fe714507c958e5dd93f58d969c226b86aabd1dec2  lib/plugin-lib.sh
 f9d83e6d25384577348e8f94c74c9c1ccc853f2c69513cb13d7964c98dde3e8d  plugins/backups.sh
 abab3680694f294bac2d2dc5fc52f4cc8090644ce27075cb0fbb35eea64c643a  plugins/panel.sh
-62c05f2ba28f2da961ed0181df78ecd800a9e477e3d10f46fb3432d83d660825  plugins/php-config.sh
+2cb486f56ddc1219f2dcb8578a0138445ecab49a8479cf5fc4deb87a67cc3ca9  plugins/php-config.sh
 27ab6638bb38af2c4be885dc8d0c74b83cb635fb2e26b313c2b7d8cdd83dd317  plugins/webmail.sh
-706474b46927855636382affa1f23f474562e7cea1cecc5d40c7707e06af787e  plugins/wordpress.sh'
+551f8d8d4bd68b7afb5419bd6c6eeda426004bafe672eb9791a85f5a1abacacd  plugins/wordpress.sh'
 # <<< plugin sums
 
 # =============================================================================
@@ -2022,11 +2022,13 @@ check_webshell() {   # recently changed PHP files with typical backdoor code
     while IFS= read -r f; do
       [[ -n $WEBSHELL_IGNORE && $f =~ $WEBSHELL_IGNORE ]] && continue
       hits=$((hits + 1))
-      out+="  $f (file date $(date -r "$f" '+%Y-%m-%d %H:%M'), last change $(date -d "@$(stat -c %Z "$f" 2>/dev/null || echo 0)" '+%Y-%m-%d %H:%M'))"$'\n'
+      out+="  $f (file date $(date -r "$f" '+%Y-%m-%d %H:%M' 2>/dev/null), last change $(date -d "@$(stat -c %Z "$f" 2>/dev/null || echo 0)" '+%Y-%m-%d %H:%M'))"$'\n'
       dalert "Web: suspicious code in recently changed file $f – check it (webshell/backdoor?)"
-    done < <(if [[ -f $stamp ]]; then T "$FIND_TIMEOUT" find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) \( -newer "$stamp" -o -cnewer "$stamp" \) 2>/dev/null
-             else T "$FIND_TIMEOUT" find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) \( -mtime -"$WEBSHELL_FIRST_DAYS" -o -ctime -"$WEBSHELL_FIRST_DAYS" \) 2>/dev/null; fi |
-             T "$FIND_TIMEOUT" xargs -r -d '\n' grep -lE "$re" 2>/dev/null | head -30)
+    # names end with NUL, not a line break: a folder name with a line break hides nothing; such a
+    # line break is shown as ?
+    done < <(if [[ -f $stamp ]]; then T "$FIND_TIMEOUT" find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) \( -newer "$stamp" -o -cnewer "$stamp" \) -print0 2>/dev/null
+             else T "$FIND_TIMEOUT" find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) \( -mtime -"$WEBSHELL_FIRST_DAYS" -o -ctime -"$WEBSHELL_FIRST_DAYS" \) -print0 2>/dev/null; fi |
+             T "$FIND_TIMEOUT" xargs -r -0 grep -lZE "$re" 2>/dev/null | tr '\n\0' '?\n' | head -30)
   done < <(docroots)
   # after a timeout the scan was incomplete: keep the old stamp, so the next scan looks again
   if [[ $(timeouts_seen) == "$nto" ]]; then can_write_state && mv "$new" "$stamp"; fi

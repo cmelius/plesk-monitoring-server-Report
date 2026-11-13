@@ -28,6 +28,7 @@ jobs:
         env:
           V: ${{ inputs.version }}
         run: |
+          [[ $GITHUB_REF == refs/heads/main ]] || { echo "::error::releases are built from main only, not from $GITHUB_REF_NAME"; exit 1; }
           [[ $V =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::the version must look like 2.0.0"; exit 1; }
           s=$(sed -n 's/^VERSION=//p' plesk-server-report.sh)
           [[ $s == "$V" ]] || { echo "::error::the script on $GITHUB_REF_NAME is version $s, not $V"; exit 1; }

@@ -287,8 +287,11 @@ parity tests against the old functions in `tests/legacy/`). Where it differs fro
 - `PLUGIN_API` is `0` until step 6.
 - The changes of this branch are listed in `CHANGELOG-2.0.md` (branch changelog), not
   in `CHANGELOG.md`, so that merging `main` into this branch stays simple. The README
-  changes are collected in `README-2.0.md` (branch README); the release archive follows
-  before 2.0.
+  changes are collected in `README-2.0.md` (branch README); the release archive
+  (`tools/build-release.sh`, workflow `release`, signed `SHA256SUMS`) is built.
+- The protocol is line-based: `out`, `alert`, `note` and `state` of `lib/plugin-lib.sh`
+  turn a line break in their text into a space, and plugins read file lists separated by
+  NUL, so a file name can neither split a line nor hide a file.
 
 ## If third-party plugins are ever wanted
 

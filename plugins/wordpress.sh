@@ -49,15 +49,16 @@ wp_logins() {
     }'
 }
 
-wp_uploads() {   # wp_uploads LAST – the PHP files in upload folders (changed since LAST, if given)
+wp_uploads() {   # wp_uploads LAST – the PHP files in upload folders (changed since LAST, if given), one per line
   local up
   while IFS= read -r up; do
     if [[ -n $1 ]]; then
-      find "$up" -type f \( -iname '*.php' -o -iname '*.php[0-9]' -o -iname '*.phtml' -o -iname '*.phar' \) \( -newermt "@$1" -o -newerct "@$1" \) 2>/dev/null
+      find "$up" -type f \( -iname '*.php' -o -iname '*.php[0-9]' -o -iname '*.phtml' -o -iname '*.phar' \) \( -newermt "@$1" -o -newerct "@$1" \) -print0 2>/dev/null
     else
-      find "$up" -type f \( -iname '*.php' -o -iname '*.php[0-9]' -o -iname '*.phtml' -o -iname '*.phar' \) ! -name 'index.php' 2>/dev/null
+      find "$up" -type f \( -iname '*.php' -o -iname '*.php[0-9]' -o -iname '*.phtml' -o -iname '*.phar' \) ! -name 'index.php' -print0 2>/dev/null
     fi
-  done < <(find "$(dirname "$VHOST_LOGS")" -mindepth 2 -maxdepth 7 -type d -path '*/wp-content/uploads' ! -path '*/system/*' 2>/dev/null)
+  done < <(find "$(dirname "$VHOST_LOGS")" -mindepth 2 -maxdepth 7 -type d -path '*/wp-content/uploads' ! -path '*/system/*' 2>/dev/null) |
+    tr '\n\0' '?\n'   # one name per line: a line break in a name is shown as ?
 }
 
 plugin_check() {

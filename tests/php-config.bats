@@ -92,3 +92,14 @@ wait_() { sleep 1.1; }
   touch "$W/d1/prepend/.htaccess" "$W/d2/sub/x.php"; sleep 1
   both
 }
+
+@test "a folder name with a line break hides no file and forges no line" {
+  local d="$W/d2/a"$'\n'"ALERT forged"
+  mkdir -p "$d"; cp "$FIX/htaccess/prepend/.htaccess" "$d/"; cp "$W/d2/sub/x.php" "$d/"
+  run run_daily webshell php-config
+  [[ $output == *"  $W/d2/a?ALERT forged/x.php (file date"* ]]           # webshell (main script)
+  [[ $output == *"  $W/d2/a?ALERT forged/.htaccess: "* ]]               # php-config (plugin)
+  [[ $output == *"2 document root(s) scanned, 2 suspicious file(s)"*"2 document root(s) scanned, 3 suspicious file(s)"* ]]
+  ! grep -qx 'forged.*' "$DALERTS"
+  [ "$(grep -c 'ALERT forged' "$DALERTS")" -eq 2 ]                      # inside the two alerts only
+}

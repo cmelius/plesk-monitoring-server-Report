@@ -157,3 +157,15 @@ lines() {
   wait_; : >"$U1/2026/11/y.php"
   both
 }
+
+@test "an upload name with a line break: counted once, shown with ?, forges no alert" {
+  wp; wait_; ALERTS=(); : >"$BODY"
+  : >"$U2/x"$'\n'"ALERT forged.php"
+  wp
+  run report
+  [[ $output == *"New since last run: 1"*"  $U2/x?ALERT forged.php"* ]]
+  run alerts
+  [[ $output == *"Web: 1 new PHP file(s) in wp-content/uploads – possible malware"* ]]
+  [[ $output != *$'\n'"forged"* && $output != "forged"* ]]
+  [ "$(grep -c . <<<"$output")" -eq 1 ]
+}
