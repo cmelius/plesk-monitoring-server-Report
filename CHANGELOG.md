@@ -2,13 +2,19 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [1.11.1] – not yet released (on `main`)
+## [1.12.0] – not yet released (on `main`)
+
+### Added
+- **`--self-update`**: the script updates itself to the newest **1.x** release – started by hand, as root, in a terminal (never from cron; a git checkout is refused). It downloads the script of the release tag from GitHub into a temporary file next to the installed one, checks it (`bash -n`, `--version` must report the expected version), shows the CHANGELOG sections since the installed version and asks (`--yes` skips the question). It waits for a running report, keeps the previous version as `plesk-server-report.sh.old` in the state directory and replaces the script with `mv`. `--self-update --rollback` brings the kept version back.
+- **Version 2 is not installed by it.** 1.x looks for the newest 1.x release, so 1.x can still get fixes after version 2 is out; a newer major version is only mentioned (by `--self-update` and the daily check). `--self-update --major` is reserved for the switch to version 2 and says that it isn't available yet. The public key that will check the signed version 2 archives is built in already (`RELEASE_KEY`), so that this check won't depend on a download.
+- README: *Updates* (with `--self-update`, `curl` for installations up to 1.11.x), *Updating from 1.x*, *Security*, *Check it before you run it as root*; STATE-FILES: `plesk-server-report.sh.old`.
+
+### Changed
+- The daily update check compares with the newest release of the installed major version (`latest 1.x release`) and names a newer major version separately.
+- **Barracuda removed from the default IP blocklists** (`DNSBL_LISTS`). It answers only DNS servers registered with Barracuda, and the registration page has not been reachable for some time. Its `clean` so far came through the hosting provider's resolver (registered there); asked through the server's own resolver, it doesn't answer – the test entry shows `no-answer`. README: how to add it again, and how to send blocklist queries through the system resolver.
 
 ### Fixed
 - **Blocklists are asked through the server's own resolver.** All blocklist lookups (IP and domain) went through the system resolver, which often forwards to the hosting provider's DNS – a shared resolver that Spamhaus and URIBL refuse, so results could be `query-refused` (or, before 1.11.0, a false `clean`). Now `127.0.0.1` is asked when a resolver answers there (on Plesk: BIND), else the system resolver as before; new setting `BLOCKLIST_RESOLVER`. The report says which resolver was asked. The daily checks *HTTPS*, *Server DNS* and *Domain DNS* name their resolver too (`MAILAUTH_RESOLVER`, like *Mail authentication*).
-
-### Changed
-- **Barracuda removed from the default IP blocklists** (`DNSBL_LISTS`). It answers only DNS servers registered with Barracuda, and the registration page has not been reachable for some time. Its `clean` so far came through the hosting provider's resolver (registered there); asked through the server's own resolver, it doesn't answer – the test entry shows `no-answer`. README: how to add it again, and how to send blocklist queries through the system resolver.
 
 ## [1.11.0] – 2026-11-13
 

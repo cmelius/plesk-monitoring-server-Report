@@ -20,7 +20,8 @@
 # GeoIP database, optional alerts for logins from unexpected countries).
 # What an attacker leaves behind is watched too: new SSH keys, accounts with a login
 # shell, sudo rights, cron jobs and autostart entries, processes started from /tmp or
-# deleted binaries, new listening ports. The script only reads – it changes and blocks nothing.
+# deleted binaries, new listening ports. The script only reads – it changes and blocks nothing
+# (the one exception: --self-update, run by hand, replaces the script's own installation).
 #
 # Only log lines written since the previous run are analysed. The resulting
 # plain-text report is stored locally and (optionally) uploaded with rclone to
@@ -48,6 +49,11 @@
 #   --test-mail       mail the newest report to REPORT_MAIL_TO now and show from the mail
 #                     log whether it was delivered; changes nothing
 #   --version         print the version
+#   --self-update     install the latest 1.x release: download, test, show the changes, ask,
+#                     then replace this script (only by hand, as root). The previous version
+#                     is kept in the state directory. --yes: don't ask.
+#                     --self-update --rollback: back to the kept version.
+#                     --self-update --major: switch to version 2 (not available in 1.x yet)
 #   --help            show this help
 #
 # Settings: edit the defaults below or – recommended, survives updates –
@@ -64,7 +70,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.11.1
+VERSION=1.12.0
 
 set -uo pipefail
 export LC_ALL=C
@@ -1899,22 +1905,39 @@ check_updates() {   # pending (security) updates, reboot required
 # Is there a newer release of this script? One request to the GitHub API, once a day. Info only,
 # no alert: the update is never installed automatically.
 SCRIPT_REPO=cmelius/plesk-monitoring-server-Report
-script_update_check() {
-  local latest newest
+latest_release() {   # latest_release – the version of the latest release on GitHub, or nothing
   command -v curl >/dev/null || return 0
-  latest=$(T 20 curl -fsS --connect-timeout 5 --max-time 15 -H 'Accept: application/vnd.github+json' \
-             "https://api.github.com/repos/$SCRIPT_REPO/releases/latest" 2>/dev/null |
-           sed -n 's/.*"tag_name": *"v\{0,1\}\.\{0,1\}\([0-9][0-9.]*\)".*/\1/p' | head -1)
+  T 20 curl -fsS --connect-timeout 5 --max-time 15 -H 'Accept: application/vnd.github+json' \
+      "https://api.github.com/repos/$SCRIPT_REPO/releases/latest" 2>/dev/null |
+    sed -n 's/.*"tag_name": *"v\{0,1\}\.\{0,1\}\([0-9][0-9.]*\)".*/\1/p' | head -1
+}
+# latest_release_in_major N – the newest release N.x (no pre-release), or nothing. Version 1
+# may still get fixes when version 2 is out, so 1.x compares with the newest 1.x release.
+latest_release_in_major() {
+  command -v curl >/dev/null || return 0
+  T 20 curl -fsS --connect-timeout 5 --max-time 15 -H 'Accept: application/vnd.github+json' \
+      "https://api.github.com/repos/$SCRIPT_REPO/releases?per_page=100" 2>/dev/null |
+    awk -v m="$1" '/"tag_name":/ { t = $0; sub(/.*"tag_name": *"v?/, "", t); sub(/".*/, "", t) }
+                   /"prerelease": *false/ && t ~ ("^" m "\\.[0-9.]+$") { print t; t = "" }' |
+    sort -V | tail -1
+}
+script_update_check() {
+  local latest newest other
+  command -v curl >/dev/null || return 0
+  latest=$(latest_release_in_major "${VERSION%%.*}")
+  other=$(latest_release)
+  [[ ${other%%.*} =~ ^[0-9]+$ && ${other%%.*} -gt ${VERSION%%.*} ]] &&
+    other=" – version $other is available too (a new major version: see README, Updating from 1.x)" || other=""
   if [[ -z $latest ]]; then
     echo "Script version: $VERSION (update check failed – no answer from GitHub; UPDATE_CHECK=0 switches it off)"
   elif [[ $latest == "$VERSION" ]]; then
-    echo "Script version: $VERSION (latest release)"
+    echo "Script version: $VERSION (latest ${VERSION%%.*}.x release)$other"
   else
     newest=$(printf '%s\n%s\n' "$VERSION" "$latest" | sort -V | tail -1)
     if [[ $newest == "$latest" ]]; then
-      echo "Script version: $VERSION – version $latest is available: https://github.com/$SCRIPT_REPO/releases/latest"
+      echo "Script version: $VERSION – version $latest is available (update: plesk-server-report.sh --self-update)$other"
     else
-      echo "Script version: $VERSION (newer than the latest release $latest – development version from main)"
+      echo "Script version: $VERSION (newer than the latest release $latest – development version from main)$other"
     fi
   fi
 }
@@ -3067,6 +3090,7 @@ is always reported). Processes are not stored – they are checked live in every
 | `running` | exists only while a run is active: `PID start now step exit-code`. If it is still there at the next run, that run did not finish, and the report says so (alert "Script: …"). |
 | `upload_failed` | time of the first failed upload, and rclone's last error message | while the upload to `REMOTE` fails, every report raises an alert (local report, mail). Deleted by the next successful upload. |
 | `tmp.*` | temporary files of the current run, removed at its end. |
+| `plesk-server-report.sh.old` | the previous version of the script, kept by `--self-update` (only after an update). `--self-update --rollback` swaps it with the installed one. Safe to delete. |
 | `README.txt` | this description. |
 EOF
 }
@@ -3127,6 +3151,97 @@ show_state() {
   done
 }
 
+# ---------------------------------------------------------------- --self-update (1.x)
+# Version 1 is a single file: --self-update replaces it with the script of the newest 1.x
+# release (by HTTPS from GitHub), after testing it. Version 2 comes as a signed archive with
+# lib/ and plugins/; switching to it will be --self-update --major, checked with the key below
+# (built in now, so that this check will not depend on a download).
+# shellcheck disable=SC2034  # for --self-update --major (version 2), not used by 1.x yet
+RELEASE_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICebnR5D3K3QzXiwsS6e1Uk3o7zixjnr/Ba5zxBxt5Ca"   # the maintainer's public key; empty: no --self-update
+SU_YES=0; SU_ROLLBACK=0; SU_MAJOR=0
+su_fail() { echo "self-update: $*" >&2; [[ -n ${SU_WORK:-} ]] && rm -rf "$SU_WORK"; return 1; }
+su_ask() {   # su_ask QUESTION – yes unless the answer is no; with --yes always yes
+  local a
+  (( SU_YES )) && return 0
+  read -r -p "$1 [y/N] " a || return 1
+  [[ $a == [yYjJ]* ]]
+}
+su_lock() {   # wait for a running report (at most 15 min), so nothing is replaced under it
+  if ! { mkdir -p "$STATE_DIR" && exec 9>"$STATE_DIR/lock" && flock -w 900 9; }; then
+    su_fail "a report run holds the lock – try again later"; return 1
+  fi
+}
+is_root() { (( EUID == 0 )); }
+su_by_hand() { [[ -t 0 || -t 1 ]]; }   # a terminal: started by hand, not by cron
+su_fetch() { curl -fsSL --connect-timeout 10 --max-time 120 -o "$2" "$1"; }   # su_fetch URL FILE
+su_major_note() {   # a newer major version: only a note
+  local other
+  other=$(latest_release)
+  [[ ${other%%.*} =~ ^[0-9]+$ && ${other%%.*} -gt ${VERSION%%.*} ]] || return 0
+  echo "Version $other is available. It can't be installed with --self-update of version ${VERSION%%.*}:"
+  echo "version 2 comes as a release archive (script with lib/ and plugins/) – see README: Updating from 1.x"
+}
+self_update_1x() {
+  local self dir d old="$STATE_DIR/plesk-server-report.sh.old" latest v raw
+  self=${SU_SELF:-$(readlink -f "${BASH_SOURCE[0]}")}; dir=${self%/*}
+  is_root || { su_fail "run it as root"; return 1; }
+  su_by_hand || { su_fail "start it by hand in a terminal, not from cron (--yes only skips the question)"; return 1; }
+  d=$dir
+  while [[ -n $d ]]; do
+    [[ -e $d/.git ]] && { su_fail "$self is in a git checkout – update it with git pull"; return 1; }
+    d=${d%/*}
+  done
+  if (( SU_MAJOR )); then
+    echo "--self-update --major: switching to version 2 is not available in this version yet – see README: Updating from 1.x"
+    su_major_note; return 0
+  fi
+  if (( SU_ROLLBACK )); then
+    [[ -f $old ]] || { su_fail "there is no previous version ($old)"; return 1; }
+    v=$(bash "$old" --version 2>/dev/null)
+    su_ask "Go back from $VERSION to ${v#plesk-server-report }?" || { echo "nothing changed"; return 0; }
+    su_lock || return 1
+    SU_WORK=$(mktemp "$dir/.plesk-server-report.XXXXXX") || { su_fail "no temporary file in $dir"; return 1; }
+    if ! { cp -p "$old" "$SU_WORK" && cp -p "$self" "$old" && mv -f "$SU_WORK" "$self"; }; then
+      su_fail "could not swap the versions – check $self and $old"; return 1
+    fi
+    exec 9>&-                          # release the lock
+    echo "back to ${v#plesk-server-report }; version $VERSION is kept in $old (--self-update --rollback swaps again)"
+    return 0
+  fi
+  latest=$(latest_release_in_major "${VERSION%%.*}")
+  [[ $latest =~ ^[0-9]+(\.[0-9]+)*$ ]] || { su_fail "no answer from GitHub about the latest release"; return 1; }
+  if [[ $(printf '%s\n%s\n' "$VERSION" "$latest" | sort -V | tail -1) == "$VERSION" ]]; then
+    echo "version $VERSION is up to date (latest ${VERSION%%.*}.x release: $latest)"
+    su_major_note; return 0
+  fi
+  echo "version $latest is available (installed: $VERSION)"
+  raw="https://raw.githubusercontent.com/$SCRIPT_REPO/v$latest"
+  # next to the script, so that mv replaces it in one step
+  SU_WORK=$(mktemp "$dir/.plesk-server-report.XXXXXX") || { su_fail "no temporary file in $dir"; return 1; }
+  su_fetch "$raw/plesk-server-report.sh" "$SU_WORK" || { su_fail "download of $raw/plesk-server-report.sh failed"; return 1; }
+  # the new version checks itself: syntax and version
+  if ! bash -n "$SU_WORK" 2>/dev/null || [[ $(bash "$SU_WORK" --version 2>/dev/null) != "plesk-server-report $latest" ]]; then
+    su_fail "the new version failed its test (syntax, or not version $latest) – nothing installed"; return 1
+  fi
+  echo "test of the new version: good"
+  if su_fetch "$raw/CHANGELOG.md" "$SU_WORK.changes" 2>/dev/null; then
+    echo ""; echo "Changes:"
+    awk -v cur="$VERSION" '/^## \[/ { if (index($0, "[" cur "]")) exit; p = 1 } p' "$SU_WORK.changes" | head -80
+    echo ""
+  fi
+  rm -f "$SU_WORK.changes"
+  su_ask "Install version $latest now?" || { rm -f "$SU_WORK"; echo "nothing changed"; return 0; }
+  su_lock || return 1
+  if ! { cp -p "$self" "$old" && chown --reference="$self" "$SU_WORK" && chmod --reference="$self" "$SU_WORK" &&
+         mv -f "$SU_WORK" "$self"; }; then
+    su_fail "could not replace $self – it is unchanged"; return 1
+  fi
+  exec 9>&-                            # release the lock
+  echo "installed version $latest. The previous version $VERSION is kept in $old (--self-update --rollback goes back)."
+  echo "Test it with your configuration: plesk-server-report.sh --only services"
+  su_major_note
+}
+
 usage() {
   sed -n '/^# Options:/,/^# Settings:/p' "$0" | sed '$d; s/^# \{0,1\}//'
 }
@@ -3146,6 +3261,10 @@ parse_args() {
       --list) list_checks; exit 0 ;;
       --summary) SUMMARY_ONLY=1 ;;
       --version) echo "plesk-server-report $VERSION"; exit 0 ;;
+      --self-update) SELF_UPDATE=1 ;;
+      --rollback) SU_ROLLBACK=1 ;;
+      --yes) SU_YES=1 ;;
+      --major) SU_MAJOR=1 ;;
       --state-readme) state_readme; exit 0 ;;
       --test-mail) TEST_MAIL=1 ;;
       --show-state) SHOW_STATE=1 ;;
@@ -3158,6 +3277,8 @@ parse_args() {
     esac
     shift
   done
+  if (( (SU_ROLLBACK || SU_YES) && ! SELF_UPDATE )); then echo "--rollback and --yes go with --self-update" >&2; exit 2; fi
+  if (( SU_MAJOR && ! SELF_UPDATE )); then echo "--major goes with --self-update" >&2; exit 2; fi
   if [[ -n $ONLY ]]; then
     local c
     ONLY_MODE=1; UPLOAD=0
@@ -3301,6 +3422,10 @@ init() {
 main() {
   ARGS=("$@")
   parse_args "$@"
+  if (( SELF_UPDATE )); then           # replaces this installation – only when root asks for it
+    load_conf
+    self_update_1x; return $?
+  fi
   if (( SHOW_STATE || DECODE )); then  # read-only: no lock, no state written
     load_conf
     if (( SHOW_STATE )); then show_state; else decode_pseudonyms "${DECODE_ARGS[@]}"; fi
@@ -3370,6 +3495,6 @@ main() {
 # Sourced (by the tests in tests/): define the functions and settings, run nothing.
 [[ ${BASH_SOURCE[0]} != "$0" ]] && return 0
 
-LOCKED_OUT=0; DONE=0; STEP=""; RUNFILE=""; SUMMARY_ONLY=0; ONLY_MODE=0; SHOW_STATE=0; TEST_MAIL=0; DECODE=0; DECODE_ARGS=(); PSEUDO_FILE=""
+SELF_UPDATE=0; LOCKED_OUT=0; DONE=0; STEP=""; RUNFILE=""; SUMMARY_ONLY=0; ONLY_MODE=0; SHOW_STATE=0; TEST_MAIL=0; DECODE=0; DECODE_ARGS=(); PSEUDO_FILE=""
 main "$@"
 DONE=1

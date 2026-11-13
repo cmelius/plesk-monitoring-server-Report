@@ -23,6 +23,8 @@ chmod 700 /usr/local/sbin/plesk-server-report.sh
 echo '5 * * * * root /usr/local/sbin/plesk-server-report.sh' > /etc/cron.d/plesk-server-report
 ```
 
+The `curl` command is for the first installation. From version 1.12.0 on, the script updates itself when you ask it to: `plesk-server-report.sh --self-update` (see [Updates](#updates)).
+
 That's it: from now on a report is written every hour to `/var/lib/plesk-server-report/out/`. Four optional extras are worth the few minutes:
 
 1. **Upload** the reports to cloud storage, so you (or an AI assistant) can read them anywhere – [Storage for the reports](#storage-for-the-reports). Without it, the reports stay on the server.
@@ -46,10 +48,10 @@ The tests (see [Tests](#tests)) are the checks fed with anonymized logs of a rea
 
 Expect it to point out a few things that are by design:
 
-- **It runs as root** – to read all logs, `/proc`, crontabs and `authorized_keys`. It changes nothing on the server: no IP is blocked, no process stopped, no file removed.
+- **It runs as root** – to read all logs, `/proc`, crontabs and `authorized_keys`. It changes nothing on the server: no IP is blocked, no process stopped, no file removed. The one exception: `--self-update`, started by hand, replaces the script itself.
 - **It loads `/etc/plesk-server-report.conf` as code** (`source`), like most shell-script configurations – an assistant will likely flag this as root code execution. That is by design, and guarded: before loading it, the script checks that the file belongs to root and that nobody else may write it. If not, it **refuses to run** – no check, no report – and says why on stderr (cron mails that to root) and in the system log, with the fix: `chown root:root /etc/plesk-server-report.conf; chmod 600 /etc/plesk-server-report.conf`. Your daily review notices the missing reports as well.
 - **`/usr/local/sbin` and `/usr/local/bin` come first in its `PATH`**, as in root's usual `PATH`, because cron's minimal `PATH` lacks the Plesk tools. Whoever can write there could replace `curl` or `rclone` – but then every root process on the server is at risk, not only this script.
-- **Network connections:** DNS lookups, the upload with rclone, report mails through the local `sendmail`, HTTPS requests to your own domains (with `curl -k`, because the check is meant to find invalid certificates), one request a day to the GitHub API for the latest version, and the monthly download of the DB-IP database.
+- **Network connections:** DNS lookups, the upload with rclone, report mails through the local `sendmail`, HTTPS requests to your own domains (with `curl -k`, because the check is meant to find invalid certificates), one request a day to the GitHub API for the latest version, the monthly download of the DB-IP database – and, only with `--self-update` started by hand, the download of the new version from GitHub.
 - **It deletes files** only in its own folder `/var/lib/plesk-server-report` (temporary files, old reports) – mode 700, and with `umask 077` every file it creates is readable by root only –, and reads the Plesk database with `SELECT` only.
 
 Anything beyond that is worth a question – [open an issue](../../issues).
@@ -476,7 +478,7 @@ apt install mmdb-bin            # RHEL-based: dnf install libmaxminddb (EPEL)
 /usr/local/sbin/plesk-server-report.sh --no-upload
 ```
 
-Options: `--no-upload` (print instead of upload), `--only CHECK,…` (run single checks, see [First run](#first-run)), `--summary` (print the 24-hour summary from the stored reports), `--list` (check names), `--version`, `--help`.
+Options: `--no-upload` (print instead of upload), `--only CHECK,…` (run single checks, see [First run](#first-run)), `--summary` (print the 24-hour summary from the stored reports), `--list` (check names), `--version`, `--self-update` (see [Updates](#updates)), `--help`.
 
 **Releases or `main`?** The [releases](../../releases) are tested versions that have been running on the author's server for a while. `main` gets every change as soon as it is made. To follow `main`, use `https://raw.githubusercontent.com/cmelius/plesk-monitoring-server-Report/main/plesk-server-report.sh` instead. The first line of every report shows the version.
 
@@ -813,7 +815,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 - **Deliveries per provider:** the report lists outgoing deliveries grouped by the receiving provider, recognized by its MX host (Microsoft, Google, Apple iCloud, GMX/web.de/IONOS, T-Online, Yahoo/AOL, Strato; others by the MX domain, e.g. a company's spam gateway). A provider with many deferrals or bounces shows a delivery problem even when its rejection text isn't one the script knows. Deferrals are counted per delivery attempt, so one mail retried five times counts five times. The table is grouped by the receiving mail server, not by the recipient's domain: mail to a spammer's forged domain (a bounce or a delivery confirmation) shows up under the name of its usually unreachable mail server, often a random-looking domain.
 - **Spam filter size limit:** SpamAssassin skips mails larger than its limit (Plesk default 256 KB, `SA_MAX_MAIL_SIZE` in `/etc/psa/psa.conf`). Spam waves with large image attachments use exactly that gap. The report counts the skipped mails (`Spam filter: N mail(s) not scanned`); if the number is high, raise the limit (e.g. to `3145728` = 3 MiB).
 - **IP blocklists** (`DNSBL_LISTS`) are asked through the server's own resolver on `127.0.0.1` if one answers there – on Plesk that is BIND –, else through the system resolver (`BLOCKLIST_RESOLVER`); the report says which. Blocklists refuse large shared resolvers, and the system resolver often forwards to the hosting provider's DNS: on the author's server, URIBL refused the provider's resolver from one day to the next. Before the server IP, the script asks for each list's test entry `127.0.0.2`, which every list must answer as listed (RFC 5782). So the report tells three things apart: `clean` (the list answers, the IP is not on it), `query-refused` (the list says it refuses this resolver – Spamhaus does that for large public resolvers) and `no-answer` (the list doesn't answer at all). The last two mean "unknown", not "clean".
-  - **Barracuda** (`b.barracudacentral.org`) is not in the default list (since 1.11.1): it answers only DNS servers registered with Barracuda, and its registration page has not been reachable for some time. Through a hosting provider's resolver it may answer – presumably because the provider is registered, while your server isn't. To check it anyway, add it, and if needed send its queries through a resolver it answers:
+  - **Barracuda** (`b.barracudacentral.org`) is not in the default list (since 1.12.0): it answers only DNS servers registered with Barracuda, and its registration page has not been reachable for some time. Through a hosting provider's resolver it may answer – presumably because the provider is registered, while your server isn't. To check it anyway, add it, and if needed send its queries through a resolver it answers:
     ```bash
     DNSBL_LISTS="zen.spamhaus.org bl.spamcop.net psbl.surriel.com b.barracudacentral.org"
     BLOCKLIST_RESOLVER=system   # all blocklists through the system resolver – Spamhaus and URIBL may refuse it
@@ -860,9 +862,10 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 
 - Before the first run, let an AI review the script – see [Check it before you run it as root](#check-it-before-you-run-it-as-root) for a prompt and what it will point out.
 - `/etc/plesk-server-report.conf` is loaded as code: keep it owned by root and writable only by root (`chmod 600`). If another user owns it or can write it, the script refuses to run and says why on stderr and in the system log (`journalctl -t plesk-server-report`). A warning in the report would come too late: by then the code in the file would already have run.
-- Runs as root because it needs to read all logs (and `/proc`, crontabs, `authorized_keys` for the persistence check). It changes nothing on the server – no IP is blocked, no process stopped, no file removed; findings are reported, the action is yours. It writes only to `/var/lib/plesk-server-report` (mode 700), to the configured rclone remote and – with `REPORT_MAIL_TO` – hands mails to the local `sendmail`.
+- Runs as root because it needs to read all logs (and `/proc`, crontabs, `authorized_keys` for the persistence check). Apart from `--self-update` (below) it changes nothing on the server – no IP is blocked, no process stopped, no file removed; findings are reported, the action is yours. It writes only to `/var/lib/plesk-server-report` (mode 700), to the configured rclone remote and – with `REPORT_MAIL_TO` – hands mails to the local `sendmail`.
 - Log lines are partly written by attackers – login names, mail addresses, URLs, user agents. The script only reads them as text: tabs and control characters are removed before a check sees a line (no terminal escape sequences in the report, no shifted fields), numbers from state files are checked before the shell computes with them, and nothing from a log is ever run. A test with hostile log lines (`tests/hostile.bats`) checks this on every push.
-- External connections: DNS lookups (blocklists, SPF/DKIM, domain DNS), the rclone upload, the report mails (only if `REPORT_MAIL_TO` is at another provider), the daily HTTPS check of your own domains (to this server's IP), the monthly download of the DB-IP Lite database (only with geolocation), and once a day one request to the GitHub API for the latest release of the script (`UPDATE_CHECK=0` switches it off). Nothing about your server is sent; the script never updates itself.
+- External connections: DNS lookups (blocklists, SPF/DKIM, domain DNS), the rclone upload, the report mails (only if `REPORT_MAIL_TO` is at another provider), the daily HTTPS check of your own domains (to this server's IP), the monthly download of the DB-IP Lite database (only with geolocation), and once a day two requests to the GitHub API for the latest releases of the script (`UPDATE_CHECK=0` switches them off). Nothing about your server is sent.
+- The script never updates itself on its own. `--self-update` replaces it only when root starts it by hand in a terminal – it refuses to run from cron and in a git checkout. It downloads the script of the newest 1.x release by HTTPS from GitHub (the release tag), checks that it is valid bash and reports the expected version, shows the changes and asks. The previous version is kept in the state directory for `--self-update --rollback`. There is no signature for 1.x releases: you trust GitHub and its HTTPS, as with the `curl` command of the installation. Version 2 will be signed; the key to check it is built into 1.12.0 already.
 - The rclone config (`/root/.config/rclone/rclone.conf`) contains the token for the storage account. That is another reason to use a dedicated account with the narrowest possible scope (`drive.file`, bucket-limited keys, chrooted SFTP user).
 
 ---
@@ -951,7 +954,16 @@ The script runs on a production Plesk server with about 40 domains and is **acti
 - a review of the whole script with fresh eyes found two blind spots: kernel security updates were not counted (they need a new package, which the simulated `apt-get upgrade` leaves out), and a PHP file with its date set back was invisible to the scans for new and suspicious files – both fixed in 1.9.0,
 - Postfix logging `sasl_username` on failed logins initially caused false "compromised mailbox" alarms, which has been fixed.
 
-To update, download the script again (your settings in `/etc/plesk-server-report.conf` and the state in `/var/lib/plesk-server-report` are kept):
+**From version 1.12.0 on**, the script updates itself – started by hand, as root, in a terminal:
+
+```bash
+/usr/local/sbin/plesk-server-report.sh --self-update      # newest 1.x release: shows the changes, asks
+/usr/local/sbin/plesk-server-report.sh --only services    # quick test run with your configuration
+```
+
+It looks for the newest **1.x** release, downloads its script from GitHub, checks it (valid bash, the expected version), shows the CHANGELOG sections since your version and asks before it replaces anything. It waits for a running report to finish. The previous version is kept as `/var/lib/plesk-server-report/plesk-server-report.sh.old`; `--self-update --rollback` brings it back (and swaps again if called twice). `--yes` skips the question – it still has to be started from a terminal, never from cron. A git checkout is refused: update it with `git pull`. Your settings in `/etc/plesk-server-report.conf` and the state are kept.
+
+**Up to version 1.11.x**, or if you prefer it, download the script again – your settings and the state are kept as well:
 
 ```bash
 curl -fsSL -o /usr/local/sbin/plesk-server-report.sh \
@@ -963,6 +975,10 @@ curl -fsSL -o /usr/local/sbin/plesk-server-report.sh \
 The test run matters: if something keeps the script from running – since 1.9.0 for example a configuration file that another user may write – you see it right away, not only when the reports stop coming. `--version` doesn't load the configuration and won't tell you.
 
 (or the `main` URL from [Installation](#installation) to get changes before they are released)
+
+### Updating from 1.x
+
+Version 2 is in development (plugins, see [Using another CMS?](#using-another-cms-help-wanted)) and not released yet. It will come as a signed release archive – the script with `lib/` and `plugins/` – so `--self-update` of version 1 won't install it: version 1 stays on 1.x and still gets fixes when version 2 is out; the daily check and `--self-update` only tell you that version 2 is available. The switch will be `--self-update --major`; in 1.12.0 it only says that it isn't available yet. How to switch will be described here when version 2 is released.
 
 Watch the repository (*Watch → Custom → Releases* or *All activity*) to get notified about changes. Issues and pull requests with your own findings are welcome.
 

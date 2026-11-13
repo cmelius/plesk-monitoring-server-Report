@@ -84,4 +84,5 @@ is always reported). Processes are not stored – they are checked live in every
 | `running` | exists only while a run is active: `PID start now step exit-code`. If it is still there at the next run, that run did not finish, and the report says so (alert "Script: …"). |
 | `upload_failed` | time of the first failed upload, and rclone's last error message | while the upload to `REMOTE` fails, every report raises an alert (local report, mail). Deleted by the next successful upload. |
 | `tmp.*` | temporary files of the current run, removed at its end. |
+| `plesk-server-report.sh.old` | the previous version of the script, kept by `--self-update` (only after an update). `--self-update --rollback` swaps it with the installed one. Safe to delete. |
 | `README.txt` | this description. |
