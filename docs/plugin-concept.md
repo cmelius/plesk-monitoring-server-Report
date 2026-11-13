@@ -216,7 +216,10 @@ are the same.
 - If `plugins/` is missing next to the script (an old single-file installation) or a
   plugin from the hash list is missing, the report raises an alert naming the checks
   that did not run.
-- The script never downloads plugins or itself.
+- The script never downloads plugins or itself on its own. `--self-update`, run by hand as
+  root, installs a release: signature of `SHA256SUMS` (SSH key of the maintainer,
+  `RELEASE_KEY`), checksum, plain files only, self-test of the new version (`--verify`),
+  question, then the folders are swapped; the previous one stays as `.old`.
 - README: the review prompt names every file of the archive; the sentence about
   sandboxed plugins is replaced.
 

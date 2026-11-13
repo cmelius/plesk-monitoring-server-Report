@@ -20,7 +20,8 @@
 # GeoIP database, optional alerts for logins from unexpected countries).
 # What an attacker leaves behind is watched too: new SSH keys, accounts with a login
 # shell, sudo rights, cron jobs and autostart entries, processes started from /tmp or
-# deleted binaries, new listening ports. The script only reads – it changes and blocks nothing.
+# deleted binaries, new listening ports. The script only reads – it changes and blocks nothing
+# (the one exception: --self-update, run by hand, replaces the script's own installation).
 #
 # Only log lines written since the previous run are analysed. The resulting
 # plain-text report is stored locally and (optionally) uploaded with rclone to
@@ -48,6 +49,12 @@
 #   --test-mail       mail the newest report to REPORT_MAIL_TO now and show from the mail
 #                     log whether it was delivered; changes nothing
 #   --version         print the version
+#   --verify          check that the files of this installation (lib/, plugins/) are those
+#                     of this release; changes nothing
+#   --self-update     install the latest release: download, check signature and checksum,
+#                     show the changes, ask, then replace this installation (only one
+#                     unpacked from the release archive). The previous version is kept.
+#                     --yes: don't ask. --self-update --rollback: back to the kept version.
 #   --help            show this help
 #
 # Settings: edit the defaults below or – recommended, survives updates –
@@ -1776,12 +1783,16 @@ check_updates() {   # pending (security) updates, reboot required
 # Is there a newer release of this script? One request to the GitHub API, once a day. Info only,
 # no alert: the update is never installed automatically.
 SCRIPT_REPO=cmelius/plesk-monitoring-server-Report
+latest_release() {   # latest_release – the version of the latest release on GitHub, or nothing
+  command -v curl >/dev/null || return 0
+  T 20 curl -fsS --connect-timeout 5 --max-time 15 -H 'Accept: application/vnd.github+json' \
+      "https://api.github.com/repos/$SCRIPT_REPO/releases/latest" 2>/dev/null |
+    sed -n 's/.*"tag_name": *"v\{0,1\}\.\{0,1\}\([0-9][0-9.]*\)".*/\1/p' | head -1
+}
 script_update_check() {
   local latest newest
   command -v curl >/dev/null || return 0
-  latest=$(T 20 curl -fsS --connect-timeout 5 --max-time 15 -H 'Accept: application/vnd.github+json' \
-             "https://api.github.com/repos/$SCRIPT_REPO/releases/latest" 2>/dev/null |
-           sed -n 's/.*"tag_name": *"v\{0,1\}\.\{0,1\}\([0-9][0-9.]*\)".*/\1/p' | head -1)
+  latest=$(latest_release)
   if [[ -z $latest ]]; then
     echo "Script version: $VERSION (update check failed – no answer from GitHub; UPDATE_CHECK=0 switches it off)"
   elif [[ $latest == "$VERSION" ]]; then
@@ -3186,6 +3197,140 @@ show_state() {
   done
 }
 
+# ---------------------------------------------------------------- --verify, --self-update
+# verify_install – are lib/ and plugins/ of this installation the files of this release?
+# Prints one line per problem; returns 1 if there is one. Ownership only when run as root.
+verify_install() {
+  local sum rel f bad=0
+  while read -r sum rel; do
+    [[ -n $rel ]] || continue
+    f="$PSR_HOME/$rel"
+    if [[ ! -f $f ]]; then echo "missing: $rel"; bad=1
+    elif [[ $(sha256sum <"$f" | cut -d' ' -f1) != "$sum" ]]; then echo "differs from this release: $rel"; bad=1
+    elif is_root && ! real_file_safe "$f"; then echo "not root's, or writable by others (file or folder): $rel"; bad=1
+    fi
+  done <<<"$PLUGIN_SUMS"
+  for f in "$PSR_HOME"/lib/*.sh "$PSR_HOME"/plugins/*.sh; do
+    [[ -e $f ]] || continue
+    grep -q "  ${f#"$PSR_HOME"/}\$" <<<"$PLUGIN_SUMS" || { echo "not part of this release (never run): ${f#"$PSR_HOME"/}"; bad=1; }
+  done
+  return "$bad"
+}
+is_root() { (( EUID == 0 )); }
+real_file_safe() { plugin_file_safe "$1"; }
+
+# Releases: an archive with the script, lib/ and plugins/, its checksum in SHA256SUMS, and
+# SHA256SUMS.sig – a signature of SHA256SUMS made with the maintainer's SSH key
+# (tools/build-release.sh). A checksum alone only shows that the download is complete:
+# whoever could replace the archive could replace SHA256SUMS too. The signature can only be
+# made with the private key, which never leaves the maintainer's computer.
+RELEASE_URL="https://github.com/$SCRIPT_REPO/releases/download"
+RELEASE_ARCHIVE=plesk-server-report.tar.gz
+RELEASE_NAMESPACE=plesk-server-report
+RELEASE_SIGNER=cmelius
+RELEASE_KEY=""   # the maintainer's public key ("ssh-ed25519 AAAA…"); empty: no --self-update
+SU_YES=0; SU_ROLLBACK=0
+su_fail() { echo "self-update: $*" >&2; [[ -n ${SU_WORK:-} ]] && rm -rf "$SU_WORK"; return 1; }
+su_ask() {   # su_ask QUESTION – yes unless the answer is no; with --yes always yes
+  local a
+  (( SU_YES )) && return 0
+  read -r -p "$1 [y/N] " a || return 1
+  [[ $a == [yYjJ]* ]]
+}
+# su_home – this installation, if --self-update may replace it: a folder named
+# plesk-server-report holding the script, lib/ and plugins/, not a git checkout
+su_home() {
+  if ! [[ $PSR_HOME == /* && ${PSR_HOME##*/} == plesk-server-report && -f $PSR_HOME/plesk-server-report.sh &&
+          -d $PSR_HOME/lib && -d $PSR_HOME/plugins ]]; then
+    su_fail "$PSR_HOME is not an installation from the release archive (/usr/local/lib/plesk-server-report) – update it the way you installed it, see README: Updates"; return 1
+  fi
+  if [[ -e $PSR_HOME/.git ]]; then su_fail "$PSR_HOME is a git checkout – update it with git pull"; return 1; fi
+  return 0
+}
+su_lock() {   # wait for a running report (at most 15 min), so nothing is replaced under it
+  mkdir -p "$STATE_DIR" && exec 9>"$STATE_DIR/lock" && flock -w 900 9 ||
+    { su_fail "a report run holds the lock – try again later"; return 1; }
+}
+# su_verify DIR – SHA256SUMS.sig is a valid signature of SHA256SUMS, and the archive matches
+su_verify() {
+  local d=$1 out
+  command -v ssh-keygen >/dev/null || { su_fail "ssh-keygen is missing (package openssh-client) – it checks the signature"; return 1; }
+  printf '%s namespaces="%s" %s\n' "$RELEASE_SIGNER" "$RELEASE_NAMESPACE" "$RELEASE_KEY" >"$d/allowed_signers"
+  if out=$(ssh-keygen -Y verify -f "$d/allowed_signers" -I "$RELEASE_SIGNER" -n "$RELEASE_NAMESPACE" \
+             -s "$d/SHA256SUMS.sig" <"$d/SHA256SUMS" 2>&1); then
+    echo "signature: good (key of $RELEASE_SIGNER)"
+  elif grep -qiE 'unknown option|illegal option|invalid option|usage:' <<<"$out"; then
+    # OpenSSH before 8.1 (RHEL 8) can't check SSH signatures
+    echo "signature: can't be checked – ssh-keygen of OpenSSH 8.1 or newer is needed" >&2
+    if (( SU_YES )); then su_fail "not installed: --yes needs a checked signature"; return 1; fi
+    su_ask "Continue with the checksum only?" || { su_fail "not installed"; return 1; }
+  else
+    su_fail "the signature of the release is NOT valid – nothing installed. Please report this: https://github.com/$SCRIPT_REPO/issues"; return 1
+  fi
+  if ! grep -qE "^[0-9a-f]{64}  $RELEASE_ARCHIVE\$" "$d/SHA256SUMS" ||
+     ! (cd "$d" && grep -E "  $RELEASE_ARCHIVE\$" SHA256SUMS | sha256sum -c --quiet - >/dev/null 2>&1); then
+    su_fail "the checksum of $RELEASE_ARCHIVE does not match SHA256SUMS – nothing installed"; return 1
+  fi
+  echo "checksum: good"
+  # only plain files and folders with plain names inside one level – no links, no ../
+  if tar -tzf "$d/$RELEASE_ARCHIVE" | grep -qvE '^(\./)?([A-Za-z0-9_][A-Za-z0-9._-]*/)*[A-Za-z0-9_.-]*$' ||
+     tar -tzf "$d/$RELEASE_ARCHIVE" | grep -qE '(^|/)\.\.(/|$)' ||
+     tar -tvzf "$d/$RELEASE_ARCHIVE" | cut -c1 | grep -qv '^[-d]$'; then
+    su_fail "$RELEASE_ARCHIVE holds something other than plain files and folders – nothing installed"; return 1
+  fi
+}
+self_update() {
+  local latest d new="$PSR_HOME.new" v
+  is_root || { su_fail "run it as root"; return 1; }
+  su_home || return 1
+  if (( SU_ROLLBACK )); then
+    [[ -f $PSR_HOME.old/plesk-server-report.sh ]] || { su_fail "there is no previous version ($PSR_HOME.old)"; return 1; }
+    v=$(bash "$PSR_HOME.old/plesk-server-report.sh" --version 2>/dev/null)
+    su_ask "Go back from $VERSION to ${v#plesk-server-report }?" || { echo "nothing changed"; return 0; }
+    su_lock || return 1
+    rm -rf "$PSR_HOME.back" && mv "$PSR_HOME" "$PSR_HOME.back" && mv "$PSR_HOME.old" "$PSR_HOME" && mv "$PSR_HOME.back" "$PSR_HOME.old" ||
+      { su_fail "could not swap the folders – check $PSR_HOME, $PSR_HOME.old and $PSR_HOME.back"; return 1; }
+    echo "back to ${v#plesk-server-report }; version $VERSION is kept in $PSR_HOME.old (--self-update --rollback swaps again)"
+    return 0
+  fi
+  latest=$(latest_release)
+  [[ $latest =~ ^[0-9]+(\.[0-9]+)*$ ]] || { su_fail "no answer from GitHub about the latest release"; return 1; }
+  if [[ $(printf '%s\n%s\n' "$VERSION" "$latest" | sort -V | tail -1) == "$VERSION" ]]; then
+    echo "version $VERSION is up to date (latest release: $latest)"; return 0
+  fi
+  echo "version $latest is available (installed: $VERSION)"
+  [[ -n $RELEASE_KEY ]] || { su_fail "this version has no release key built in – update by hand, see README: Updates"; return 1; }
+  SU_WORK=$(mktemp -d "$STATE_DIR/self-update.XXXXXX") || { su_fail "no temporary folder in $STATE_DIR"; return 1; }
+  d=$SU_WORK
+  for v in "$RELEASE_ARCHIVE" SHA256SUMS SHA256SUMS.sig; do
+    curl -fsSL --connect-timeout 10 --max-time 300 -o "$d/$v" "$RELEASE_URL/v$latest/$v" ||
+      { su_fail "download of $RELEASE_URL/v$latest/$v failed"; return 1; }
+  done
+  su_verify "$d" || return 1
+  rm -rf "$new" && mkdir -m 755 "$new" && tar -xzf "$d/$RELEASE_ARCHIVE" -C "$new" --no-same-owner ||
+    { rm -rf "$new"; su_fail "could not unpack the archive into $new"; return 1; }
+  chmod 755 "$new/plesk-server-report.sh"   # cron runs it through the link in /usr/local/sbin
+  # the new version checks itself: syntax, version, its plugin files
+  if ! bash -n "$new/plesk-server-report.sh" || [[ $(bash "$new/plesk-server-report.sh" --version 2>/dev/null) != "plesk-server-report $latest" ]] ||
+     ! v=$(bash "$new/plesk-server-report.sh" --verify 2>&1); then
+    rm -rf "$new"; su_fail "the new version failed its test – nothing installed${v:+: $v}"; return 1
+  fi
+  echo "test of the new version: good"
+  if [[ -f $new/CHANGELOG.md ]]; then
+    echo ""; echo "Changes:"
+    awk -v cur="$VERSION" '/^## \[/ { if (index($0, "[" cur "]")) exit; p = 1 } p' "$new/CHANGELOG.md" | head -80
+    echo ""
+  fi
+  su_ask "Install version $latest now?" || { rm -rf "$new" "$d"; echo "nothing changed"; return 0; }
+  su_lock || { rm -rf "$new"; return 1; }
+  rm -rf "$PSR_HOME.old" && mv "$PSR_HOME" "$PSR_HOME.old" && mv "$new" "$PSR_HOME" || {
+    [[ -d $PSR_HOME ]] || mv "$PSR_HOME.old" "$PSR_HOME"
+    su_fail "could not swap the folders – check $PSR_HOME and $PSR_HOME.old"; return 1; }
+  rm -rf "$d"
+  echo "installed version $latest. The previous version $VERSION is kept in $PSR_HOME.old (--self-update --rollback goes back)."
+  echo "Test it with your configuration: plesk-server-report.sh --only services"
+}
+
 usage() {
   sed -n '/^# Options:/,/^# Settings:/p' "$0" | sed '$d; s/^# \{0,1\}//'
 }
@@ -3205,6 +3350,10 @@ parse_args() {
       --list) list_checks; exit 0 ;;
       --summary) SUMMARY_ONLY=1 ;;
       --version) echo "plesk-server-report $VERSION"; exit 0 ;;
+      --verify) verify_install; exit $? ;;
+      --self-update) SELF_UPDATE=1 ;;
+      --rollback) SU_ROLLBACK=1 ;;
+      --yes) SU_YES=1 ;;
       --state-readme) state_readme; exit 0 ;;
       --test-mail) TEST_MAIL=1 ;;
       --show-state) SHOW_STATE=1 ;;
@@ -3217,6 +3366,7 @@ parse_args() {
     esac
     shift
   done
+  if (( (SU_ROLLBACK || SU_YES) && ! SELF_UPDATE )); then echo "--rollback and --yes go with --self-update" >&2; exit 2; fi
   if [[ -n $ONLY ]]; then
     local c
     ONLY_MODE=1; UPLOAD=0
@@ -3360,6 +3510,10 @@ init() {
 main() {
   ARGS=("$@")
   parse_args "$@"
+  if (( SELF_UPDATE )); then           # replaces this installation – only when root asks for it
+    load_conf
+    self_update; return $?
+  fi
   if (( SHOW_STATE || DECODE )); then  # read-only: no lock, no state written
     load_conf
     if (( SHOW_STATE )); then show_state; else decode_pseudonyms "${DECODE_ARGS[@]}"; fi
@@ -3429,6 +3583,6 @@ main() {
 # Sourced (by the tests in tests/): define the functions and settings, run nothing.
 [[ ${BASH_SOURCE[0]} != "$0" ]] && return 0
 
-LOCKED_OUT=0; DONE=0; STEP=""; RUNFILE=""; SUMMARY_ONLY=0; ONLY_MODE=0; SHOW_STATE=0; TEST_MAIL=0; DECODE=0; DECODE_ARGS=(); PSEUDO_FILE=""
+SELF_UPDATE=0; LOCKED_OUT=0; DONE=0; STEP=""; RUNFILE=""; SUMMARY_ONLY=0; ONLY_MODE=0; SHOW_STATE=0; TEST_MAIL=0; DECODE=0; DECODE_ARGS=(); PSEUDO_FILE=""
 main "$@"
 DONE=1

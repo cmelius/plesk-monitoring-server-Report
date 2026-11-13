@@ -53,8 +53,19 @@ To write next to it:
 
 - `--no-same-owner`: the files must belong to root. The script runs only files that belong to root and that nobody else may write, in folders of the same kind; otherwise the check is not run and the report says why.
 - **Updating from 1.x:** unpack the archive as above; the link replaces the old single file in `/usr/local/sbin`. Settings and state are kept. The old file must not stay a regular file at that path (`ln -sf` replaces it).
-- **An incomplete installation** (only the script, `plugins/` missing, or a file of another version) is reported: every check whose file is missing or differs raises an alert "the check … was not run", naming the reason. The script never downloads plugins or itself.
+- **An incomplete installation** (only the script, `plugins/` missing, or a file of another version) is reported: every check whose file is missing or differs raises an alert "the check … was not run", naming the reason, and `--verify` lists every file that differs. The script never downloads plugins or itself on its own.
 - *Releases or `main`?*: following `main` means a `git clone` (or the archive of the branch) instead of the raw URL of one file.
+- **Updating 2.x → newer** (the *Updates* section): one command –
+
+  ```bash
+  plesk-server-report.sh --self-update        # shows the changes and asks; --yes: no question
+  plesk-server-report.sh --self-update --rollback   # back to the previous version
+  ```
+
+  Text: It runs only when you start it as root – never from cron, the script never updates itself. It downloads the archive of the latest release with `SHA256SUMS` and the signature `SHA256SUMS.sig`, checks the **signature** with the maintainer's public key built into the script – so a release swapped on GitHub would be refused, not only a broken download –, checks the checksum, unpacks next to the installation, lets the new version test itself (`--verify`), shows the changes since your version and asks. Only then it swaps the folders; the previous version stays in `/usr/local/lib/plesk-server-report.old`. Signature checks need OpenSSH 8.1 or newer (Debian 11+, Ubuntu 20.04+, RHEL 9); on RHEL 8 it says so and asks before going on with the checksum only. It replaces only an installation from the release archive – a git checkout is updated with `git pull`.
+- `--verify` (options list): checks that `lib/` and `plugins/` are the files of this release.
+- *Check it before you run it as root* → "Expect it to point out": "It deletes files only in its own folder …" gets the exception: `--self-update`, run by hand, replaces the folder `/usr/local/lib/plesk-server-report` (keeping the previous one as `.old`). Same for *Security* ("It writes only to `/var/lib/plesk-server-report` …") and the network list (`--self-update` downloads from GitHub). "Nothing about your server is sent; the script never updates itself" → "… never updates itself on its own".
+- **(planned) for the maintainer, not the README:** the release steps – `tools/build-release.sh`, sign `SHA256SUMS` with `ssh-keygen -Y sign -n plesk-server-report`, upload archive, `SHA256SUMS`, `SHA256SUMS.sig`; the public key goes into `RELEASE_KEY` before 2.0.
 
 ## Check it before you run it as root
 
