@@ -87,6 +87,14 @@ untouched() { [ ! -e "$I.old" ] && [ ! -e "$I.new" ] && grep -q "^VERSION=$VERSI
   [ "$status" -eq 1 ]; [[ $output == *"no answer from GitHub"* ]]
 }
 
+@test "newer than the latest release (from main): nothing to do" {
+  LATEST=${VERSION%%.*}.0.0; OVERALL=$LATEST
+  [ "$VERSION" != "$LATEST" ] || skip "VERSION is x.0.0"
+  run self_update
+  [ "$status" -eq 0 ]; [[ $output == *"version $VERSION is newer than the latest ${VERSION%%.*}.x release $LATEST (development version from main) – nothing to do"* ]]
+  untouched
+}
+
 @test "a new major version is only named; --major is not available yet" {
   LATEST=$VERSION; OVERALL=$(( ${VERSION%%.*} + 1 )).0.0
   run self_update

@@ -634,6 +634,8 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       dsnx[qid($0)] = 1; dsnn++; if (dsnex == "") dsnex = rdom($0) }
     / status=(sent|deferred|bounced)/ && /postfix\/smtp\[/ {
       p = prov($0); st = ($0 ~ / status=sent/ ? 1 : ($0 ~ / status=deferred/ ? 2 : 3)); pv[p, st]++; pt[p]++
+      # deferred counts attempts (one log line each); the distinct mails behind them too
+      if (st == 2 && !((p, qid($0)) in dq)) { dq[p, qid($0)] = 1; dm[p]++ }
       w = watched(rdom($0))
       if (w != "") { wv[w, st]++
         if (st > 1 && wx[w] == "") { r = $0; sub(/.* status=(deferred|bounced) \(/, "", r); sub(/\)$/, "", r); wx[w] = substr($0, 1, 15) " " rdom($0) ": " substr(r, 1, 200) } }
@@ -727,7 +729,8 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       printf "SKIP\t%d\t%s\n", sk, skl
       rl_ = ""; for (r in sbr) rl_ = rl_ (rl_ == "" ? "" : ", ") r " ×" sbr[r]
       printf "SADNS\t%d\t%d\t%s\n", sas, sab, rl_
-      for (p in pt) printf "PROV\t%d\t%d\t%d\t%d\t%s\n", pt[p], pv[p, 1], pv[p, 2], pv[p, 3], p
+      for (p in pt) printf "PROV\t%d\t%d\t%d\t%d\t%s\t%d\n", pt[p], pv[p, 1], pv[p, 2], pv[p, 3], p, dm[p]
+      for (k in dq) { split(k, kk, SUBSEP); printf "DEFQ\t%s\t%s\n", kk[1], kk[2] }
       printf "DSNOUT\t%d\t%s\n", dsnn, dsnex
       for (u in mbf) printf "MBFULL\t%d\t%s\n", mbf[u], u
       nw = split(watch, ww, " "); for (i = 1; i <= nw; i++) { w = tolower(ww[i]); printf "WATCH\t%d\t%d\t%d\t%s\t%s\n", wv[w, 1], wv[w, 2], wv[w, 3], w, wx[w] }
@@ -764,9 +767,17 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   # reply says. Grouped by the MX host, not the recipient's domain: a forged sender's domain shows
   # up under the name of its (often unreachable) mail server.
   if grep -q '^PROV' <<<"$MAILSTATS"; then
-    out "Outgoing deliveries per receiving mail server (provider or MX host; sent / deferred / bounced):"
+    out "Outgoing deliveries per receiving mail server (provider or MX host; sent / deferred attempts (mails) / bounced):"
     grep '^PROV' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -10 |
-      awk -F'\t' '{printf "  %-22s %5d / %d / %d\n", $6, $3, $4, $5}' >>"$BODY"
+      awk -F'\t' '{printf "  %-22s %5d / %d%s / %d\n", $6, $3, $4, ($4 > 0 ? " (" $7 " mail" ($7 == 1 ? "" : "s") ")" : ""), $5}' >>"$BODY"
+  fi
+  # the deferred mails (provider, queue ID) for the summary: distinct mails over the day, not attempts
+  if (( ! ONLY_MODE )); then
+    { [[ -f $STATE_DIR/deferred_mails ]] &&
+        awk -F'\t' -v old=$(( $(date +%s) - 2 * 86400 )) '$1 >= old' "$STATE_DIR/deferred_mails"
+      grep '^DEFQ' <<<"$MAILSTATS" | awk -F'\t' -v now="$(date +%s)" '{ print now "\t" $2 "\t" $3 }'
+      true
+    } >"$STATE_DIR/deferred_mails.new" && mv "$STATE_DIR/deferred_mails.new" "$STATE_DIR/deferred_mails"
   fi
   # full mailboxes: mail to them is rejected – the customer often notices only days later
   while IFS=$'\t' read -r _ n k; do
@@ -2470,6 +2481,16 @@ run_daily() {   # run_daily NAME… – section text to stdout, alerts to $DALER
 # After an update or a change of the configuration file they run again right away, so the
 # daily checks show the new results (and the new version line) at once instead of from the
 # next night on. "Update" means the script file changed – also between two releases.
+# They also run again after packages were installed or removed (apt/dnf upgrade): otherwise a
+# security update you just installed would stay in the report as pending until the next day.
+PKG_DB=""   # the package database whose time counts; empty: dpkg's, or the RPM database
+pkgdb_stamp() {   # pkgdb_stamp – modification time of the package database, or nothing
+  local f
+  for f in ${PKG_DB:-/var/lib/dpkg/status /var/lib/rpm/rpmdb.sqlite /var/lib/rpm/Packages}; do
+    [[ -f $f ]] && { stat -c %Y "$f" 2>/dev/null; return 0; }
+  done
+  return 0
+}
 self_sum() {   # self_sum – short checksum of this script and its configuration file
   cat "$(readlink -f "$0" 2>/dev/null || echo "$0")" "$CONF" 2>/dev/null |
     { sha256sum 2>/dev/null || cksum; } | awk '{print substr($1, 1, 12)}'
@@ -2477,7 +2498,7 @@ self_sum() {   # self_sum – short checksum of this script and its configuratio
 daily_checks() {
   local daily="$STATE_DIR/daily.txt" a stamp
   DALERTS="$STATE_DIR/daily_alerts.txt"
-  stamp="$(date +%F) $VERSION $(self_sum)"
+  stamp="$(date +%F) $VERSION $(self_sum) $(pkgdb_stamp)"
   if [[ $(cat "$STATE_DIR/daily_date" 2>/dev/null) != "$stamp" ]]; then
     # mark the day first: if a daily check makes the run abort, the next runs still report hourly
     echo "$stamp" >"$STATE_DIR/daily_date"
@@ -2533,7 +2554,8 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       if ($0 ~ /^Rejections mentioning/) { r = $0; sub(/.*: /, "", r); rj += r; next }
       if ($0 ~ /^  example: /) { if (nbx < 5) { l = $0; sub(/^  example: /, "", l); print "BLX\t" tm "\t" t(substr(l, 1, 260)); nbx++ }; next }
       if ($0 ~ /^Outgoing deliveries per (provider|receiving mail server)/) { sub_ = "prov"; next }
-      if (sub_ == "prov" && $0 ~ /^  [^ ].* [0-9]+ \/ [0-9]+ \/ [0-9]+$/) {
+      if (sub_ == "prov" && $0 ~ /^  [^ ].* [0-9]+ \/ [0-9]+( \([0-9]+ mails?\))? \/ [0-9]+$/) {
+        sub(/ \([0-9]+ mails?\)/, "")   # distinct mails: from the state file deferred_mails, not summed
         n = split($0, x, " "); pn = $0; sub(/^  /, "", pn); sub(/ +[0-9]+ \/ [0-9]+ \/ [0-9]+$/, "", pn)
         ps[pn] += x[n-4]; pd[pn] += x[n-2]; pb[pn] += x[n]; next }
       if ($0 ~ /^Watched recipient domain /) { sub_ = ""; w = $0; sub(/^Watched recipient domain /, "", w); sub(/:.*/, "", w)
@@ -2710,8 +2732,13 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
     rec MAILTOT | awk -F'\t' '{printf "Delivered: %d | deferred: %d | bounced: %d | highest queue: %d%s\nRejections mentioning blocklist/reputation/spam/rate limit: %d\n", $1, $2, $3, $4, ($5 != "" ? " (" $5 ")" : ""), $6}'
     rec BLX | awk -F'\t' '{printf "  example (%s): %s\n", $1, $2}'
     if [[ -n $(rec PROVTOT) ]]; then
-      echo "Outgoing deliveries per receiving mail server (provider or MX host; total sent / deferred / bounced):"
-      rec PROVTOT | sort -t$'\t' -k1,1nr | head -10 | awk -F'\t' '{printf "  %-22s %5d / %d / %d\n", $5, $2, $3, $4}'
+      echo "Outgoing deliveries per receiving mail server (provider or MX host; total sent / deferred attempts (mails) / bounced):"
+      # distinct deferred mails of the period, from the state file (one line per provider and queue ID)
+      { awk -F'\t' -v since=$(( $(date +%s) - SUMMARY_HOURS * 3600 )) '$1 >= since && !(($2, $3) in s) { s[$2, $3] = 1; n[$2]++ }
+           END { for (p in n) print "M\t" p "\t" n[p] }' "$STATE_DIR/deferred_mails" 2>/dev/null
+        rec PROVTOT | sort -t$'\t' -k1,1nr | head -10 | sed 's/^/P\t/'; } |
+        awk -F'\t' '$1 == "M" { m[$2] = $3; next }
+                     { printf "  %-22s %5d / %d%s / %d\n", $6, $3, $4, ($4 > 0 && ($6 in m) ? " (" m[$6] " mail" (m[$6] == 1 ? "" : "s") ")" : ""), $5 }'
     fi
     rec WATCHTOT | awk -F'\t' '{printf "Watched recipient domain %s: %d sent, %d deferred, %d bounced\n", $4, $1, $2, $3}'
     rec WATCHX | awk -F'\t' '{printf "  example (%s): %s\n", $1, $2}'
@@ -3069,6 +3096,7 @@ Timestamps are Unix time (seconds since 1970, UTC): `date -d @1793684400`.
 |---|---|---|
 | `known_login_ips` | `IP last-seen` | SSH and Plesk panel logins: an IP not in this list raises "login … from previously unknown IP". The first run fills it without alerts. An IP not seen for `KNOWN_LOGIN_IP_DAYS` is dropped. |
 | `known_mail_ips` | `IP mailbox last-seen` | client IPs of successful IMAP/POP3 and SMTP logins, kept for `KNOWN_MAIL_IP_DAYS`. Failed logins from one of them raise "… failed logins of … – a device with an outdated password?" (`WARN_OLD_PASSWORD`); when fail2ban bans one of them, the report raises "fail2ban: jail … bans … which had successful logins before". |
+| `deferred_mails` | `time provider queue-ID` | mails to other servers whose delivery was deferred, kept 2 days. `summary.txt` counts the distinct mails behind the deferred attempts from it ("deferred attempts (mails)"): a mail Postfix retries in many runs counts once. |
 | `known_imap_countries` | `mailbox country last-seen` | countries outside `ALLOWED_COUNTRIES` a mailbox has fetched mail from. The alert "logged in via IMAP/POP3 from a new country" comes once per mailbox and country; an entry not seen for `IMAP_COUNTRY_KEEP_DAYS` is dropped, so the next trip alerts again. |
 
 ## Baseline for the access & persistence check (`baseline/`)
@@ -3124,7 +3152,7 @@ a normal run, not with `--only`. Delete a file and that plugin starts from scrat
 
 | File | Content |
 |---|---|
-| `daily_date` | the day (YYYY-MM-DD), the script version and a checksum of the script and its configuration file of the last daily checks – they run in the first run of a new day, and right after the script or the configuration file changed. Delete it to run them again in the next run. |
+| `daily_date` | the day (YYYY-MM-DD), the script version, a checksum of the script and its configuration file, and the time of the package database at the last daily checks – they run in the first run of a new day, and right after the script or the configuration file changed or packages were installed (so an installed update leaves the report at once). Delete it to run them again in the next run. |
 | `daily.txt` | their output, repeated in every report of that day under DAILY CHECKS. |
 | `daily_alerts.txt` | their alerts, repeated in every report of that day. |
 
@@ -3319,8 +3347,11 @@ self_update() {
   fi
   latest=$(latest_release_in_major "${VERSION%%.*}")
   [[ $latest =~ ^[0-9]+(\.[0-9]+)*$ ]] || { su_fail "no answer from GitHub about the latest release"; return 1; }
-  if [[ $(printf '%s\n%s\n' "$VERSION" "$latest" | sort -V | tail -1) == "$VERSION" ]]; then
+  if [[ $latest == "$VERSION" ]]; then
     echo "version $VERSION is up to date (latest ${VERSION%%.*}.x release: $latest)"
+    su_major_note; return 0
+  elif [[ $(printf '%s\n%s\n' "$VERSION" "$latest" | sort -V | tail -1) == "$VERSION" ]]; then
+    echo "version $VERSION is newer than the latest ${VERSION%%.*}.x release $latest (development version from main) – nothing to do"
     su_major_note; return 0
   fi
   echo "version $latest is available (installed: $VERSION)"

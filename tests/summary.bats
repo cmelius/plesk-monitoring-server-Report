@@ -64,3 +64,12 @@ section() { sed -n "/^== $1/,/^\$/p" "$2"; }
   echo "$output"
   [ "$status" -eq 0 ]
 }
+
+@test "deferred mails of the day from the state file: a mail retried in many runs counts once" {
+  now=$(date +%s)
+  printf '%s\td123.example\tAAA111\n%s\td123.example\tAAA111\n%s\td123.example\tBBB222\n%s\td123.example\tOLD000\n' \
+    $((now - 7200)) $((now - 3600)) $((now - 60)) $((now - 90000)) >"$STATE_DIR/deferred_mails"
+  write_summary "$BATS_TEST_TMPDIR/summary2.txt" || true
+  run grep -E '^  d123.example ' "$BATS_TEST_TMPDIR/summary2.txt"
+  [[ $output =~ /\ [0-9]+\ \(2\ mails\)\ / ]]
+}

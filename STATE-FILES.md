@@ -23,6 +23,7 @@ Timestamps are Unix time (seconds since 1970, UTC): `date -d @1793684400`.
 |---|---|---|
 | `known_login_ips` | `IP last-seen` | SSH and Plesk panel logins: an IP not in this list raises "login … from previously unknown IP". The first run fills it without alerts. An IP not seen for `KNOWN_LOGIN_IP_DAYS` is dropped. |
 | `known_mail_ips` | `IP mailbox last-seen` | client IPs of successful IMAP/POP3 and SMTP logins, kept for `KNOWN_MAIL_IP_DAYS`. Failed logins from one of them raise "… failed logins of … – a device with an outdated password?" (`WARN_OLD_PASSWORD`); when fail2ban bans one of them, the report raises "fail2ban: jail … bans … which had successful logins before". |
+| `deferred_mails` | `time provider queue-ID` | mails to other servers whose delivery was deferred, kept 2 days. `summary.txt` counts the distinct mails behind the deferred attempts from it ("deferred attempts (mails)"): a mail Postfix retries in many runs counts once. |
 | `known_imap_countries` | `mailbox country last-seen` | countries outside `ALLOWED_COUNTRIES` a mailbox has fetched mail from. The alert "logged in via IMAP/POP3 from a new country" comes once per mailbox and country; an entry not seen for `IMAP_COUNTRY_KEEP_DAYS` is dropped, so the next trip alerts again. |
 
 ## Baseline for the access & persistence check (`baseline/`)
@@ -78,7 +79,7 @@ a normal run, not with `--only`. Delete a file and that plugin starts from scrat
 
 | File | Content |
 |---|---|
-| `daily_date` | the day (YYYY-MM-DD), the script version and a checksum of the script and its configuration file of the last daily checks – they run in the first run of a new day, and right after the script or the configuration file changed. Delete it to run them again in the next run. |
+| `daily_date` | the day (YYYY-MM-DD), the script version, a checksum of the script and its configuration file, and the time of the package database at the last daily checks – they run in the first run of a new day, and right after the script or the configuration file changed or packages were installed (so an installed update leaves the report at once). Delete it to run them again in the next run. |
 | `daily.txt` | their output, repeated in every report of that day under DAILY CHECKS. |
 | `daily_alerts.txt` | their alerts, repeated in every report of that day. |
 

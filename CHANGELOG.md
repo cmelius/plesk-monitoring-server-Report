@@ -10,10 +10,12 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 - README: *Updates* (with `--self-update`, `curl` for installations up to 1.11.x), *Updating from 1.x*, *Security*, *Check it before you run it as root*; STATE-FILES: `plesk-server-report.sh.old`.
 
 ### Changed
+- **Deferred deliveries: attempts and mails.** The table of outgoing deliveries counted deferred *attempts* – Postfix logs one line per retry, so a single mail that a provider kept refusing could show up as dozens. Now the number of distinct mails follows in brackets, e.g. `29 (7 mails)`, in the report and in `summary.txt` (for the summary from the new state file `deferred_mails`).
 - The daily update check compares with the newest release of the installed major version (`latest 1.x release`) and names a newer major version separately.
 - **Barracuda removed from the default IP blocklists** (`DNSBL_LISTS`). It answers only DNS servers registered with Barracuda, and the registration page has not been reachable for some time. Its `clean` so far came through the hosting provider's resolver (registered there); asked through the server's own resolver, it doesn't answer – the test entry shows `no-answer`. README: how to add it again, and how to send blocklist queries through the system resolver.
 
 ### Fixed
+- **An installed update left the report only the next day.** The daily checks (pending updates among them) ran once a day, so after `apt upgrade` the update stayed in every report as pending until the next morning. Now they also run again in the next run after the package database changed (`/var/lib/dpkg/status`, or the RPM database).
 - **Blocklists are asked through the server's own resolver.** All blocklist lookups (IP and domain) went through the system resolver, which often forwards to the hosting provider's DNS – a shared resolver that Spamhaus and URIBL refuse, so results could be `query-refused` (or, before 1.11.0, a false `clean`). Now `127.0.0.1` is asked when a resolver answers there (on Plesk: BIND), else the system resolver as before; new setting `BLOCKLIST_RESOLVER`. The report says which resolver was asked. The daily checks *HTTPS*, *Server DNS* and *Domain DNS* name their resolver too (`MAILAUTH_RESOLVER`, like *Mail authentication*).
 
 ## [1.11.0] – 2026-11-13

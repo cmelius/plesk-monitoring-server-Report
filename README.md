@@ -143,11 +143,11 @@ Rejections mentioning blocklist/reputation/spam/rate limit: 61
   example: Oct 26 09:41:12 gmail.com: host gmail-smtp-in.l.google.com[192.0.2.26] said: 421-4.7.28 [203.0.113.10] Gmail has detected an unusual rate of unsolicited mail originating from your IP address. To protect our users from spam, mail sent from your IP addr
   example: Oct 26 09:44:03 outlook.com: host outlook-com.olc.protection.outlook.com[192.0.2.40] said: 451 4.7.650 The mail server [203.0.113.10] has been temporarily rate limited due to IP reputation. (in reply to MAIL FROM command))
   example: Oct 26 09:52:37 icloud.com: host mx01.mail.icloud.com[192.0.2.61] said: 550 5.7.1 Your message was rejected due to icloud.com's local policy [CS01] (in reply to end of DATA command))
-Outgoing deliveries per receiving mail server (provider or MX host; sent / deferred / bounced):
-  google                   310 / 52 / 18
-  microsoft                141 / 29 / 11
+Outgoing deliveries per receiving mail server (provider or MX host; sent / deferred attempts (mails) / bounced):
+  google                   310 / 52 (9 mails) / 18
+  microsoft                141 / 29 (7 mails) / 11
   gmx/web.de/ionos          47 / 0 / 2
-  apple icloud              12 / 6 / 3
+  apple icloud              12 / 6 (2 mails) / 3
   t-online                   9 / 0 / 0
   mailhost.example           6 / 0 / 0
 Watched recipient domain invoices.example.com: 3 sent, 0 deferred, 0 bounced
@@ -393,10 +393,10 @@ Delivered: 2276 | deferred: 91 | bounced: 36 | highest queue: 4 (2026-10-26 10:0
 Rejections mentioning blocklist/reputation/spam/rate limit: 61
   example (2026-10-26 10:05 UTC): Oct 26 09:41:12 gmail.com: host gmail-smtp-in.l.google.com[192.0.2.26] said: 421-4.7.28 [203.0.113.10] Gmail has detected an unusual rate of unsolicited mail …
   example (2026-10-26 10:05 UTC): Oct 26 09:44:03 outlook.com: host outlook-com.olc.protection.outlook.com[192.0.2.40] said: 451 4.7.650 The mail server [203.0.113.10] has been temporarily rate limited …
-Outgoing deliveries per receiving mail server (provider or MX host; total sent / deferred / bounced):
-  google                  1104 / 53 / 19
-  microsoft                512 / 31 / 11
-  gmx/web.de/ionos         301 / 1 / 2
+Outgoing deliveries per receiving mail server (provider or MX host; total sent / deferred attempts (mails) / bounced):
+  google                  1104 / 53 (10 mails) / 19
+  microsoft                512 / 31 (8 mails) / 11
+  gmx/web.de/ionos         301 / 1 (1 mail) / 2
   t-online                  88 / 0 / 0
   apple icloud              41 / 6 / 4
   mailhost.example          37 / 0 / 0
@@ -779,7 +779,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 - **IMAP/POP3 countries:** mailboxes already read from abroad at the first run are stored as known (`known_imap_countries`) without an alert.
 - **Logins:** all IPs with a successful SSH/panel login in the current logs are stored as known (`/var/lib/plesk-server-report/known_login_ips`). Every later login from a new IP raises an alert once. Remove lines from that file to "forget" an IP.
 - **SSH keys, accounts, sudo, cron jobs, autostart files, listening ports:** the first run stores what is there as the baseline (`/var/lib/plesk-server-report/baseline/`) without alerts – except cron jobs and autostart files with suspicious content and suspicious processes, which are reported right away. From then on every change is listed once.
-- **To repeat the daily checks today:** `rm /var/lib/plesk-server-report/daily_date`. They also run again by themselves in the next run after the script or the configuration file changed.
+- **To repeat the daily checks today:** `rm /var/lib/plesk-server-report/daily_date`. They also run again by themselves in the next run after the script or the configuration file changed, or after packages were installed – so a security update you installed with `apt upgrade` disappears from the report with the next run, not only the next day.
 - **To run single checks right now**, e.g. after fixing a DNS record: `plesk-server-report.sh --only mailauth` (several: `--only mailauth,domaindns`; groups: `hourly`, `daily`, `all`; names: `--list`). The result is printed and nothing else happens: no upload, and log offsets, scan stamps and known login IPs stay as they are, so the next hourly run still sees everything. The on/off switches from the configuration (`MAILAUTH_CHECK` etc.) don't apply to checks named explicitly.
 - **For a complete reset:** `rm -rf /var/lib/plesk-server-report`
 

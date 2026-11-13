@@ -62,3 +62,10 @@ mail_on() { MAIL_LOG="$FIX/mail/$1"; check_mail || true; }
   run alerts
   [[ $output != *"DSN"* ]]
 }
+
+@test "deferred: attempts and the distinct mails behind them, kept for the summary" {
+  mail_on dsn.log
+  run report
+  [[ $output == *"d903.example               0 / 2 (1 mail) / 0"* ]]
+  [ "$(cut -f2,3 "$STATE_DIR/deferred_mails")" = "$(printf 'd903.example\t51B2460193')" ]
+}
