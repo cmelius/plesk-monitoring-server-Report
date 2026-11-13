@@ -3210,8 +3210,11 @@ self_update_1x() {
   fi
   latest=$(latest_release_in_major "${VERSION%%.*}")
   [[ $latest =~ ^[0-9]+(\.[0-9]+)*$ ]] || { su_fail "no answer from GitHub about the latest release"; return 1; }
-  if [[ $(printf '%s\n%s\n' "$VERSION" "$latest" | sort -V | tail -1) == "$VERSION" ]]; then
+  if [[ $latest == "$VERSION" ]]; then
     echo "version $VERSION is up to date (latest ${VERSION%%.*}.x release: $latest)"
+    su_major_note; return 0
+  elif [[ $(printf '%s\n%s\n' "$VERSION" "$latest" | sort -V | tail -1) == "$VERSION" ]]; then
+    echo "version $VERSION is newer than the latest ${VERSION%%.*}.x release $latest (development version from main) – nothing to do"
     su_major_note; return 0
   fi
   echo "version $latest is available (installed: $VERSION)"

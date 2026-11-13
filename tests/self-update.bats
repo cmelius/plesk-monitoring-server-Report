@@ -59,6 +59,14 @@ leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
   [ ! -e "$STATE_DIR/plesk-server-report.sh.old" ]
 }
 
+@test "newer than the latest release (from main): nothing to do" {
+  LATEST=1.11.0; OVERALL=1.11.0
+  run self_update_1x
+  [ "$status" -eq 0 ]
+  [[ $output == *"version 1.12.0 is newer than the latest 1.x release 1.11.0 (development version from main) – nothing to do"* ]]
+  cmp -s "$SU_SELF" "$BATS_TEST_DIRNAME/../plesk-server-report.sh"
+}
+
 @test "version 2 released: 1.x is not replaced by it, only a note" {
   LATEST=1.12.0; OVERALL=2.0.0
   run self_update_1x
