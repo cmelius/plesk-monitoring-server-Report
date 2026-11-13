@@ -3210,7 +3210,7 @@ su_major_note() {   # a newer major version: only a note
   echo "version 2 comes as a release archive (script with lib/ and plugins/) – see README: Updating from 1.x"
 }
 self_update_1x() {
-  local self dir d old="$STATE_DIR/plesk-server-report.sh.old" latest v raw
+  local self dir d old="$STATE_DIR/plesk-server-report.sh.old" latest v raw same
   self=${SU_SELF:-$(readlink -f "${BASH_SOURCE[0]}")}; dir=${self%/*}
   # no half-downloaded file left next to the script, also after Ctrl-C
   trap 'rm -f "${SU_WORK:-/nonexistent}" "${SU_WORK:-/nonexistent}.changes"' EXIT
@@ -3241,14 +3241,13 @@ self_update_1x() {
   fi
   latest=$(latest_release_in_major "${VERSION%%.*}")
   [[ $latest =~ ^[0-9]+(\.[0-9]+)*$ ]] || { su_fail "no answer from GitHub about the latest release"; return 1; }
-  if [[ $latest == "$VERSION" ]]; then
-    echo "version $VERSION is up to date (latest ${VERSION%%.*}.x release: $latest)"
-    su_major_note; return 0
-  elif [[ $(printf '%s\n%s\n' "$VERSION" "$latest" | sort -V | tail -1) == "$VERSION" ]]; then
+  # same number: the file can still differ – a copy taken from main before the release
+  same=0; [[ $latest == "$VERSION" ]] && same=1
+  if (( ! same )) && [[ $(printf '%s\n%s\n' "$VERSION" "$latest" | sort -V | tail -1) == "$VERSION" ]]; then
     echo "version $VERSION is newer than the latest ${VERSION%%.*}.x release $latest (development version from main) – nothing to do"
     su_major_note; return 0
   fi
-  echo "version $latest is available (installed: $VERSION)"
+  (( same )) || echo "version $latest is available (installed: $VERSION)"
   raw="https://raw.githubusercontent.com/$SCRIPT_REPO/v$latest"
   # next to the script, so that mv replaces it in one step
   SU_WORK=$(mktemp "$dir/.plesk-server-report.XXXXXX") || { su_fail "no temporary file in $dir"; return 1; }
@@ -3258,21 +3257,29 @@ self_update_1x() {
   if ! bash -n "$SU_WORK" 2>/dev/null || [[ $(sed -n 's/^VERSION=//p' "$SU_WORK" | head -1) != "$latest" ]]; then
     su_fail "the new version failed its test (syntax, or not version $latest) – nothing installed"; return 1
   fi
+  if (( same )); then
+    if cmp -s "$SU_WORK" "$self"; then
+      rm -f "$SU_WORK"; echo "version $VERSION is up to date (latest ${VERSION%%.*}.x release: $latest)"
+      su_major_note; return 0
+    fi
+    echo "your copy of $VERSION differs from the release $latest (a development version from main?)"
+  fi
   echo "test of the new version: good"
-  if su_fetch "$raw/CHANGELOG.md" "$SU_WORK.changes" 2>/dev/null; then
+  if (( ! same )) && su_fetch "$raw/CHANGELOG.md" "$SU_WORK.changes" 2>/dev/null; then
     echo ""; echo "Changes:"
     awk -v cur="$VERSION" '/^## \[/ { if (index($0, "[" cur "]")) exit; p = 1 } p' "$SU_WORK.changes" | head -80
     echo ""
   fi
   rm -f "$SU_WORK.changes"
-  su_ask "Install version $latest now?" || { rm -f "$SU_WORK"; echo "nothing changed"; return 0; }
+  local q="Install version $latest now?"; (( same )) && q="Replace your copy with the release $latest?"
+  su_ask "$q" || { rm -f "$SU_WORK"; echo "nothing changed"; return 0; }
   su_lock || return 1
   if ! { cp -p "$self" "$old" && chown --reference="$self" "$SU_WORK" && chmod --reference="$self" "$SU_WORK" &&
          mv -f "$SU_WORK" "$self"; }; then
     su_fail "could not replace $self – it is unchanged"; return 1
   fi
   exec 9>&-                            # release the lock
-  echo "installed version $latest. The previous version $VERSION is kept in $old (--self-update --rollback goes back)."
+  echo "installed version $latest. The previous copy ($VERSION) is kept in $old (--self-update --rollback goes back)."
   echo "Test it with your configuration: plesk-server-report.sh --only services"
   su_major_note
 }

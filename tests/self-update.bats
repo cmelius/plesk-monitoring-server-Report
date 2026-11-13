@@ -51,8 +51,8 @@ leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
   [ "$(installed)" = "plesk-server-report 1.12.0" ]
 }
 
-@test "already up to date: nothing changes" {
-  LATEST=1.12.0; OVERALL=1.12.0
+@test "already up to date (same file as the release): nothing changes" {
+  LATEST=1.12.0; OVERALL=1.12.0; cp "$SU_SELF" "$NEW"
   run self_update_1x
   [ "$status" -eq 0 ]
   [[ $output == *"version 1.12.0 is up to date (latest 1.x release: 1.12.0)"* ]]
@@ -68,7 +68,7 @@ leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
 }
 
 @test "version 2 released: 1.x is not replaced by it, only a note" {
-  LATEST=1.12.0; OVERALL=2.0.0
+  LATEST=1.12.0; OVERALL=2.0.0; cp "$SU_SELF" "$NEW"
   run self_update_1x
   [ "$status" -eq 0 ]
   [[ $output == *"Version 2.0.0 is available. It can't be installed with --self-update of version 1"* ]]
@@ -155,4 +155,15 @@ leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
   [ "$status" -eq 0 ]
   [ ! -e "$BATS_TEST_TMPDIR/ran" ]
   [ "$(installed)" = "plesk-server-report 1.12.0" ]
+}
+
+@test "same version, but a copy from main that differs from the release: offered as an update" {
+  LATEST=1.12.0
+  sed 's/^# deleted binaries/# (release) deleted binaries/' "$SU_SELF" >"$NEW"
+  run self_update_1x
+  [ "$status" -eq 0 ]
+  [[ $output == *"your copy of 1.12.0 differs from the release 1.12.0"* ]]
+  cmp -s "$SU_SELF" "$NEW"
+  [ -e "$STATE_DIR/plesk-server-report.sh.old" ]
+  [ "$(leftovers)" -eq 0 ]
 }
