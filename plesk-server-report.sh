@@ -133,8 +133,11 @@ WARN_CPU_USER_PCT=80          # %CPU of a single system user (snapshot)
 WARN_MEM_AVAIL_PCT=10         # available RAM below x %
 WARN_DISK_PCT=85              # filesystem usage above x %
 WARN_5XX_PER_DOMAIN=100       # HTTP 5xx responses per domain
+# shellcheck disable=SC2034  # used by the plugin wordpress
 WARN_LOGIN_POSTS=300          # POSTs to wp-login.php/xmlrpc.php per domain
+# shellcheck disable=SC2034  # used by the plugin wordpress
 WARN_LOGIN_DETAIL=20          # show login-attack details for domains with at least x POSTs
+# shellcheck disable=SC2034  # used by the plugins wordpress and webmail
 WARN_LOGIN_BRUTE_FAILS=5      # successful wp-login after at least x failures from the same IP
 WARN_PHP_FATAL=20             # PHP fatal errors per domain
 WARN_REQ_PER_MIN=600          # peak requests per minute for one domain (load spike / L7 flood)
@@ -181,6 +184,7 @@ PERSISTENCE_IGNORE=""         # regex on the text of findings to ignore (e.g. a 
 DNSBL_LISTS="zen.spamhaus.org bl.spamcop.net psbl.surriel.com"   # Barracuda: see README (answers registered resolvers only)
 WEB_IGNORE_DOMAINS=""         # space-separated domains without web alerts (still listed)
 # Known legitimate PHP files inside wp-content/uploads (regex on the full path)
+# shellcheck disable=SC2034  # used by the plugin wordpress
 UPLOADS_PHP_IGNORE='/uploads/borlabs-cookie/|/uploads/mailchimp-for-wp/debug-log\.php$'
 
 # GeoIP: country + network operator of IPs from a local DB-IP Lite database
