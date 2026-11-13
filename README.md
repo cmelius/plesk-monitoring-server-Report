@@ -938,7 +938,7 @@ Other applications popular on Plesk (Joomla, Drupal, TYPO3, PrestaShop, Shopware
 
 The template includes a one-line command that anonymizes the log lines (IPs → `203.0.113.x`, domain → `example.com`). **Please never post real IPs, domains or user names. Issues are public.**
 
-**An idea: plugins.** Checks for specific software (other CMS, other mail servers, setups without Plesk) could one day become plugins – small files with a fixed contract, run in a sandbox where they can only read. This is only an idea for now, not a plan with a date: whether it is worth the work depends on how many people would use it. If you would, say so in an issue. Until then, the issue template above is the way to get support for your software added.
+**Plugins – work in progress.** Checks for specific software (other CMS, other mail servers, setups without Plesk) are to become plugins – small files with a fixed contract, run in a sandbox where they can only read. The work has started on the branch [`feature/plugin-system`](https://github.com/cmelius/plesk-monitoring-server-Report/tree/feature/plugin-system); it is a development state, not meant for production servers, and there is no release date yet. Feedback is welcome in an issue – especially if you would write or use a plugin. Until it is released, the issue template above is the way to get support for your software added.
 
 ---
 
