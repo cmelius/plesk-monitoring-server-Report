@@ -50,6 +50,14 @@ untouched() { [ ! -e "$I.old" ] && [ ! -e "$I.new" ] && grep -q "^VERSION=$VERSI
   [[ $output == *"not part of this release (never run): plugins/extra.sh"* ]]
 }
 
+@test "the built-in release key is an ed25519 public key" {
+  [[ $RELEASE_KEY =~ ^ssh-ed25519\ AAAAC3NzaC1lZDI1NTE5[A-Za-z0-9+/]{48}$ ]]
+  command -v ssh-keygen >/dev/null || skip "ssh-keygen is missing"
+  echo "$RELEASE_KEY" >"$BATS_TEST_TMPDIR/release.pub"
+  run ssh-keygen -l -f "$BATS_TEST_TMPDIR/release.pub"
+  [ "$status" -eq 0 ]; [[ $output == "256 SHA256:"*"(ED25519)" ]]
+}
+
 @test "refused: no release key, not an installation from the archive, a git checkout, not root" {
   release
   RELEASE_KEY=""

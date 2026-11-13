@@ -3228,7 +3228,7 @@ RELEASE_URL="https://github.com/$SCRIPT_REPO/releases/download"
 RELEASE_ARCHIVE=plesk-server-report.tar.gz
 RELEASE_NAMESPACE=plesk-server-report
 RELEASE_SIGNER=cmelius
-RELEASE_KEY=""   # the maintainer's public key ("ssh-ed25519 AAAA…"); empty: no --self-update
+RELEASE_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICebnR5D3K3QzXiwsS6e1Uk3o7zixjnr/Ba5zxBxt5Ca"   # the maintainer's public key; empty: no --self-update
 SU_YES=0; SU_ROLLBACK=0
 su_fail() { echo "self-update: $*" >&2; [[ -n ${SU_WORK:-} ]] && rm -rf "$SU_WORK"; return 1; }
 su_ask() {   # su_ask QUESTION – yes unless the answer is no; with --yes always yes
