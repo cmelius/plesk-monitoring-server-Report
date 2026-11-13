@@ -3185,7 +3185,7 @@ show_state() {
 # lib/ and plugins/; switching to it will be --self-update --major, checked with the key below
 # (built in now, so that this check will not depend on a download).
 # shellcheck disable=SC2034  # for --self-update --major (version 2), not used by 1.x yet
-RELEASE_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICebnR5D3K3QzXiwsS6e1Uk3o7zixjnr/Ba5zxBxt5Ca"   # the maintainer's public key; empty: no --self-update
+RELEASE_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBwQHy40R5vtIHxSSKofpOmJe3yW8LnONdOoWJyY/THA"   # the maintainer's public key; empty: no --self-update
 SU_YES=0; SU_ROLLBACK=0; SU_MAJOR=0
 su_fail() { echo "self-update: $*" >&2; [[ -n ${SU_WORK:-} ]] && rm -rf "$SU_WORK"; return 1; }
 su_ask() {   # su_ask QUESTION – yes unless the answer is no; with --yes always yes
