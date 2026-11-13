@@ -2,7 +2,7 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [1.11.0] – not yet released (on `main`)
+## [1.11.0] – 2026-11-13
 
 ### Added
 - **Full mailboxes:** mail rejected because a mailbox on this server is full raises an alert in every run, naming the mailbox (Plesk: `4.2.2 Mailbox full` from its mail filter; Dovecot and other local delivery: status `4.2.2`/`5.2.2`, "quota exceeded"; deliveries to other servers are left out).
