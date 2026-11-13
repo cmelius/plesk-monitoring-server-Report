@@ -143,11 +143,11 @@ Rejections mentioning blocklist/reputation/spam/rate limit: 61
   example: Oct 26 09:41:12 gmail.com: host gmail-smtp-in.l.google.com[192.0.2.26] said: 421-4.7.28 [203.0.113.10] Gmail has detected an unusual rate of unsolicited mail originating from your IP address. To protect our users from spam, mail sent from your IP addr
   example: Oct 26 09:44:03 outlook.com: host outlook-com.olc.protection.outlook.com[192.0.2.40] said: 451 4.7.650 The mail server [203.0.113.10] has been temporarily rate limited due to IP reputation. (in reply to MAIL FROM command))
   example: Oct 26 09:52:37 icloud.com: host mx01.mail.icloud.com[192.0.2.61] said: 550 5.7.1 Your message was rejected due to icloud.com's local policy [CS01] (in reply to end of DATA command))
-Outgoing deliveries per receiving mail server (provider or MX host; sent / deferred / bounced):
-  google                   310 / 52 / 18
-  microsoft                141 / 29 / 11
+Outgoing deliveries per receiving mail server (provider or MX host; sent / deferred attempts (mails) / bounced):
+  google                   310 / 52 (9 mails) / 18
+  microsoft                141 / 29 (7 mails) / 11
   gmx/web.de/ionos          47 / 0 / 2
-  apple icloud              12 / 6 / 3
+  apple icloud              12 / 6 (2 mails) / 3
   t-online                   9 / 0 / 0
   mailhost.example           6 / 0 / 0
 Watched recipient domain invoices.example.com: 3 sent, 0 deferred, 0 bounced
@@ -393,10 +393,10 @@ Delivered: 2276 | deferred: 91 | bounced: 36 | highest queue: 4 (2026-10-26 10:0
 Rejections mentioning blocklist/reputation/spam/rate limit: 61
   example (2026-10-26 10:05 UTC): Oct 26 09:41:12 gmail.com: host gmail-smtp-in.l.google.com[192.0.2.26] said: 421-4.7.28 [203.0.113.10] Gmail has detected an unusual rate of unsolicited mail …
   example (2026-10-26 10:05 UTC): Oct 26 09:44:03 outlook.com: host outlook-com.olc.protection.outlook.com[192.0.2.40] said: 451 4.7.650 The mail server [203.0.113.10] has been temporarily rate limited …
-Outgoing deliveries per receiving mail server (provider or MX host; total sent / deferred / bounced):
-  google                  1104 / 53 / 19
-  microsoft                512 / 31 / 11
-  gmx/web.de/ionos         301 / 1 / 2
+Outgoing deliveries per receiving mail server (provider or MX host; total sent / deferred attempts (mails) / bounced):
+  google                  1104 / 53 (10 mails) / 19
+  microsoft                512 / 31 (8 mails) / 11
+  gmx/web.de/ionos         301 / 1 (1 mail) / 2
   t-online                  88 / 0 / 0
   apple icloud              41 / 6 / 4
   mailhost.example          37 / 0 / 0

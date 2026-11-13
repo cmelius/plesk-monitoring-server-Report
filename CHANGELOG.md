@@ -10,6 +10,7 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 - README: *Updates* (with `--self-update`, `curl` for installations up to 1.11.x), *Updating from 1.x*, *Security*, *Check it before you run it as root*; STATE-FILES: `plesk-server-report.sh.old`.
 
 ### Changed
+- **Deferred deliveries: attempts and mails.** The table of outgoing deliveries counted deferred *attempts* – Postfix logs one line per retry, so a single mail that a provider kept refusing could show up as dozens. Now the number of distinct mails follows in brackets, e.g. `29 (7 mails)`, in the report and in `summary.txt` (for the summary from the new state file `deferred_mails`).
 - The daily update check compares with the newest release of the installed major version (`latest 1.x release`) and names a newer major version separately.
 - **Barracuda removed from the default IP blocklists** (`DNSBL_LISTS`). It answers only DNS servers registered with Barracuda, and the registration page has not been reachable for some time. Its `clean` so far came through the hosting provider's resolver (registered there); asked through the server's own resolver, it doesn't answer – the test entry shows `no-answer`. README: how to add it again, and how to send blocklist queries through the system resolver.
 

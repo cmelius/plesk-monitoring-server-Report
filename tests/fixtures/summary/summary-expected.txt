@@ -32,7 +32,7 @@ Built from the reports of this period. Daily checks and fail2ban: see latest.txt
 Delivered: 923 | deferred: 1 | bounced: 0 | highest queue: 0
 Rejections mentioning blocklist/reputation/spam/rate limit: 1
   example (2026-11-12 10:05 UTC): Nov 12 08:58:15 d122.example: host sub.d123.example[198.18.1.228] said: 450 4.2.0 <info@d122.example>: Recipient address rejected: Greylisted for domain [d122.example], please retry again later.(PortUNA E-Code: 0x0003) (in reply to RCP
-Outgoing deliveries per receiving mail server (provider or MX host; total sent / deferred / bounced):
+Outgoing deliveries per receiving mail server (provider or MX host; total sent / deferred attempts (mails) / bounced):
   google                    18 / 0 / 0
   microsoft                 14 / 0 / 0
   gmx/web.de/ionos           5 / 0 / 0
