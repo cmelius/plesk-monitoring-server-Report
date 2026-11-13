@@ -100,6 +100,7 @@ AUTH_LOG=""                   # SSH logins; default: /var/log/auth.log or /var/l
 PLESK_PANEL_LOG=/var/log/plesk/httpsd_access_log   # access log of the Plesk panel (port 8443) – panel logins
 PLESK_ERROR_LOG=/var/log/plesk/panel.log           # Plesk's own log – failed panel logins, failed certificate renewals
 ROUNDCUBE_LOG_DIR=""          # default: /var/log/plesk-roundcube (or /usr/share/psa-roundcube/logs)
+BACKUP_LOG_DIR=""             # Plesk backup logs (backup-*/backup.log); default: /var/log/plesk/PMM (or /usr/local/psa/PMM/logs, /opt/psa/PMM/logs)
 
 # Alert thresholds – per run (with an hourly cron job: per hour)
 WARN_MAILS_PER_SENDER=150     # recipients per envelope sender
@@ -1785,7 +1786,7 @@ check_backups() {   # latest Plesk backup (time, age, errors), Acronis agent –
   local pmm last age st now mt
   now=$(date +%s)
   section "BACKUPS"
-  for pmm in /var/log/plesk/PMM /usr/local/psa/PMM/logs /opt/psa/PMM/logs; do [[ -d $pmm ]] && break; pmm=""; done
+  for pmm in ${BACKUP_LOG_DIR:-/var/log/plesk/PMM /usr/local/psa/PMM/logs /opt/psa/PMM/logs}; do [[ -d $pmm ]] && break; pmm=""; done
   if [[ -n $pmm ]]; then
     last=$(T "$CMD_TIMEOUT" find -L "$pmm" -maxdepth 2 -type d -name 'backup-*' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)
     if [[ -n $last ]]; then

@@ -12,8 +12,8 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 - **Mailboxes without a size limit** (Plesk: mailbox and subscription set to unlimited) are measured too (`du` on the Maildir folder): the report line names the largest one and the total, and one larger than `WARN_MAILBOX_UNLIMITED_GB` raises a warning (new setting, default 5 GB, `0` = off) – it can't become full, but fills the disk and the backups. The line says "unlimited (no size limit set in Plesk)" instead of "without size limit".
 - `summary.txt` lists full mailboxes (rejected delivery attempts, first – last) and delivery confirmations sent to other servers – both were only in the single reports and the alerts so far.
 - README, *What it found so far*: a full mailbox that rejected mail, and mailboxes without a size limit nobody knew about. Example report and summary show the new lines.
-- **Tests** (`tests/`, [bats](https://github.com/bats-core/bats-core)): the mail, panel, web, login, mailbox and backdoor checks fed with anonymized logs of a real server, run by the GitHub workflow on every push – once with `mawk` and once with `gawk`. `tests/anonymize.py` anonymizes logs for new fixtures. README: section *Tests*.
-- `MAIL_LOG` and `AUTH_LOG` (new settings, default empty = as before): the mail log and the SSH login log, for systems that keep them elsewhere.
+- **Tests** (`tests/`, [bats](https://github.com/bats-core/bats-core)): the mail, panel, web (with ModSecurity), login (SSH and Plesk panel), webmail, backup, fail2ban, mailbox and backdoor checks fed with anonymized logs of a real server, and the daily summary built from a day of its hourly reports, run by the GitHub workflow on every push – once with `mawk` and once with `gawk`. `tests/anonymize.py` anonymizes logs for new fixtures. README: section *Tests*.
+- `MAIL_LOG`, `AUTH_LOG` and `BACKUP_LOG_DIR` (new settings, default empty = as before): the mail log, the SSH login log and the Plesk backup logs, for systems that keep them elsewhere.
 
 ### Changed
 - Every `# shellcheck` directive in the script says why it is there.

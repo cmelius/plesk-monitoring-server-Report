@@ -762,6 +762,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 | `PLESK_PANEL_LOG` | `/var/log/plesk/httpsd_access_log` | access log of the Plesk panel (port 8443), used to detect panel logins |
 | `PLESK_ERROR_LOG` | `/var/log/plesk/panel.log` | Plesk's own log: failed panel logins with login name, failed certificate renewals (section `PLESK PANEL LOG`) |
 | `ROUNDCUBE_LOG_DIR` | auto | Roundcube log directory, default `/var/log/plesk-roundcube` or `/usr/share/psa-roundcube/logs` |
+| `BACKUP_LOG_DIR` | auto | Plesk backup logs (`backup-*/backup.log`), default `/var/log/plesk/PMM`, `/usr/local/psa/PMM/logs` or `/opt/psa/PMM/logs` |
 | `GEOIP_DIR` | `$STATE_DIR/geoip` | where the DB-IP Lite databases are stored |
 
 ---
@@ -893,7 +894,7 @@ Limits: pseudonymised data is still personal data (GDPR Art. 4(5)) – it lowers
 
 ## Tests
 
-`tests/` holds [bats](https://github.com/bats-core/bats-core) tests and their fixtures: logs of the author's server, anonymized, plus a few made-up lines for other mail setups – an hour of mail traffic, the cases from [What it found so far](#what-it-found-so-far) (a tablet with an outdated password, refused blocklist lookups, delivery confirmations, a full mailbox, failed certificate renewals), web logs, `.htaccess` files and mailbox sizes. Each test loads the script's functions without running it and points one check at a fixture; nothing outside a temporary directory is touched, no root needed.
+`tests/` holds [bats](https://github.com/bats-core/bats-core) tests and their fixtures: logs of the author's server, anonymized, plus a few made-up lines for cases that server didn't have (other mail setups, a failed backup) – an hour of mail traffic, the cases from [What it found so far](#what-it-found-so-far) (a tablet with an outdated password, refused blocklist lookups, delivery confirmations, a full mailbox, failed certificate renewals), web logs with ModSecurity hits, Plesk panel logins, Roundcube, the Plesk backup log, the output of `fail2ban-client`, `.htaccess` files, mailbox sizes – and a day of the script's own hourly reports, from which the daily summary must come out as on the server. Each test loads the script's functions without running it and points one check at a fixture; nothing outside a temporary directory is touched, no root needed.
 
 ```bash
 apt install bats            # RHEL family: dnf install bats (EPEL)

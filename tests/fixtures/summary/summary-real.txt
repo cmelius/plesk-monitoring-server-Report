@@ -1,0 +1,235 @@
+Server summary d1.example – last 24 h: 19 report(s), 2026-11-12 07:00 UTC to 2026-11-13 06:05 UTC – plesk-server-report v1.11.0
+Built from the reports of this period. Daily checks and fail2ban: see latest.txt. Details of a run: report-<date>-<time>.txt
+
+== RUNS (time, status) ==
+  2026-11-12 07:00 UTC  STATUS: OK
+  2026-11-12 08:05 UTC  STATUS: OK
+  2026-11-12 10:05 UTC  STATUS: WARNING (1)
+  2026-11-12 11:01 UTC  STATUS: WARNING (1)
+  2026-11-12 11:05 UTC  STATUS: OK
+  2026-11-12 12:05 UTC  STATUS: OK
+  2026-11-12 12:36 UTC  STATUS: OK
+  2026-11-12 13:03 UTC  STATUS: OK
+  2026-11-12 13:16 UTC  STATUS: OK
+  2026-11-12 14:05 UTC  STATUS: OK
+  2026-11-12 15:20 UTC  STATUS: OK
+  2026-11-12 16:05 UTC  STATUS: OK
+  2026-11-12 18:05 UTC  STATUS: WARNING (1)
+  2026-11-12 20:05 UTC  STATUS: OK
+  2026-11-12 22:05 UTC  STATUS: OK
+  2026-11-13 00:05 UTC  STATUS: OK
+  2026-11-13 02:05 UTC  STATUS: WARNING (1)
+  2026-11-13 04:05 UTC  STATUS: WARNING (2)
+  2026-11-13 06:05 UTC  STATUS: WARNING (1)
+
+== ALERTS (times seen, first – last, text) ==
+    1×  2026-11-12 10:05 UTC – 2026-11-12 10:05 UTC  Mail: 1 rejections by remote servers mentioning a blocklist, reputation, spam or rate limit – check the server IP and the examples
+    1×  2026-11-12 11:01 UTC – 2026-11-12 11:01 UTC  Mail: mailbox info@d37.example is full – 25 delivery attempt(s) rejected since the last run (senders retry for a few days after 4.2.2, 5.2.2 returns the mail at once). Raise its size limit, or have the customer delete or archive mail
+    1×  2026-11-12 18:05 UTC – 2026-11-12 18:05 UTC  Login: Plesk panel login from previously unknown IP 198.18.2.79 (DE, Vodafone GmbH)
+    2×  2026-11-13 02:05 UTC – 2026-11-13 04:05 UTC  fail2ban: jail plesk-courierimap bans 198.18.2.87 (DE, BITel Gesellschaft fuer Telekommunikatio), which had successful logins before (mail logins of user10@d35.example, user70@d35.example, user153@d35.example (last 2026-11-13)) – a device with an outdated password? Unban: fail2ban-client set plesk-courierimap unbanip 198.18.2.87
+    2×  2026-11-13 04:05 UTC – 2026-11-13 06:05 UTC  fail2ban: jail plesk-courierimap bans 198.18.0.61 (DE, BITel Gesellschaft fuer Telekommunikatio), which had successful logins before (mail logins of user10@d35.example, user70@d35.example, user153@d35.example (last 2026-11-13)) – a device with an outdated password? Unban: fail2ban-client set plesk-courierimap unbanip 198.18.0.61
+
+== MAIL ==
+Delivered: 923 | deferred: 1 | bounced: 0 | highest queue: 0
+Rejections mentioning blocklist/reputation/spam/rate limit: 1
+  example (2026-11-12 10:05 UTC): Nov 12 08:58:15 d122.example: host sub.d123.example[198.18.1.228] said: 450 4.2.0 <info@d122.example>: Recipient address rejected: Greylisted for domain [d122.example], please retry again later.(PortUNA E-Code: 0x0003) (in reply to RCP
+Outgoing deliveries per receiving mail server (provider or MX host; total sent / deferred / bounced):
+  google                    18 / 0 / 0
+  microsoft                 14 / 0 / 0
+  gmx/web.de/ionos           5 / 0 / 0
+  d75.example                4 / 0 / 0
+  d123.example       2 / 1 / 0
+  hornetsecurity.com         3 / 0 / 0
+  d125.example              2 / 0 / 0
+  d143.example                 2 / 0 / 0
+  apple icloud               1 / 0 / 0
+  d164.example        1 / 0 / 0
+Watched recipient domain datev.de: 0 sent, 0 deferred, 0 bounced
+Full mailboxes (rejected delivery attempts in total, first – last):
+      25  info@d37.example  2026-11-12 11:01 UTC – 2026-11-12 11:01 UTC
+Spam filter: 12 mail(s) not scanned, larger than the size limit (limit 3.0 MB = 3145728 bytes)
+DNS blocklists for the server IP: not listed in any run
+
+Top senders (total recipients; incoming mail included):
+      27  user64@d127.example
+      22  user65@d128.example
+      13  info@d37.example
+      10  info@d26.example
+       6  user62@d34.example
+       5  user71@gmail.com
+       5  user39@d1.example
+       4  bounce@sub.d115.example
+       4  bounces+X@sub.d193.example
+       4  user72@aol.com
+
+Authenticated mailboxes (mails in total; every client IP seen):
+      13  info@d37.example
+          198.18.1.213 (DE, BITel Gesellschaft fuer Telekommunikatio) ×13
+       7  user70@d14.example
+          198.18.1.229 (DE, Deutsche Telekom AG) ×7
+       5  user62@d34.example
+          198.18.0.24 (DE, BITel Gesellschaft fuer Telekommunikatio) ×4, 127.0.0.1 (this server) ×1
+       5  info@d24.example
+          198.18.1.116 (DE, Deutsche Telekom AG) ×5
+       4  user121@d34.example
+          198.18.0.24 (DE, BITel Gesellschaft fuer Telekommunikatio) ×4
+       3  user47@d34.example
+          198.18.0.24 (DE, BITel Gesellschaft fuer Telekommunikatio) ×3
+       3  info@d25.example
+          198.18.1.116 (DE, Deutsche Telekom AG) ×3
+       3  office@d21.example
+          198.18.1.200 (DE, Deutsche Telekom AG) ×3
+       2  info@d20.example
+          198.18.2.70 (DE, Deutsche Telekom AG) ×1, 198.18.1.230 (DE, Deutsche Telekom AG) ×1
+       2  info@d14.example
+          198.18.1.229 (DE, Deutsche Telekom AG) ×2
+       2  user63@d34.example
+          198.18.0.24 (DE, BITel Gesellschaft fuer Telekommunikatio) ×2
+       1  info@d39.example
+          198.18.2.59 (DE, Deutsche Telekom AG) ×1
+       1  user10@d35.example
+          198.18.2.87 (DE, BITel Gesellschaft fuer Telekommunikatio) ×1
+
+IMAP/POP3 logins from outside the allowed countries (time; logins, mailbox, IP):
+  2026-11-12 08:05 UTC  2  user8@d33.example  from 198.18.1.214 (IE, Microsoft Corporation [datacenter])  – 2 KB of mail read
+  2026-11-12 10:05 UTC  2  user8@d33.example  from 198.18.1.214 (IE, Microsoft Corporation [datacenter])  – 3 KB of mail read
+  2026-11-12 11:01 UTC  3  user19@d11.example  from 198.18.1.242 (AR, ETERNET S.R.L.)  – 6 KB of mail read
+  2026-11-12 11:01 UTC  1  user7@d5.example  from 198.18.1.243 (FR, Microsoft Corporation [datacenter])
+  2026-11-12 11:01 UTC  1  user8@d33.example  from 198.18.1.214 (IE, Microsoft Corporation [datacenter])  – 1 KB of mail read
+  2026-11-12 12:05 UTC  2  user7@d5.example  from 198.18.1.243 (FR, Microsoft Corporation [datacenter])  – 8 KB of mail read
+  2026-11-12 12:05 UTC  1  user8@d33.example  from 198.18.1.214 (IE, Microsoft Corporation [datacenter])  – 34 KB of mail read
+  2026-11-12 12:36 UTC  1  user7@d5.example  from 198.18.1.243 (FR, Microsoft Corporation [datacenter])  – 8 KB of mail read
+  2026-11-12 13:03 UTC  1  user8@d33.example  from 198.18.1.214 (IE, Microsoft Corporation [datacenter])  – 3 KB of mail read
+  2026-11-12 14:05 UTC  2  user8@d33.example  from 198.18.1.214 (IE, Microsoft Corporation [datacenter])  – 24 KB of mail read
+  2026-11-12 14:05 UTC  1  user7@d5.example  from 198.18.1.243 (FR, Microsoft Corporation [datacenter])  – 15 KB of mail read
+  2026-11-12 15:20 UTC  1  user7@d5.example  from 198.18.1.243 (FR, Microsoft Corporation [datacenter])  – 8 KB of mail read
+  2026-11-12 15:20 UTC  1  user8@d33.example  from 198.18.1.214 (IE, Microsoft Corporation [datacenter])  – 3 KB of mail read
+  2026-11-12 16:05 UTC  1  user7@d5.example  from 198.18.1.243 (FR, Microsoft Corporation [datacenter])  – 15 KB of mail read
+  2026-11-12 22:05 UTC  4  user19@d11.example  from 198.18.1.242 (AR, ETERNET S.R.L.)  – no mail read
+  2026-11-12 22:05 UTC  1  user19@d11.example  from 198.18.2.95 (AR, Techtel LMDS Comunicaciones Interactivas)  – no mail read
+  2026-11-13 00:05 UTC  2  user19@d11.example  from 198.18.2.102 (AR, Telecom Argentina S.A.)  – no mail read
+  2026-11-13 02:05 UTC  3  user19@d11.example  from 198.18.1.242 (AR, ETERNET S.R.L.)  – 116 KB of mail read
+  2026-11-13 04:05 UTC  2  user7@d5.example  from 198.18.1.243 (FR, Microsoft Corporation [datacenter])  – 15 KB of mail read
+  2026-11-13 06:05 UTC  3  user19@d11.example  from 198.18.1.242 (AR, ETERNET S.R.L.)  – 49 KB of mail read
+  2026-11-13 06:05 UTC  2  user7@d5.example  from 198.18.1.243 (FR, Microsoft Corporation [datacenter])  – 22 KB of mail read
+
+Mailboxes sending with a foreign sender domain (login ≠ from):
+
+Mails sent by scripts (total per system user):
+      15  uid 30  popuser  /var/qmail/popuser
+      14  uid 10020  sysuser  /var/www/vhosts/d26.example
+      11  uid 10034  sysuser  /var/www/vhosts/d32.example
+       6  uid 999  psaadm  /opt/psa/admin
+       4  uid 10004  sysuser  /var/www/vhosts/d23.example
+       2  uid 10049  sysuser  /var/www/vhosts/d31.example
+       1  uid 10025  sysuser  /var/www/vhosts/d10.example
+
+Failed mail logins: SMTP 2007 | IMAP/POP3 1216 in total, most in one run: 540 (2026-11-12 10:05 UTC)
+Top IPs (failed mail logins, total; only IPs that were among the top 5 of a run):
+      23  198.18.2.60 (GB, HOSTGNOME LTD)
+      16  198.18.1.43 (LT, UAB Host Baltic)
+      12  198.18.1.244 (US, d99.example, LLC)
+      11  198.18.1.57 (VN, VIETNAM POSTS AND TELECOMMUNICATIONS GRO)
+      11  198.18.1.47 (DE, Host Europe GmbH)
+      10  198.18.1.54 (SG, Shenzhen Tencent Computer Systems Compan [datacenter])
+      10  198.18.1.50 (US, d99.example, LLC)
+       9  198.18.1.46 (US, WHG Hosting Services Ltd [datacenter])
+       8  198.18.0.67 (NL, SolidCore Hosting LTD [datacenter])
+       8  198.18.1.34 (NL, Feo Prest SRL)
+Most attacked mailboxes (failed SMTP/IMAP/POP3 logins, total):
+     328  user9@d27.example
+     294  user10@d35.example
+     280  user10
+     220  user9
+      82  info
+      53  info@d14.example
+      37  user8@d33.example
+      31  info@d34.example
+
+Webmail (Roundcube) – mails sent (time; mails, recipients, IPs):
+  2026-11-12 13:03 UTC  1      1 rcpt   1 IPs  user62@d34.example
+  2026-11-12 13:03 UTC      198.18.0.26 (DE, Deutsche Telekom AG) ×1
+Failed webmail logins: 0 in total
+
+== SYSTEM ==
+Highest 5-min load: 0.47 (2026-11-12 16:05 UTC) on 12 cores | lowest available RAM: 77 % (2026-11-12 12:36 UTC)
+Highest CPU per system user (snapshots):
+    28.1 %  sweet-e+ (2026-11-12 16:05 UTC)
+    24.4 %  web19 (2026-11-12 12:36 UTC)
+    23.6 %  web15 (2026-11-12 07:00 UTC)
+     8.3 %  pelling+ (2026-11-12 18:05 UTC)
+       6 %  agent360 (2026-11-12 13:03 UTC)
+Filesystems (highest usage):
+     8%  /
+     8%  /boot/efi
+Failed services / OOM killer: none in any run
+Backups (newest report):
+  Plesk backup: last run 2026-11-13 03:23 UTC (2 h ago, TOKEN), status: OK (exit code 0)
+  Acronis agent: running
+
+== WEB (totals) ==
+requests | 5xx | login POSTs | domain
+     8272     0     20  d14.example
+     2671     2      0  d13.example
+     2211  1886      0  d2.example
+     2018     0      0  d36.example
+     1829     0      0  d26.example
+     1535     0      0  d10.example
+     1529     2     10  d11.example
+     1463     0      5  d31.example
+     1174     0     52  d35.example
+     1014     0      0  d34.example
+      983     0     14  d39.example
+      411     0      2  d6.example
+      116     0      1  d23.example
+
+WordPress login attacks (time, details):
+  2026-11-13 02:05 UTC  d35.example: 48 POSTs from 1 IPs (busiest 198.18.2.116 (48))
+  2026-11-13 02:05 UTC    wp-login.php: 48, successful (302): 0 | xmlrpc.php: 0, blocked (4xx): 0
+
+PHP fatal errors (total, domain, first message):
+
+Attack patterns & sensitive-file probes (totals, of which answered 200):
+  d12.example            SQLi 0/0 | traversal 0/0 | code exec 0/0 | XSS 0/0 | sensitive files 272/0
+  d36.example            SQLi 0/0 | traversal 27/0 | code exec 0/0 | XSS 0/0 | sensitive files 157/0
+  d13.example   SQLi 0/0 | traversal 0/0 | code exec 0/0 | XSS 0/0 | sensitive files 150/2
+  d5.example         SQLi 0/0 | traversal 8/0 | code exec 0/0 | XSS 0/0 | sensitive files 121/0
+  d15.example          SQLi 0/0 | traversal 0/0 | code exec 0/0 | XSS 0/0 | sensitive files 108/0
+  sub.d28.example      SQLi 0/0 | traversal 0/0 | code exec 0/0 | XSS 0/0 | sensitive files 90/0
+  d35.example           SQLi 0/0 | traversal 0/0 | code exec 0/0 | XSS 0/0 | sensitive files 90/0
+  d25.example               SQLi 0/0 | traversal 0/0 | code exec 0/0 | XSS 0/0 | sensitive files 82/0
+  d16.example      SQLi 0/0 | traversal 0/0 | code exec 0/0 | XSS 0/0 | sensitive files 66/0
+  d27.example          SQLi 0/0 | traversal 0/0 | code exec 0/0 | XSS 0/0 | sensitive files 62/0
+  d39.example  SQLi 0/0 | traversal 0/0 | code exec 4/0 | XSS 0/0 | sensitive files 56/0
+  d11.example               SQLi 0/0 | traversal 3/0 | code exec 0/0 | XSS 0/0 | sensitive files 55/0
+
+Traffic peaks & distributed requests (time, details):
+  2026-11-12 08:05 UTC  d14.example          peak 191 req/min at 07:45 | /wp-content/plugins/burst-statistics/endpoint.php from 5 IPs
+  2026-11-12 11:01 UTC  d32.example               peak 155 req/min at 10:40 | / from 2 IPs
+  2026-11-12 15:20 UTC  sub.d28.example      peak 151 req/min at 14:38 | / from 5 IPs
+  2026-11-12 16:05 UTC  sub.d28.example      peak 151 req/min at 15:34 | / from 2 IPs
+  2026-11-12 22:05 UTC  d25.example               peak 249 req/min at 20:40 | / from 19 IPs
+  2026-11-13 00:05 UTC  d36.example            peak 203 req/min at 22:41 | / from 16 IPs
+
+ModSecurity (total hits, of which blocked):
+     290    290  d12.example
+     245     84  d13.example
+     166    166  d36.example
+     136    136  d5.example
+     116    116  d15.example
+      98     98  d35.example
+      96     96  sub.d28.example
+      74     74  d25.example
+
+== WEBROOTS: PHP files in upload folders ==
+New in this period: 0
+
+== SUCCESSFUL LOGINS (SSH, Plesk panel; count, first – last) ==
+     4×  2026-11-12 07:00 UTC – 2026-11-12 12:05 UTC  Plesk -              from 198.18.0.18   (panel, user not logged)  DE, Vodafone GmbH
+     8×  2026-11-12 07:00 UTC – 2026-11-12 15:20 UTC  SSH   root           from 198.18.0.18   (publickey)  DE, Vodafone GmbH
+     1×  2026-11-12 18:05 UTC – 2026-11-12 18:05 UTC  Plesk -              from 198.18.2.79   (panel, user not logged)  DE, Vodafone GmbH
+
+== ACCESS & PERSISTENCE (changes + − ~ and findings !; count, first – last) ==
+  no change, nothing suspicious
+
+Newest report: report-20261113-0605.txt

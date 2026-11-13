@@ -24,3 +24,11 @@ setup() { load_script; AUTH_LOG="$FIX/auth.log"; PLESK_PANEL_LOG=/nonexistent; }
   run alerts
   [[ $output == *198.18.1.163* ]]
 }
+
+@test "Plesk panel: a successful login (POST, then a panel page) and failed attempts" {
+  AUTH_LOG=/nonexistent; PLESK_ERROR_LOG=/nonexistent; PLESK_PANEL_LOG="$FIX/panel/httpsd_access_log"
+  check_logins || true
+  run report
+  [[ $output == *"1× Plesk -              from 198.18.0.18"* ]]
+  [[ $output == *"Plesk panel: 5 failed login attempt(s)"* ]]
+}

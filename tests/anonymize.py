@@ -6,7 +6,7 @@
                                   [--out-dir DIR] FILE...
 
 Without --out-dir the anonymized FILEs are printed one after the other; with it,
-each goes to DIR/<its name>. --learn reads more files only to learn names (all
+each goes to DIR/<its path as given> – so pass relative paths. --learn reads more files only to learn names (all
 logs of the server, say), so a customer name is replaced in a short excerpt even
 if its domain doesn't appear there. One mapping is shared by all files, so the
 same domain, mailbox or IP gets the same replacement everywhere:
@@ -27,6 +27,8 @@ same domain, mailbox or IP gets the same replacement everywhere:
     mailbox names are replaced wherever they appear – in paths, file names,
     folder names, bare logins
   - SSH key fingerprints, long hex or base64 tokens -> fixed placeholders
+  - the script's own reports: Plesk system users ("uid 10020  name") -> sysuser,
+    bare login names in count lists ("      30  jane") like mailbox names
 
 Nothing is sent anywhere; the script only reads the files and prints. Read the
 result before you publish it: anonymizing is best effort, a human (or a second
@@ -71,7 +73,7 @@ TLDS = ("de|com|net|org|eu|info|ch|at|io|biz|shop|online|uk|nl|fr|es|it|pl|ru|cn
 DOMAIN_RE = re.compile(r"(?<![\w.-])((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:%s))(?![\w-])" % TLDS, re.I)
 VERP_RE = re.compile(r"(?<![\w.+=-])(bounces?|prvs|msprvs\d*|srs\d|bo|bnc)([+=.-])[^@\s<>,;]*@", re.I)
 EMAIL_RE = re.compile(r"(?<![\w.+-])([a-z0-9][a-z0-9._+-]*)@((?:[a-z0-9-]+\.)+[a-z]{2,})", re.I)
-IPV4_RE = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d{1,3}){3})(?![\d.])")
+IPV4_RE = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d{1,3}){3})(?!\d|\.\d)")   # an IP may end a sentence: "from 192.0.2.1."
 IPV6_RE = re.compile(r"(?<![\w:])((?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{0,4}|(?:[0-9a-f]{1,4}:){1,6}:[0-9a-f]{1,4})(?![\w:])", re.I)
 FPR_RE = re.compile(r"SHA256:[A-Za-z0-9+/]{20,}")
 TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])[A-Za-z0-9+_-]{28,}={0,2}")
@@ -83,6 +85,13 @@ KEEP_SEG_RE = re.compile(r"(wp-[a-z0-9-]+|[A-Za-z0-9_.-]+\.(php\d?|txt|xml|js|cs
                          r"\.[A-Za-z0-9_-]+|admin|plugins|themes|uploads|includes|api|v\d+|feed|login|cgi-bin|vendor|"
                          r"phpmyadmin|pma|xmlrpc|wordpress|wp|blog|backup|backups|old|new|test|config|"
                          r"\d{4}|\d{1,2}|robots\.txt|sitemap.*|well-known|acme-challenge|autodiscover)", re.I)
+# a "+" address (Gmail forwarding, subaddress) may carry another address after the "+"
+PLUS_RE = re.compile(r"(?<![\w.+=-])([a-z0-9][a-z0-9._-]*)\+[^@\s<>,;]*@", re.I)
+# the script's own reports: Plesk system users ("uid 10020  name  /var/www/vhosts/…") and
+# bare login names in count lists ("      30  jane")
+UIDUSER_RE = re.compile(r"(\buid \d+\s+)([a-z][\w.-]*)(?=\s+/)")
+KEEP_SYSUSERS = {"root", "popuser", "www-data", "apache", "nginx", "psaadm", "mailman", "postfix", "nobody"}
+COUNTLOGIN_RE = re.compile(r"^([ \t]+\d+[ \t]+)([A-Za-z][\w.-]*)(?=[ \t]*$)", re.M)
 HEX_RE = re.compile(r"(?<![0-9a-f])[0-9a-f]{24,}(?![0-9a-f])", re.I)
 
 
@@ -116,6 +125,10 @@ class Anon:
                 for w in re.split(r"[.-]", reg.rsplit(".", 1)[0]):
                     if len(w) >= 5 and not w.isdigit() and w.lower() not in STOPWORDS:
                         self.words.setdefault(w.lower(), "name%d" % (len(self.words) + 1))
+                # the whole name too, where its parts are short ("my-big-shop")
+                lab = reg.rsplit(".", 1)[0].lower()
+                if "-" in lab and len(lab) >= 5:
+                    self.words.setdefault(lab, "name%d" % (len(self.words) + 1))
         sub = dl[: -len(reg)].rstrip(".")
         sub = ".".join(("www" if s == "www" else "mail" if s in ("mail", "mx", "smtp") else "sub") for s in sub.split(".")) if sub else ""
         return (sub + "." if sub else "") + self.dom[reg]
@@ -176,6 +189,7 @@ class Anon:
     def line(self, t):
         t = FPR_RE.sub("SHA256:" + "A" * 43, t)
         t = VERP_RE.sub(lambda m: m.group(1) + m.group(2) + "X@", t)
+        t = PLUS_RE.sub(lambda m: self.local(m.group(1)) + "+X@", t)
         t = EMAIL_RE.sub(lambda m: self.local(m.group(1)) + "@" + self.domain(m.group(2)), t)
         t = DOMAIN_RE.sub(lambda m: self.domain(m.group(1)), t)
         t = IPV4_RE.sub(lambda m: self.ipv4(m.group(1)), t)
@@ -190,8 +204,12 @@ class Anon:
                                                   or m.group(2).startswith(("user", "d")) and m.group(2)[1:].isdigit()
                                                   else self.local(m.group(2))), t)
         t = SYSUSER_RE.sub("sysuser", t)
+        t = UIDUSER_RE.sub(lambda m: m.group(1) + (m.group(2) if m.group(2) in KEEP_SYSUSERS else "sysuser"), t)
+        t = COUNTLOGIN_RE.sub(lambda m: m.group(1) + (m.group(2) if m.group(2).lower() in KEEP_LOCALS
+                                                      or re.fullmatch(r"(user|sysuser|name)\d*", m.group(2))
+                                                      else self.local(m.group(2))), t)
         t = REQ_RE.sub(lambda m: m.group(1) + self.web_path(m.group(2)), t)
-        t = REF_RE.sub(lambda m: m.group(1) + "/" + m.group(3), t)
+        t = REF_RE.sub(lambda m: m.group(1) + (self.web_path(m.group(2)) if m.group(2) else "/") + m.group(3), t)   # the referrer path matters too (login_up.php)
         if self._word_re is None:
             words = sorted(self.words, key=len, reverse=True)
             self._word_re = re.compile("|".join(map(re.escape, words)), re.I) if words else False
