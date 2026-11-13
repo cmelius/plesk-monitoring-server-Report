@@ -166,7 +166,7 @@ WEBSHELL_FIRST_DAYS=7         # first run: scan PHP files changed within this ma
 PERSISTENCE_CHECK=1           # SSH keys, accounts with a login shell, sudo, cron/autostart, suspicious processes, new listening ports
 PERSISTENCE_IGNORE=""         # regex on the text of findings to ignore (e.g. a known tool running from /tmp)
 
-DNSBL_LISTS="zen.spamhaus.org bl.spamcop.net b.barracudacentral.org psbl.surriel.com"
+DNSBL_LISTS="zen.spamhaus.org bl.spamcop.net psbl.surriel.com"   # Barracuda: see README (answers registered resolvers only)
 WEB_IGNORE_DOMAINS=""         # space-separated domains without web alerts (still listed)
 # Known legitimate PHP files inside wp-content/uploads (regex on the full path)
 UPLOADS_PHP_IGNORE='/uploads/borlabs-cookie/|/uploads/mailchimp-for-wp/debug-log\.php$'
