@@ -3248,8 +3248,9 @@ su_home() {
   return 0
 }
 su_lock() {   # wait for a running report (at most 15 min), so nothing is replaced under it
-  mkdir -p "$STATE_DIR" && exec 9>"$STATE_DIR/lock" && flock -w 900 9 ||
-    { su_fail "a report run holds the lock – try again later"; return 1; }
+  if ! { mkdir -p "$STATE_DIR" && exec 9>"$STATE_DIR/lock" && flock -w 900 9; }; then
+    su_fail "a report run holds the lock – try again later"; return 1
+  fi
 }
 # su_verify DIR – SHA256SUMS.sig is a valid signature of SHA256SUMS, and the archive matches
 su_verify() {
@@ -3288,8 +3289,9 @@ self_update() {
     v=$(bash "$PSR_HOME.old/plesk-server-report.sh" --version 2>/dev/null)
     su_ask "Go back from $VERSION to ${v#plesk-server-report }?" || { echo "nothing changed"; return 0; }
     su_lock || return 1
-    rm -rf "$PSR_HOME.back" && mv "$PSR_HOME" "$PSR_HOME.back" && mv "$PSR_HOME.old" "$PSR_HOME" && mv "$PSR_HOME.back" "$PSR_HOME.old" ||
-      { su_fail "could not swap the folders – check $PSR_HOME, $PSR_HOME.old and $PSR_HOME.back"; return 1; }
+    if ! { rm -rf "$PSR_HOME.back" && mv "$PSR_HOME" "$PSR_HOME.back" && mv "$PSR_HOME.old" "$PSR_HOME" && mv "$PSR_HOME.back" "$PSR_HOME.old"; }; then
+      su_fail "could not swap the folders – check $PSR_HOME, $PSR_HOME.old and $PSR_HOME.back"; return 1
+    fi
     echo "back to ${v#plesk-server-report }; version $VERSION is kept in $PSR_HOME.old (--self-update --rollback swaps again)"
     return 0
   fi
@@ -3307,8 +3309,9 @@ self_update() {
       { su_fail "download of $RELEASE_URL/v$latest/$v failed"; return 1; }
   done
   su_verify "$d" || return 1
-  rm -rf "$new" && mkdir -m 755 "$new" && tar -xzf "$d/$RELEASE_ARCHIVE" -C "$new" --no-same-owner ||
-    { rm -rf "$new"; su_fail "could not unpack the archive into $new"; return 1; }
+  if ! { rm -rf "$new" && mkdir -m 755 "$new" && tar -xzf "$d/$RELEASE_ARCHIVE" -C "$new" --no-same-owner; }; then
+    rm -rf "$new"; su_fail "could not unpack the archive into $new"; return 1
+  fi
   chmod 755 "$new/plesk-server-report.sh"   # cron runs it through the link in /usr/local/sbin
   # the new version checks itself: syntax, version, its plugin files
   if ! bash -n "$new/plesk-server-report.sh" || [[ $(bash "$new/plesk-server-report.sh" --version 2>/dev/null) != "plesk-server-report $latest" ]] ||
@@ -3323,9 +3326,10 @@ self_update() {
   fi
   su_ask "Install version $latest now?" || { rm -rf "$new" "$d"; echo "nothing changed"; return 0; }
   su_lock || { rm -rf "$new"; return 1; }
-  rm -rf "$PSR_HOME.old" && mv "$PSR_HOME" "$PSR_HOME.old" && mv "$new" "$PSR_HOME" || {
+  if ! { rm -rf "$PSR_HOME.old" && mv "$PSR_HOME" "$PSR_HOME.old" && mv "$new" "$PSR_HOME"; }; then
     [[ -d $PSR_HOME ]] || mv "$PSR_HOME.old" "$PSR_HOME"
-    su_fail "could not swap the folders – check $PSR_HOME and $PSR_HOME.old"; return 1; }
+    su_fail "could not swap the folders – check $PSR_HOME and $PSR_HOME.old"; return 1
+  fi
   rm -rf "$d"
   echo "installed version $latest. The previous version $VERSION is kept in $PSR_HOME.old (--self-update --rollback goes back)."
   echo "Test it with your configuration: plesk-server-report.sh --only services"

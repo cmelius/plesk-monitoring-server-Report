@@ -121,10 +121,11 @@ untouched() { [ ! -e "$I.old" ] && [ ! -e "$I.new" ] && grep -q "^VERSION=$VERSI
   [ "$status" -eq 1 ]; [[ $output == *"holds something other than plain files and folders"* ]]
   untouched
   release
-  (cd "$BATS_TEST_TMPDIR" && mkdir -p up && echo x >up/evil && tar -czf "$R/v9.9.9/plesk-server-report.tar.gz" -C stage . ../up/evil 2>/dev/null) || true
+  (cd "$BATS_TEST_TMPDIR" && mkdir -p up && echo x >up/evil && tar -czPf "$R/v9.9.9/plesk-server-report.tar.gz" -C stage . ../up/evil 2>/dev/null) || true   # -P keeps the ../
+  tar -tzf "$R/v9.9.9/plesk-server-report.tar.gz" 2>/dev/null | grep -qx '\.\./up/evil'
   (cd "$R/v9.9.9" && sha256sum plesk-server-report.tar.gz >SHA256SUMS); sign
   SU_YES=1 run self_update
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 1 ]; [[ $output == *"holds something other than plain files and folders"* ]]
   untouched
   release 9.9.8; sign                           # the archive says 9.9.8, the release 9.9.9
   SU_YES=1 run self_update
