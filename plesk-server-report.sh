@@ -3209,6 +3209,34 @@ su_major_note() {   # a newer major version: only a note
   echo "Version $other is available. It can't be installed with --self-update of version ${VERSION%%.*}:"
   echo "version 2 comes as a release archive (script with lib/ and plugins/) – see README: Updating from 1.x"
 }
+su_api() { T 20 curl -fsS --proto =https --connect-timeout 5 --max-time 15 -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$SCRIPT_REPO/$1" 2>/dev/null; }
+# su_dev_changes FILE VERSION CHANGELOG – for a copy taken from main before the release: find the
+# commit it came from (git's blob checksum, computed without git) among the last 20 commits that
+# changed the script up to the release tag, and list the commits after it. Otherwise the release's
+# CHANGELOG section. Uses at most 21 GitHub API requests (60 an hour are allowed without login).
+su_dev_changes() {
+  local f=$1 ver=$2 log=$3 blob list i=0 c b msgs=()
+  blob=$({ printf 'blob %d\0' "$(stat -c %s "$f")"; cat "$f"; } | sha1sum | cut -d' ' -f1)
+  # newest first: top-level "sha" (4 spaces) and the first line of "message" (6 spaces) of each commit
+  list=$(su_api "commits?path=plesk-server-report.sh&sha=v$ver&per_page=20" |
+         awk '/^    "sha": "/ { s = $0; sub(/.*"sha": "/, "", s); sub(/".*/, "", s) }
+              /^      "message": "/ && s != "" { m = $0; sub(/.*"message": "/, "", m); sub(/\\n.*|",?$/, "", m)
+                                                 gsub(/\\u[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]|[\001-\037\177]/, "", m)
+                                                 gsub(/\\"/, "\"", m); print s "\t" m; s = "" }')
+  while IFS=$'\t' read -r c m; do
+    [[ $c =~ ^[0-9a-f]{40}$ ]] || continue
+    b=$(su_api "contents/plesk-server-report.sh?ref=$c" | sed -n 's/^  "sha": "\([0-9a-f]*\)".*/\1/p' | head -1)
+    if [[ -n $b && $b == "$blob" ]]; then
+      if (( i == 0 )); then echo "your copy is the release's file except for its line endings or mode"; return 0; fi
+      echo ""; echo "Your copy is from commit ${c:0:7}; the release adds:"
+      printf '  - %s\n' "${msgs[@]}"; echo ""; return 0
+    fi
+    msgs+=("${m:0:120}"); i=$((i + 1))
+  done <<<"$list"
+  echo ""; echo "Changes in $ver (your copy may contain some of them already):"
+  [[ -s $log ]] && awk -v v="$ver" '/^## \[/ { if (p) exit; if (index($0, "[" v "]")) p = 1 } p' "$log" | head -60
+  echo ""
+}
 self_update_1x() {
   local self dir d old="$STATE_DIR/plesk-server-report.sh.old" latest v raw same
   self=${SU_SELF:-$(readlink -f "${BASH_SOURCE[0]}")}; dir=${self%/*}
@@ -3265,6 +3293,10 @@ self_update_1x() {
     echo "your copy of $VERSION differs from the release $latest (a development version from main?)"
   fi
   echo "test of the new version: good"
+  if (( same )); then
+    su_fetch "$raw/CHANGELOG.md" "$SU_WORK.changes" 2>/dev/null
+    su_dev_changes "$self" "$latest" "$SU_WORK.changes"
+  fi
   if (( ! same )) && su_fetch "$raw/CHANGELOG.md" "$SU_WORK.changes" 2>/dev/null; then
     echo ""; echo "Changes:"
     awk -v cur="$VERSION" '/^## \[/ { if (index($0, "[" cur "]")) exit; p = 1 } p' "$SU_WORK.changes" | head -80

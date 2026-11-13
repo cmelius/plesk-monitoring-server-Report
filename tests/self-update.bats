@@ -167,3 +167,43 @@ leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
   [ -e "$STATE_DIR/plesk-server-report.sh.old" ]
   [ "$(leftovers)" -eq 0 ]
 }
+
+# fake GitHub API: three commits that changed the script, newest first; the installed copy is the oldest
+fake_api() {
+  local c1=1111111111111111111111111111111111111111 c2=2222222222222222222222222222222222222222 c3=3333333333333333333333333333333333333333
+  blobof() { { printf 'blob %d\0' "$(stat -c %s "$1")"; cat "$1"; } | sha1sum | cut -d' ' -f1; }
+  case $1 in
+    commits\?*) printf '[\n  {\n    "sha": "%s",\n    "commit": {\n      "message": "Fix the release\\n\\nCo-Authored-By: x",\n      "tree": {\n        "sha": "aaaa"\n      }\n    }\n  },\n  {\n    "sha": "%s",\n    "commit": {\n      "message": "Second change – with a dash",\n    }\n  },\n  {\n    "sha": "%s",\n    "commit": {\n      "message": "The copy you have",\n    }\n  }\n]\n' $c3 $c2 $c1 ;;
+    contents/*ref=$c3) printf '{\n  "name": "plesk-server-report.sh",\n  "sha": "%s",\n}\n' "$(blobof "$NEW")" ;;
+    contents/*ref=$c2) printf '{\n  "sha": "%s",\n}\n' 0000000000000000000000000000000000000000 ;;
+    contents/*ref=$c1) printf '{\n  "sha": "%s",\n}\n' "$(blobof "${FAKE_INSTALLED:-$SU_SELF}")" ;;
+  esac
+}
+
+@test "copy from main: the commits since that copy are listed" {
+  LATEST=1.12.0; SU_YES=0
+  sed 's/^# deleted binaries/# (release) deleted binaries/' "$SU_SELF" >"$NEW"
+  su_api() { fake_api "$@"; }
+  run self_update_1x <<<"n"
+  [[ $output == *"Your copy is from commit 1111111; the release adds:"* ]]
+  [[ $output == *"  - Fix the release"* ]]
+  [[ $output == *"  - Second change – with a dash"* ]]
+  [[ $output != *"The copy you have"* ]]
+  [[ $output != *"Co-Authored-By"* ]]
+}
+
+@test "copy from main not found among the commits: the release's CHANGELOG section instead" {
+  LATEST=1.12.0; SU_YES=0; FAKE_INSTALLED=/dev/null
+  sed 's/^# deleted binaries/# (release) deleted binaries/' "$SU_SELF" >"$NEW"
+  su_api() { fake_api "$@"; }
+  su_fetch() {
+    case $1 in
+      */plesk-server-report.sh) cp "$NEW" "$2" ;;
+      */CHANGELOG.md) printf '## [1.12.0] – test\n- the release section\n\n## [1.11.0] – before\n- old\n' >"$2" ;;
+    esac
+  }
+  run self_update_1x <<<"n"
+  [[ $output == *"Changes in 1.12.0 (your copy may contain some of them already):"* ]]
+  [[ $output == *"- the release section"* ]]
+  [[ $output != *"- old"* ]]
+}
