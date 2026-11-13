@@ -55,6 +55,8 @@
 #                     show the changes, ask, then replace this installation (only one
 #                     unpacked from the release archive). The previous version is kept.
 #                     --yes: don't ask. --self-update --rollback: back to the kept version.
+#                     Stays within this major version; --self-update --major: switch to
+#                     the next one (not available yet)
 #   --help            show this help
 #
 # Settings: edit the defaults below or – recommended, survives updates –
@@ -73,7 +75,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.11.1
+VERSION=1.12.0
 
 set -uo pipefail
 export LC_ALL=C
@@ -154,7 +156,7 @@ MAILAUTH_IGNORE_DOMAINS=""    # space-separated domains to skip
 # own hostname or for zones that exist in Plesk but are hosted elsewhere. "" = system resolver
 BLOCKLIST_RESOLVER=""         # DNS resolver for blocklist lookups (IP and domain blocklists). Empty: 127.0.0.1 if a
                               # resolver answers there (Plesk: BIND), else the system resolver; "system" forces that
-MAILAUTH_RESOLVER="1.1.1.1"
+MAILAUTH_RESOLVER="1.1.1.1"     # daily DNS checks: mail authentication, server and domain DNS, HTTPS; "" = system resolver
 MAILAUTH_SHOW_ALL=0           # 1 = list every domain, 0 = only domains with findings
 DKIM_KEY_DIR=/etc/domainkeys  # Plesk DKIM private keys: <dir>/<domain>/<selector>
 DKIM_SELECTOR=default         # Plesk signs with selector "default"
@@ -818,7 +820,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       else BLRES+=" $bl:LISTED($r)"; alert "Mail: server IP $PUBIP is listed on $bl"
       fi
     done
-    out "DNS blocklists for $PUBIP:$BLRES (queried via $BL_VIA)"
+    out "DNS blocklists for $PUBIP (all queried via $BL_VIA):$BLRES"
   fi
 
   out ""; out "Top senders (total recipients):"
@@ -1720,20 +1722,33 @@ latest_release() {   # latest_release – the version of the latest release on G
       "https://api.github.com/repos/$SCRIPT_REPO/releases/latest" 2>/dev/null |
     sed -n 's/.*"tag_name": *"v\{0,1\}\.\{0,1\}\([0-9][0-9.]*\)".*/\1/p' | head -1
 }
-script_update_check() {
-  local latest newest
+# latest_release_in_major N – the newest release N.x (no pre-release), or nothing. Version 1
+# may still get fixes when version 2 is out, so 1.x compares with the newest 1.x release.
+latest_release_in_major() {
   command -v curl >/dev/null || return 0
-  latest=$(latest_release)
+  T 20 curl -fsS --connect-timeout 5 --max-time 15 -H 'Accept: application/vnd.github+json' \
+      "https://api.github.com/repos/$SCRIPT_REPO/releases?per_page=100" 2>/dev/null |
+    awk -v m="$1" '/"tag_name":/ { t = $0; sub(/.*"tag_name": *"v?/, "", t); sub(/".*/, "", t) }
+                   /"prerelease": *false/ && t ~ ("^" m "\\.[0-9.]+$") { print t; t = "" }' |
+    sort -V | tail -1
+}
+script_update_check() {
+  local latest newest other
+  command -v curl >/dev/null || return 0
+  latest=$(latest_release_in_major "${VERSION%%.*}")
+  other=$(latest_release)
+  [[ ${other%%.*} =~ ^[0-9]+$ && ${other%%.*} -gt ${VERSION%%.*} ]] &&
+    other=" – version $other is available too (a new major version: see README, Updates)" || other=""
   if [[ -z $latest ]]; then
     echo "Script version: $VERSION (update check failed – no answer from GitHub; UPDATE_CHECK=0 switches it off)"
   elif [[ $latest == "$VERSION" ]]; then
-    echo "Script version: $VERSION (latest release)"
+    echo "Script version: $VERSION (latest ${VERSION%%.*}.x release)$other"
   else
     newest=$(printf '%s\n%s\n' "$VERSION" "$latest" | sort -V | tail -1)
     if [[ $newest == "$latest" ]]; then
-      echo "Script version: $VERSION – version $latest is available: https://github.com/$SCRIPT_REPO/releases/latest"
+      echo "Script version: $VERSION – version $latest is available (update: plesk-server-report.sh --self-update)$other"
     else
-      echo "Script version: $VERSION (newer than the latest release $latest – development version from main)"
+      echo "Script version: $VERSION (newer than the latest release $latest – development version from main)$other"
     fi
   fi
 }
@@ -1826,6 +1841,7 @@ check_https() {   # HSTS header and http→https redirect on domains with a vali
     echo "  $n domain(s) checked"
   fi
   (( skip )) && echo "  $skip domain(s) with a certificate point elsewhere and were skipped"
+  echo "  DNS queried via ${MAILAUTH_RESOLVER:-system resolver}"
   return 0
 }
 
@@ -1864,6 +1880,7 @@ check_serverdns() {   # PTR of the server IP, HELO name, IPv6 reverse DNS
   else
     echo "  IPv6: not used for mail (CHECK_IPV6=$CHECK_IPV6)"
   fi
+  echo "  DNS queried via ${MAILAUTH_RESOLVER:-system resolver}"
 }
 
 check_mailtls() {   # certificate of the mail server on the mail ports
@@ -1937,7 +1954,8 @@ check_domaindns() {   # still pointing here?, CAA vs. Let's Encrypt, DNSSEC, dom
   echo ""; echo "Domain DNS (points here? CAA, DNSSEC, domain blocklists):"
   [[ -n $out ]] && printf '%s' "$out"
   echo "  $n domain(s) checked, findings listed above"
-  [[ -n ${DOMAIN_BLOCKLISTS// /} ]] && { bl_init; echo "  domain blocklists queried via $BL_VIA"; }
+  if [[ -n ${DOMAIN_BLOCKLISTS// /} ]]; then bl_init; echo "  DNS queried via ${MAILAUTH_RESOLVER:-system resolver}, domain blocklists via $BL_VIA"
+  else echo "  DNS queried via ${MAILAUTH_RESOLVER:-system resolver}"; fi
   [[ -n ${BL_REFUSED:-} ]] && echo "  note: some blocklists refused queries from this resolver:$(tr ' ' '\n' <<<"$BL_REFUSED" | sort -u | xargs -r echo ' ')"
   return 0
 }
@@ -3120,6 +3138,7 @@ a normal run, not with `--only`. Delete a file and that plugin starts from scrat
 | `running` | exists only while a run is active: `PID start now step exit-code`. If it is still there at the next run, that run did not finish, and the report says so (alert "Script: …"). |
 | `upload_failed` | time of the first failed upload, and rclone's last error message | while the upload to `REMOTE` fails, every report raises an alert (local report, mail). Deleted by the next successful upload. |
 | `tmp.*` | temporary files of the current run, removed at its end. |
+| `plesk-server-report.sh.old` | the previous script, kept by `--self-update` of version 1.x. Since 2.0 the previous version is kept as the folder `/usr/local/lib/plesk-server-report.old` (`--self-update --rollback`); this file is no longer used – safe to delete. |
 | `README.txt` | this description. |
 EOF
 }
@@ -3220,7 +3239,7 @@ RELEASE_ARCHIVE=plesk-server-report.tar.gz
 RELEASE_NAMESPACE=plesk-server-report
 RELEASE_SIGNER=cmelius
 RELEASE_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICebnR5D3K3QzXiwsS6e1Uk3o7zixjnr/Ba5zxBxt5Ca"   # the maintainer's public key; empty: no --self-update
-SU_YES=0; SU_ROLLBACK=0
+SU_YES=0; SU_ROLLBACK=0; SU_MAJOR=0
 su_fail() { echo "self-update: $*" >&2; [[ -n ${SU_WORK:-} ]] && rm -rf "$SU_WORK"; return 1; }
 su_ask() {   # su_ask QUESTION – yes unless the answer is no; with --yes always yes
   local a
@@ -3271,10 +3290,22 @@ su_verify() {
     su_fail "$RELEASE_ARCHIVE holds something other than plain files and folders – nothing installed"; return 1
   fi
 }
+su_by_hand() { [[ -t 0 || -t 1 ]]; }   # a terminal: started by hand, not by cron
+su_major_note() {   # a newer major version: only a note
+  local other
+  other=$(latest_release)
+  [[ ${other%%.*} =~ ^[0-9]+$ && ${other%%.*} -gt ${VERSION%%.*} ]] || return 0
+  echo "Version $other is available. It is a new major version, which --self-update doesn't install – see README: Updates"
+}
 self_update() {
   local latest d new="$PSR_HOME.new" v
   is_root || { su_fail "run it as root"; return 1; }
+  su_by_hand || { su_fail "start it by hand in a terminal, not from cron (--yes only skips the question)"; return 1; }
   su_home || return 1
+  if (( SU_MAJOR )); then
+    echo "--self-update --major: switching to version $(( ${VERSION%%.*} + 1 )) is not available in this version yet – see README: Updates"
+    su_major_note; return 0
+  fi
   if (( SU_ROLLBACK )); then
     [[ -f $PSR_HOME.old/plesk-server-report.sh ]] || { su_fail "there is no previous version ($PSR_HOME.old)"; return 1; }
     v=$(bash "$PSR_HOME.old/plesk-server-report.sh" --version 2>/dev/null)
@@ -3286,10 +3317,11 @@ self_update() {
     echo "back to ${v#plesk-server-report }; version $VERSION is kept in $PSR_HOME.old (--self-update --rollback swaps again)"
     return 0
   fi
-  latest=$(latest_release)
+  latest=$(latest_release_in_major "${VERSION%%.*}")
   [[ $latest =~ ^[0-9]+(\.[0-9]+)*$ ]] || { su_fail "no answer from GitHub about the latest release"; return 1; }
   if [[ $(printf '%s\n%s\n' "$VERSION" "$latest" | sort -V | tail -1) == "$VERSION" ]]; then
-    echo "version $VERSION is up to date (latest release: $latest)"; return 0
+    echo "version $VERSION is up to date (latest ${VERSION%%.*}.x release: $latest)"
+    su_major_note; return 0
   fi
   echo "version $latest is available (installed: $VERSION)"
   [[ -n $RELEASE_KEY ]] || { su_fail "this version has no release key built in – update by hand, see README: Updates"; return 1; }
@@ -3324,6 +3356,7 @@ self_update() {
   rm -rf "$d"
   echo "installed version $latest. The previous version $VERSION is kept in $PSR_HOME.old (--self-update --rollback goes back)."
   echo "Test it with your configuration: plesk-server-report.sh --only services"
+  su_major_note
 }
 
 usage() {
@@ -3349,6 +3382,7 @@ parse_args() {
       --self-update) SELF_UPDATE=1 ;;
       --rollback) SU_ROLLBACK=1 ;;
       --yes) SU_YES=1 ;;
+      --major) SU_MAJOR=1 ;;
       --state-readme) state_readme; exit 0 ;;
       --test-mail) TEST_MAIL=1 ;;
       --show-state) SHOW_STATE=1 ;;
@@ -3362,6 +3396,7 @@ parse_args() {
     shift
   done
   if (( (SU_ROLLBACK || SU_YES) && ! SELF_UPDATE )); then echo "--rollback and --yes go with --self-update" >&2; exit 2; fi
+  if (( SU_MAJOR && ! SELF_UPDATE )); then echo "--major goes with --self-update" >&2; exit 2; fi
   if [[ -n $ONLY ]]; then
     local c
     ONLY_MODE=1; UPLOAD=0

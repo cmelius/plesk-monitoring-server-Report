@@ -92,4 +92,5 @@ a normal run, not with `--only`. Delete a file and that plugin starts from scrat
 | `running` | exists only while a run is active: `PID start now step exit-code`. If it is still there at the next run, that run did not finish, and the report says so (alert "Script: …"). |
 | `upload_failed` | time of the first failed upload, and rclone's last error message | while the upload to `REMOTE` fails, every report raises an alert (local report, mail). Deleted by the next successful upload. |
 | `tmp.*` | temporary files of the current run, removed at its end. |
+| `plesk-server-report.sh.old` | the previous script, kept by `--self-update` of version 1.x. Since 2.0 the previous version is kept as the folder `/usr/local/lib/plesk-server-report.old` (`--self-update --rollback`); this file is no longer used – safe to delete. |
 | `README.txt` | this description. |

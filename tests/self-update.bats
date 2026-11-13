@@ -12,7 +12,10 @@ setup() {
   cp -r "$REPO/plesk-server-report.sh" "$REPO/lib" "$REPO/plugins" "$REPO/CHANGELOG.md" "$I/"
   PSR_HOME=$I; RELEASE_URL="file://$R"; SU_YES=0; SU_ROLLBACK=0
   is_root() { return 0; }
-  latest_release() { echo 9.9.9; }
+  su_by_hand() { return 0; }
+  LATEST=9.9.9; OVERALL=9.9.9
+  latest_release_in_major() { echo "$LATEST"; }   # the newest release of this major version
+  latest_release() { echo "$OVERALL"; }           # the newest of all
 }
 
 # release [VERSION] – builds the release 9.9.9 (the files of this checkout, with that version) in $R
@@ -76,12 +79,37 @@ untouched() { [ ! -e "$I.old" ] && [ ! -e "$I.new" ] && grep -q "^VERSION=$VERSI
 }
 
 @test "up to date: nothing downloaded" {
-  latest_release() { echo "$VERSION"; }
+  LATEST=$VERSION; OVERALL=$VERSION
   run self_update
-  [ "$status" -eq 0 ]; [[ $output == *"is up to date"* ]]
-  latest_release() { echo ""; }
+  [ "$status" -eq 0 ]; [[ $output == *"is up to date (latest ${VERSION%%.*}.x release: $VERSION)"* && $output != *"major"* ]]
+  LATEST=""
   run self_update
   [ "$status" -eq 1 ]; [[ $output == *"no answer from GitHub"* ]]
+}
+
+@test "a new major version is only named; --major is not available yet" {
+  LATEST=$VERSION; OVERALL=$(( ${VERSION%%.*} + 1 )).0.0
+  run self_update
+  [ "$status" -eq 0 ]; [[ $output == *"Version $OVERALL is available. It is a new major version, which --self-update doesn't install"* ]]
+  untouched
+  SU_MAJOR=1 run self_update
+  [ "$status" -eq 0 ]; [[ $output == *"switching to version $(( ${VERSION%%.*} + 1 )) is not available in this version yet"* ]]
+  untouched
+}
+
+@test "not from cron: without a terminal it refuses, also with --yes" {
+  su_by_hand() { return 1; }
+  SU_YES=1 run self_update
+  [ "$status" -eq 1 ]; [[ $output == *"start it by hand in a terminal"* ]]
+  untouched
+}
+
+@test "--yes, --rollback and --major only with --self-update" {
+  local o
+  for o in --yes --rollback --major; do
+    run bash "$REPO/plesk-server-report.sh" "$o"
+    [ "$status" -eq 2 ]; [[ $output == *"go"*"with --self-update"* ]]
+  done
 }
 
 @test "a good release is installed, the old one kept; --rollback swaps back and forth" {

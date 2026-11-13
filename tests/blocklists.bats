@@ -20,7 +20,7 @@ setup() {
 
 @test "clean, listed, refused and silent lists are told apart" {
   run report
-  [[ $output == *"DNS blocklists for 1.2.3.4: answers.example:clean listed.example:LISTED(127.0.0.3) refuses.example:query-refused silent.example:no-answer (queried via system resolver)"* ]]
+  [[ $output == *"DNS blocklists for 1.2.3.4 (all queried via system resolver): answers.example:clean listed.example:LISTED(127.0.0.3) refuses.example:query-refused silent.example:no-answer"* ]]
 }
 
 @test "only a listing raises an alert" {
@@ -42,7 +42,7 @@ setup() {
   DNSBL_LISTS="answers.example listed.example"
   check_mail || true
   run report
-  [[ $output == *"answers.example:clean listed.example:LISTED(127.0.0.3) (queried via 127.0.0.1)"* ]]
+  [[ $output == *"(all queried via 127.0.0.1): answers.example:clean listed.example:LISTED(127.0.0.3)"* ]]
 }
 
 @test "no resolver on 127.0.0.1: the system resolver" {
@@ -51,5 +51,5 @@ setup() {
   DNSBL_LISTS="answers.example"
   check_mail || true
   run report
-  [[ $output == *"answers.example:clean (queried via system resolver)"* ]]
+  [[ $output == *"(all queried via system resolver): answers.example:clean"* ]]
 }
