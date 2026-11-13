@@ -9,8 +9,9 @@ setup() {
   W="$BATS_TEST_TMPDIR/www"; mkdir -p "$W/d1" "$W/d2/sub"
   cp -r "$FIX/htaccess/prepend" "$FIX/htaccess/normal" "$W/d1/"
   cp -r "$FIX/htaccess/campaign" "$W/d2/sub/"
-  # shellcheck disable=SC2016  # PHP, not shell
-  printf '<?php eval(base64_decode($_POST["x"])); ?>\n' >"$W/d2/sub/x.php"
+  # a backdoor one-liner, put together only here: as a line in this file, virus scanners take the
+  # repository (and every download of it) for the backdoor itself
+  printf '<?php %s(%s($%s["x"])); ?>\n' "ev""al" "base64_""decode" "_PO""ST" >"$W/d2/sub/x.php"
   # git keeps no file times: everything was changed two days ago (the inode change time is
   # now, so a test that needs the files to be older than a scan waits a second: wait_)
   find "$W" -exec touch -d '-2 days' {} +
