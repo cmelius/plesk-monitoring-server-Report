@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
-# write_summary from the hourly reports of a real server (anonymized): 26 reports, of which 19
-# are within the 24 hours before the newest. summary-real.txt is the summary the server wrote
+# write_summary from the hourly reports of a real server (anonymized): 21 reports, of which 19
+# are within the 24 hours before the newest (one of the others exactly 24 hours before). summary-real.txt is the summary the server wrote
 # (anonymized); summary-expected.txt is what this version writes from the same reports.
 
 load helper
