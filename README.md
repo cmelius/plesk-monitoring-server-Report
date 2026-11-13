@@ -310,11 +310,13 @@ HTTPS (HSTS and http→https redirect; domains with a valid certificate that poi
   no redirect from http to https: lawfirm.example
   security can be improved (Plesk: Websites & Domains → SSL/TLS Certificates → HSTS / Redirect from http to https)
   23 domain(s) checked
+  DNS queried via 1.1.1.1
 
 Server DNS (reverse DNS / HELO):
   203.0.113.10 → host.example.com: ok (forward-confirmed)
   Postfix HELO name: host.example.com (resolves to this server, matches PTR)
   IPv6: not used for mail (CHECK_IPV6=auto)
+  DNS queried via 1.1.1.1
 
 Mail server certificates for host.example.com:
   port 25: name ok, valid 61 more days
@@ -326,7 +328,7 @@ Mail server certificates for host.example.com:
 Domain DNS (points here? CAA, DNSSEC, domain blocklists):
   moved.example: website points elsewhere (192.0.2.77, NL, Example Hosting B.V. [datacenter]) – moved? CDN?
   39 domain(s) checked, findings listed above
-  domain blocklists queried via 127.0.0.1
+  DNS queried via 1.1.1.1, domain blocklists via 127.0.0.1
 
 Exposed files in document roots (.env, .git, dumps, backups, config copies, info/admin tools):
   shop.example/.env – PUBLICLY REACHABLE (HTTP 200)
@@ -720,7 +722,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 | `MAILAUTH_CHECK` | 1 | daily SPF/DKIM/DMARC check, 0 = off (needs `dig`, package `bind9-dnsutils`) |
 | `MAILAUTH_SHOW_ALL` | 0 | 1 = list every domain, 0 = only domains with findings |
 | `MAILAUTH_IGNORE_DOMAINS` | empty | space-separated domains to skip |
-| `MAILAUTH_RESOLVER` | `1.1.1.1` | DNS resolver for the SPF/DKIM/DMARC check, `""` = system resolver (see notes) |
+| `MAILAUTH_RESOLVER` | `1.1.1.1` | DNS resolver for the daily DNS checks (SPF/DKIM/DMARC, server and domain DNS, HTTPS), `""` = system resolver (see notes); blocklists use `BLOCKLIST_RESOLVER` |
 | `DKIM_KEY_DIR` / `DKIM_SELECTOR` | `/etc/domainkeys` / `default` | where Plesk keeps the DKIM private keys (`<dir>/<domain>/<selector>`) and the selector it signs with |
 | `MAILNAMES_DIR` | `/var/qmail/mailnames` | Plesk mailbox directory (`<dir>/<domain>/<mailbox>`) |
 | `SERVER_DNS_CHECK` | 1 | PTR / HELO / IPv6 check, 0 = off |

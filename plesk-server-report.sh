@@ -139,7 +139,7 @@ MAILAUTH_IGNORE_DOMAINS=""    # space-separated domains to skip
 # own hostname or for zones that exist in Plesk but are hosted elsewhere. "" = system resolver
 BLOCKLIST_RESOLVER=""         # DNS resolver for blocklist lookups (IP and domain blocklists). Empty: 127.0.0.1 if a
                               # resolver answers there (Plesk: BIND), else the system resolver; "system" forces that
-MAILAUTH_RESOLVER="1.1.1.1"
+MAILAUTH_RESOLVER="1.1.1.1"     # daily DNS checks: mail authentication, server and domain DNS, HTTPS; "" = system resolver
 MAILAUTH_SHOW_ALL=0           # 1 = list every domain, 0 = only domains with findings
 DKIM_KEY_DIR=/etc/domainkeys  # Plesk DKIM private keys: <dir>/<domain>/<selector>
 DKIM_SELECTOR=default         # Plesk signs with selector "default"
@@ -2007,6 +2007,7 @@ check_https() {   # HSTS header and http→https redirect on domains with a vali
     echo "  $n domain(s) checked"
   fi
   (( skip )) && echo "  $skip domain(s) with a certificate point elsewhere and were skipped"
+  echo "  DNS queried via ${MAILAUTH_RESOLVER:-system resolver}"
   return 0
 }
 
@@ -2045,6 +2046,7 @@ check_serverdns() {   # PTR of the server IP, HELO name, IPv6 reverse DNS
   else
     echo "  IPv6: not used for mail (CHECK_IPV6=$CHECK_IPV6)"
   fi
+  echo "  DNS queried via ${MAILAUTH_RESOLVER:-system resolver}"
 }
 
 check_mailtls() {   # certificate of the mail server on the mail ports
@@ -2118,7 +2120,8 @@ check_domaindns() {   # still pointing here?, CAA vs. Let's Encrypt, DNSSEC, dom
   echo ""; echo "Domain DNS (points here? CAA, DNSSEC, domain blocklists):"
   [[ -n $out ]] && printf '%s' "$out"
   echo "  $n domain(s) checked, findings listed above"
-  [[ -n ${DOMAIN_BLOCKLISTS// /} ]] && { bl_init; echo "  domain blocklists queried via $BL_VIA"; }
+  if [[ -n ${DOMAIN_BLOCKLISTS// /} ]]; then bl_init; echo "  DNS queried via ${MAILAUTH_RESOLVER:-system resolver}, domain blocklists via $BL_VIA"
+  else echo "  DNS queried via ${MAILAUTH_RESOLVER:-system resolver}"; fi
   [[ -n ${BL_REFUSED:-} ]] && echo "  note: some blocklists refused queries from this resolver:$(tr ' ' '\n' <<<"$BL_REFUSED" | sort -u | xargs -r echo ' ')"
   return 0
 }
