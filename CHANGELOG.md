@@ -2,6 +2,11 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
+## [1.11.1] – not yet released (on `main`)
+
+### Fixed
+- **Blocklists are asked through the server's own resolver.** All blocklist lookups (IP and domain) went through the system resolver, which often forwards to the hosting provider's DNS – a shared resolver that Spamhaus and URIBL refuse, so results could be `query-refused` (or, before 1.11.0, a false `clean`). Now `127.0.0.1` is asked when a resolver answers there (on Plesk: BIND), else the system resolver as before; new setting `BLOCKLIST_RESOLVER`. The report says which resolver was asked.
+
 ## [1.11.0] – 2026-11-13
 
 ### Added

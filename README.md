@@ -151,7 +151,7 @@ Outgoing deliveries per receiving mail server (provider or MX host; sent / defer
 Watched recipient domain invoices.example.com: 3 sent, 0 deferred, 0 bounced
 Spam filter: all mails scanned – none above the size limit (limit 3.0 MB = 3145728 bytes, Plesk: SA_MAX_MAIL_SIZE in /etc/psa/psa.conf)
 Spam filter: blocklist lookups answered (412 mail(s) scanned)
-DNS blocklists for 203.0.113.10: zen.spamhaus.org:clean bl.spamcop.net:clean b.barracudacentral.org:clean psbl.surriel.com:clean
+DNS blocklists for 203.0.113.10: zen.spamhaus.org:clean bl.spamcop.net:clean b.barracudacentral.org:clean psbl.surriel.com:clean (queried via 127.0.0.1)
 
 Top senders (total recipients):
      700  support@bank-secure.example
@@ -326,6 +326,7 @@ Mail server certificates for host.example.com:
 Domain DNS (points here? CAA, DNSSEC, domain blocklists):
   moved.example: website points elsewhere (192.0.2.77, NL, Example Hosting B.V. [datacenter]) – moved? CDN?
   39 domain(s) checked, findings listed above
+  domain blocklists queried via 127.0.0.1
 
 Exposed files in document roots (.env, .git, dumps, backups, config copies, info/admin tools):
   shop.example/.env – PUBLICLY REACHABLE (HTTP 200)
@@ -727,7 +728,8 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 | `MAIL_TLS_NAME` | server host name | the host name your customers enter in their mail clients. The mail certificate must be valid for it |
 | `MAIL_TLS_PORTS` | `25 465 587 993 995` | ports whose certificate is checked (25/587 via STARTTLS, 143/110 also possible) |
 | `DOMAIN_DNS_CHECK` | 1 | per-domain A/AAAA, CAA, DNSSEC and domain-blocklist check, 0 = off |
-| `DOMAIN_BLOCKLISTS` | `dbl.spamhaus.org multi.surbl.org multi.uribl.com` | domain blocklists, queried via the local resolver |
+| `DOMAIN_BLOCKLISTS` | `dbl.spamhaus.org multi.surbl.org multi.uribl.com` | domain blocklists, queried like the IP blocklists (`BLOCKLIST_RESOLVER`) |
+| `BLOCKLIST_RESOLVER` | auto | DNS resolver for all blocklist lookups: `127.0.0.1` if a resolver answers there (on Plesk: BIND), else the system resolver; an IP, or `system` to force the system resolver |
 | `HTTPS_CHECK` | 1 | daily HSTS and http→https redirect check, 0 = off |
 | `ATTACK_STATS` | 1 | hourly attack-pattern, sensitive-file, traffic-peak and ModSecurity statistics |
 | `WARN_REQ_PER_MIN` | 600 | alert when a domain's busiest minute exceeds this many requests |
@@ -808,7 +810,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 - **Plesk's own log** (`PLESK_ERROR_LOG`, default `/var/log/plesk/panel.log`, new section `PLESK PANEL LOG`): failed panel logins with login name and top IPs, and failed automatic certificate renewals with the reason from Let's Encrypt. Plesk renews 30 days before expiry and retries daily, so a failure shows up weeks before the certificate check warns. Typical reasons: the domain points to another server or doesn't exist any more (remove it or its certificate from Plesk), or the challenge URL `/.well-known/acme-challenge/` is blocked or redirected. Without Plesk the section says the log was not found.
 - **Deliveries per provider:** the report lists outgoing deliveries grouped by the receiving provider, recognized by its MX host (Microsoft, Google, Apple iCloud, GMX/web.de/IONOS, T-Online, Yahoo/AOL, Strato; others by the MX domain, e.g. a company's spam gateway). A provider with many deferrals or bounces shows a delivery problem even when its rejection text isn't one the script knows. Deferrals are counted per delivery attempt, so one mail retried five times counts five times. The table is grouped by the receiving mail server, not by the recipient's domain: mail to a spammer's forged domain (a bounce or a delivery confirmation) shows up under the name of its usually unreachable mail server, often a random-looking domain.
 - **Spam filter size limit:** SpamAssassin skips mails larger than its limit (Plesk default 256 KB, `SA_MAX_MAIL_SIZE` in `/etc/psa/psa.conf`). Spam waves with large image attachments use exactly that gap. The report counts the skipped mails (`Spam filter: N mail(s) not scanned`); if the number is high, raise the limit (e.g. to `3145728` = 3 MiB).
-- **IP blocklists** (`DNSBL_LISTS`) are asked through the server's resolver. Before the server IP, the script asks for each list's test entry `127.0.0.2`, which every list must answer as listed (RFC 5782). So the report tells three things apart: `clean` (the list answers, the IP is not on it), `query-refused` (the list says it refuses this resolver – Spamhaus does that for large public resolvers) and `no-answer` (the list doesn't answer at all). The last two mean "unknown", not "clean". Use a local resolver for reliable results.
+- **IP blocklists** (`DNSBL_LISTS`) are asked through the server's own resolver on `127.0.0.1` if one answers there – on Plesk that is BIND –, else through the system resolver (`BLOCKLIST_RESOLVER`); the report says which. Blocklists refuse large shared resolvers, and the system resolver often forwards to the hosting provider's DNS: on the author's server, URIBL refused the provider's resolver from one day to the next. Before the server IP, the script asks for each list's test entry `127.0.0.2`, which every list must answer as listed (RFC 5782). So the report tells three things apart: `clean` (the list answers, the IP is not on it), `query-refused` (the list says it refuses this resolver – Spamhaus does that for large public resolvers) and `no-answer` (the list doesn't answer at all). The last two mean "unknown", not "clean".
   - **UCEPROTECT** is not in the default list, but some receivers use it. To check it as well, add Level 1 (single IPs): `DNSBL_LISTS="zen.spamhaus.org bl.spamcop.net b.barracudacentral.org psbl.surriel.com dnsbl-1.uceprotect.net"`. Levels 2 and 3 list whole provider networks and would alert for other customers' spam.
 - **Domain blocklists** (`DOMAIN_BLOCKLISTS`: Spamhaus DBL, SURBL, URIBL) list domains seen in spam and phishing – for a hosted domain usually a hacked website. A refused query (each list has its own answer for it) is listed as a note, not as a finding.
 - **Plesk panel logins:** Plesk writes no login events to `panel.log` (it only contains errors), so logins are read from the panel's access log `/var/log/plesk/httpsd_access_log` (Plesk 18 on Debian, Ubuntu and RHEL-based systems). A login is a `POST /login_up.php`; only a successful one is followed by a panel page (`/admin/`, `/smb/` or `/cp/`) with `login_up.php` as referrer. Only the standard access-log fields are used (IP, request, status, referrer), so older log formats work too; logins through a domain (`https://example.com/login.php`, proxied from `127.0.0.1`) are attributed to the real client IP when Plesk logs it. The access log doesn't contain the user name, so the report shows the IP only. Logins that did not reach a panel page are counted as failed attempts. Logins via the Plesk API or "Log in as customer" are not covered. SSH logins are read from `auth.log`/`secure` or the journal.
