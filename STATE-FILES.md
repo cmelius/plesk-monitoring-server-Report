@@ -60,9 +60,8 @@ is always reported). Processes are not stored – they are checked live in every
 | File | Content | Used for |
 |---|---|---|
 | `last_run` | Unix time of the last normal run | everything "since the last run" (journal, web logs). |
-| `offsets/` | one file per log, named after a hash of its path; content `inode bytes-read path` | the script reads only the lines added since the last run. The inode identifies the file after a rotation (`maillog` → `maillog.processed`), so the rest of the old file is still read. Delete a file here and that log is read again from its last 20,000 lines. |
+| `offsets/` | one file per log, named after a hash of its path (for a plugin: of its name and the path, so a log the script reads too is read in full by both); content `inode bytes-read path`, for a plugin followed by `(plugin NAME)` | the script reads only the lines added since the last run. The inode identifies the file after a rotation (`maillog` → `maillog.processed`), so the rest of the old file is still read. Delete a file here and that log is read again from its last 20,000 lines. |
 | `journal_since` | Unix time | position in the systemd journal (only if there is no mail log file). |
-| `last_scan` | empty; its modification time counts | new PHP files in upload folders are files changed after this – by file date or by inode change time, so a file with its date set back is found too. |
 | `webshell_scan` | empty; its modification time counts | the daily scan for suspicious code looks only at PHP files changed since then (file date or inode change time). |
 
 ## Checks that are plugins (`plugins/`)
@@ -73,6 +72,7 @@ a normal run, not with `--only`. Delete a file and that plugin starts from scrat
 | File | Content (one entry per line) | Used for |
 |---|---|---|
 | `plugins/php-config/state` | `last_scan` and the Unix time (with fractions of a second) of the last complete daily scan | the daily scan of `.htaccess`, `.user.ini` and `php.ini` in the document roots looks only at files changed since then (file date or inode change time). Without it, the scan checks all of them, whatever their date – a backdoor may be older than the script. Taken over from `webshell_scan` of version 1.x. |
+| `plugins/wordpress/state` | `last_scan` and the Unix time (with fractions of a second) of the last complete scan of the upload folders | new PHP files in `wp-content/uploads` are files changed after this – by file date or by inode change time, so a file with its date set back is found too. Without it, all PHP files there are listed (except `index.php`). Taken over from `last_scan` of version 1.x. |
 
 ## Daily checks
 

@@ -1,7 +1,7 @@
 # Plugin system – concept
 
 Status: concept for a later major version (2.0). Steps 1 to 4 of the order below are
-built (framework, `panel`, `backups`, `webmail`, `php-config`; see "State of the code"). This branch
+built (framework, `panel`, `backups`, `webmail`, `php-config`, `wordpress`; see "State of the code"). This branch
 (`feature/plugin-system`) carries the work; `main` continues with the 1.x releases
 and is merged into this branch from time to time.
 
@@ -228,15 +228,16 @@ are the same.
 
 ## Open
 
-- Runtime of step 5: how much longer does a run take when `wordpress` reads the access
-  logs a second time? Measure first, then decide whether one stream should be shared.
+- (decided) Runtime of step 5: on the maintainer's server all access logs together are
+  1.2 MB, read in 5 ms; `--only web` takes 1.5 s, almost all of it fixed costs. `wordpress`
+  reads the logs a second time, with positions of its own; no shared stream.
 
 ## State of the code
 
-Steps 1 to 4 are built: `lib/plugin-lib.sh` (runs one plugin), `plugins/panel.sh`,
+Steps 1 to 5 are built: `lib/plugin-lib.sh` (runs one plugin), `plugins/panel.sh`,
 `plugins/backups.sh` (no log on stdin; `PLUGIN_READS` names the directories),
 `plugins/webmail.sh` (several logs), `plugins/php-config.sh` (daily, context `domains`,
-state), the loader
+state), `plugins/wordpress.sh` (the logs of every domain, own section), the loader
 and the protocol in the main script (`run_plugin`), `tools/update-plugin-sums.sh`, and
 the tests in `tests/plugins.bats` and one file per plugin (with
 parity tests against the old functions in `tests/legacy/`). Where it differs from the text above, for now:
@@ -257,8 +258,18 @@ parity tests against the old functions in `tests/legacy/`). Where it differs fro
   they are. A section of its own can follow with 2.0 if wanted.
 - A plugin's name stands in `HOURLY_CHECKS` like every check; a name without a
   `check_<name>` function is a plugin.
-- Offsets are still kept per log path. The key per plugin comes with step 5, when two
-  readers share a log.
+- Offsets: a plugin's key is a hash of its name and the path (`new_lines FILE PLUGIN`),
+  the main script's stays a hash of the path. Before the checks of a normal run,
+  `plugin_seed_offsets` gives a plugin without a position the one the main script stored
+  in the run before – so the update from 1.x neither repeats nor misses lines, also for
+  the access logs, which `web` keeps reading.
+- `PLUGIN_LOGS` may contain `*` as a whole part of a path (`$VHOST_LOGS/*/logs/access_log`);
+  each match is a log of its own on stdin, numbered by its entry in `PLUGIN_LOGS`.
+- `wordpress` has the section `WORDPRESS (since last run)` after `WEB`, which loses the
+  column *login POSTs*; the section `WEBROOTS` is gone. `summary.txt` reads both layouts.
+  Successful logins of a domain are listed in IP order (before: the order awk kept them).
+  Its scan of the upload folders gets two thirds of the time limit and stores no new
+  `last_scan` when it is cut off.
 - Daily plugins print their own heading (`PLUGIN_SECTION` empty), their time limit is
   three times `FIND_TIMEOUT` (one scan over all document roots instead of one `find`
   per domain), their alerts go to the daily alerts.

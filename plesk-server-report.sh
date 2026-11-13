@@ -197,7 +197,7 @@ CONF=/etc/plesk-server-report.conf
 
 # Check names in report order. Hourly checks analyse the log lines since the previous run,
 # daily checks run once a day and are cached in $STATE_DIR/daily.txt.
-HOURLY_CHECKS="mail webmail system fail2ban web uploads logins panel persistence services backups"
+HOURLY_CHECKS="mail webmail system fail2ban web wordpress logins panel persistence services backups"
 DAILY_CHECKS="updates certificates https serverdns mailtls domaindns exposed webshell php-config mailauth mailboxes"
 
 # Plugins: checks for specific software, each a file of its own in plugins/ next to this script,
@@ -218,7 +218,8 @@ PLUGIN_SUMS='c2a7e353d70e1f00e8e97ee5106a51f90854c98a014b69ec6ce2505551b8c377  l
 f9d83e6d25384577348e8f94c74c9c1ccc853f2c69513cb13d7964c98dde3e8d  plugins/backups.sh
 abab3680694f294bac2d2dc5fc52f4cc8090644ce27075cb0fbb35eea64c643a  plugins/panel.sh
 62c05f2ba28f2da961ed0181df78ecd800a9e477e3d10f46fb3432d83d660825  plugins/php-config.sh
-27ab6638bb38af2c4be885dc8d0c74b83cb635fb2e26b313c2b7d8cdd83dd317  plugins/webmail.sh'
+27ab6638bb38af2c4be885dc8d0c74b83cb635fb2e26b313c2b7d8cdd83dd317  plugins/webmail.sh
+706474b46927855636382affa1f23f474562e7cea1cecc5d40c7707e06af787e  plugins/wordpress.sh'
 # <<< plugin sums
 
 # =============================================================================
@@ -367,11 +368,14 @@ log_clean() { LC_ALL=C tr '\t' ' ' | LC_ALL=C tr -d '\000-\010\013-\037\177'; }
 # Handles log rotation: the rest of the rotated file is read as well, found by its inode
 # whatever it is called now (FILE.1, FILE.processed, FILE-date).
 # At most MAX_LOG_MB are read (the newest part); more is reported as a note.
+# new_lines FILE [PLUGIN] – a plugin keeps a position of its own (offset_key), so a log that
+# the main script reads too (the access logs: web and wordpress) is read in full by both.
 new_lines() { _new_lines "$@" | log_clean; }
+offset_key() { printf '%s' "${2:+$2:}$1" | md5sum | cut -c1-16; }
 _new_lines() {
-  local f=$1 key st ino size off=0 oino="" ooff=0 rest=0 rsize rf="" max=$(( MAX_LOG_MB * 1048576 ))
+  local f=$1 key st ino size off=0 oino="" ooff=0 rest=0 rsize rf="" max=$(( MAX_LOG_MB * 1048576 )) who=${2:+ (plugin $2)}
   [[ -r $f ]] || return 0
-  key=$(printf '%s' "$f" | md5sum | cut -c1-16)
+  key=$(offset_key "$f" "${2:-}")
   st="$STATE_DIR/offsets/$key"
   ino=$(stat -c %i "$f"); size=$(stat -c %s "$f")
   if [[ -f $st ]]; then
@@ -384,7 +388,7 @@ _new_lines() {
   else
     # first run: only the last 20,000 lines to keep it fast
     tail -n 20000 "$f" | head -c "$size"
-    can_write_state && echo "$ino $size $f" >"$st"
+    can_write_state && echo "$ino $size $f$who" >"$st"
     return 0
   fi
   if (( max > 0 && rest + size - off > max )); then
@@ -393,7 +397,7 @@ _new_lines() {
   fi
   (( rest > 0 )) && tail -c "$rest" "$rf"
   tail -c +"$((off + 1))" "$f" | head -c "$((size - off))"
-  can_write_state && echo "$ino $size $f" >"$st"
+  can_write_state && echo "$ino $size $f$who" >"$st"
   return 0
 }
 
@@ -1124,8 +1128,8 @@ check_fail2ban() {
   fi
 }
 
-check_web() {   # requests, 5xx, WordPress logins, PHP errors, attack patterns, peaks, ModSecurity
-  local dir dom lf n e5 lp top wl ws xr xb nl lt succ brute sline tok sip xnote ex
+check_web() {   # requests, 5xx, PHP errors, attack patterns, peaks, ModSecurity (WordPress: plugins/wordpress.sh)
+  local dir dom lf n e5 ex
   local sq sq2 tr tr2 rc rc2 xs xs2 sf sf2 sfl pk pkm dp dn root f h b
   section "WEB (since last run)"
   if [[ -z $VHOST_LOGS || ! -d $VHOST_LOGS ]]; then
@@ -1142,13 +1146,6 @@ check_web() {   # requests, 5xx, WordPress logins, PHP errors, attack patterns, 
     done | awk -v d="$dom" '
       { n++; ip[$1]++ }
       $9 ~ /^5[0-9][0-9]$/ { e5++ }
-      # WordPress logins: a successful wp-login.php POST answers 302 (redirect to
-      # wp-admin), a failed one 200. Requests with ?action= (lost password, ...) are ignored.
-      $6 == "\"POST" && $7 ~ /wp-login\.php/ {
-        lp++; wl++; lip[$1]++
-        if ($7 !~ /action=/) { if ($9 == 302) ws[$1]++; else if ($9 == 200) wf[$1]++ }
-      }
-      $6 == "\"POST" && $7 ~ /xmlrpc\.php/ { lp++; xr++; lip[$1]++; if ($9 ~ /^40[0-9]$/) xb++ }
       # ---- attack patterns, sensitive-file probes, traffic peaks, distributed requests
       as {
         u=tolower($7); ok=($9 == 200)
@@ -1170,14 +1167,8 @@ check_web() {   # requests, 5xx, WordPress logins, PHP errors, attack patterns, 
               printf "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\t%d\t%s\t%s\t%d\n", d, sq, sq2, tr, tr2, rc, rc2, xs, xs2, sf, sf2, sfl, pk, pkm, dp, dn >> attf
             }
             if (n) { top=""; m=0; for (i in ip) if (ip[i]>m) { m=ip[i]; top=i }
-                     nl=0; lt="-"; lm=0; for (i in lip) { nl++; if (lip[i]>lm) { lm=lip[i]; lt=i } }
-                     succ=""; nsucc=0; brute=""
-                     for (i in ws) { nsucc+=ws[i]; succ=succ " " i "=" (wf[i]+0)
-                                     if (wf[i] >= bf) brute=brute " " i }
-                     if (succ == "") succ="-"; if (brute == "") brute="-"
-                     printf "%d\t%d\t%d\t%s\t%s (%d)\t%d\t%d\t%d\t%d\t%d\t%s (%d)\t%s\t%s\n",
-                            n, e5+0, lp+0, d, top, m, wl+0, nsucc, xr+0, xb+0, nl, lt, lm, succ, brute } }' \
-      bf="$WARN_LOGIN_BRUTE_FAILS" as="$ATTACK_STATS" attf="$TMP.att" >>"$TMP"
+                     printf "%d\t%d\t%s\t%s (%d)\n", n, e5+0, d, top, m } }' \
+      as="$ATTACK_STATS" attf="$TMP.att" >>"$TMP"
     new_lines "$dir/error_log" | awk -v d="$dom" -v msf="$TMP.modsec" -v scf="$TMP.scan" '
       # A scanner that requests a theme, plugin or wp-admin file directly runs it without WordPress:
       # "Call to undefined function <WordPress core function>()" / undefined constant ABSPATH. Not an
@@ -1196,35 +1187,13 @@ check_web() {   # requests, 5xx, WordPress logins, PHP errors, attack patterns, 
                                                        if (b == "") break; top=top (top==""?"":"; ") b " " rm[b] " ×" c; delete r[b] }
                            printf "%d\t%d\t%s\t%s\n", mb+mw, mb, d, top >> msf } }' >>"$TMP.php"
   done
-  out "requests | 5xx | login POSTs | domain | busiest IP"
-  sort -t$'\t' -k1,1nr "$TMP" | head -10 | awk -F'\t' '{printf "  %7d %5d %6d  %s  %s\n", $1, $2, $3, $4, $5}' >>"$BODY"
-  while IFS=$'\t' read -r n e5 lp dom _; do
+  out "requests | 5xx | domain | busiest IP"
+  sort -t$'\t' -k1,1nr "$TMP" | head -10 | awk -F'\t' '{printf "  %7d %5d  %s  %s\n", $1, $2, $3, $4}' >>"$BODY"
+  while IFS=$'\t' read -r n e5 dom _; do
     ignored_domain "$dom" && continue
     (( e5 > WARN_5XX_PER_DOMAIN )) && alert "Web: $dom returned $e5 server errors (5xx)"
-    (( lp > WARN_LOGIN_POSTS )) && alert "Web: $dom received $lp login attempts (wp-login/xmlrpc)"
   done <"$TMP"
 
-  out ""; out "WordPress login attacks (domains with at least $WARN_LOGIN_DETAIL login POSTs):"
-  while IFS=$'\t' read -r n e5 lp dom top wl ws xr xb nl lt succ brute; do
-    sline=""
-    if [[ $succ != - ]]; then
-      for tok in $succ; do
-        sip=${tok%=*}; geo "$sip"
-        sline+="${sline:+, }$sip${GEO_LABEL:+ ($GEO_LABEL)}, ${tok##*=} failures before"
-        if geo_foreign && ! ignored_domain "$dom"; then
-          alert "Web: $dom – successful WordPress login from $sip ($GEO_LABEL), outside $ALLOWED_COUNTRIES"
-        fi
-      done
-    fi
-    if [[ $brute != - ]] && ! ignored_domain "$dom"; then
-      alert "Web: $dom – successful WordPress login from$brute after repeated failures – brute force succeeded? Check the users of this site"
-    fi
-    (( lp >= WARN_LOGIN_DETAIL )) || continue
-    xnote=""; (( xr > 0 && xb == 0 )) && xnote=" – xmlrpc.php is NOT blocked"
-    printf '  %s: %d POSTs from %d IPs (busiest %s)\n    wp-login.php: %d, successful (302): %d | xmlrpc.php: %d, blocked (4xx): %d%s\n' \
-      "$dom" "$lp" "$nl" "$lt" "$wl" "$ws" "$xr" "$xb" "$xnote" >>"$BODY"
-    [[ $succ != - ]] && printf '    successful wp-login from: %s\n' "$sline" >>"$BODY"
-  done < <(sort -t$'\t' -k3,3nr "$TMP")
   out ""; out "PHP fatal errors (count, domain, first message):"
   sort -t$'\t' -k1,1nr "$TMP.php" | head -8 | while IFS=$'\t' read -r n dom ex; do
     printf '  %5d  %s – %s\n' "$n" "$dom" "$ex" >>"$BODY"
@@ -1272,48 +1241,6 @@ check_web() {   # requests, 5xx, WordPress logins, PHP errors, attack patterns, 
     fi
   fi
   rm -f "$TMP.att" "$TMP.modsec" "$TMP.scan"
-}
-
-check_uploads() {   # new PHP files in wp-content/uploads
-  local SCAN_STAMP up CNT nto
-  section "WEBROOTS: PHP files in upload folders"
-  if [[ -z $VHOST_LOGS || ! -d $VHOST_LOGS ]]; then
-    out "  skipped – VHOST_LOGS not found"
-    note "web: log directory VHOST_LOGS=\"$VHOST_LOGS\" not found – web figures are 0"
-    return 0
-  fi
-  SCAN_STAMP="$STATE_DIR/last_scan"
-  nto=$(timeouts_seen)
-  can_write_state && touch "$SCAN_STAMP.new"   # remember the time before scanning
-  while IFS= read -r up; do
-    if [[ -f $SCAN_STAMP ]]; then
-      # changed since the last scan – by file date (mtime) OR by inode change time (ctime): malware
-      # sets the file date back (PHP touch()) to look old; the change time can't be set by a user
-      T "$FIND_TIMEOUT" find "$up" -type f \( -iname '*.php' -o -iname '*.php[0-9]' -o -iname '*.phtml' -o -iname '*.phar' \) \( -newer "$SCAN_STAMP" -o -cnewer "$SCAN_STAMP" \) 2>/dev/null
-    else
-      T "$FIND_TIMEOUT" find "$up" -type f \( -iname '*.php' -o -iname '*.php[0-9]' -o -iname '*.phtml' -o -iname '*.phar' \) ! -name 'index.php' 2>/dev/null
-    fi
-  done < <(T "$FIND_TIMEOUT" find "$(dirname "$VHOST_LOGS")" -mindepth 2 -maxdepth 7 -type d -path '*/wp-content/uploads' ! -path '*/system/*' 2>/dev/null) |
-    grep -vE "$UPLOADS_PHP_IGNORE" >"$TMP"
-  CNT=$(wc -l <"$TMP")
-  if [[ -f $SCAN_STAMP ]]; then
-    out "New since last run: $CNT"
-    (( CNT > 0 )) && alert "Web: $CNT new PHP file(s) in wp-content/uploads – possible malware"
-  else
-    out "First run – existing PHP files (excluding index.php): $CNT"
-    (( CNT > 0 )) && alert "Web: $CNT PHP file(s) found in wp-content/uploads – check whether legitimate"
-  fi
-  local st=0 fm
-  [[ -f $SCAN_STAMP ]] && st=$(stat -c %Y "$SCAN_STAMP")
-  head -15 "$TMP" | while IFS= read -r up; do
-    fm=$(stat -c %Y "$up" 2>/dev/null || echo 0)
-    if (( st > 0 && fm > 0 && fm < st )); then     # found by its change time only
-      printf '  %s  (file date %s is older than its last change – set back, or the file was moved/its permissions changed)\n' "$up" "$(date -d "@$fm" +%F)" >>"$BODY"
-    else printf '  %s\n' "$up" >>"$BODY"; fi
-  done
-  # after a timeout the scan was incomplete: keep the old stamp, so the next run looks again
-  if [[ $(timeouts_seen) == "$nto" ]]; then can_write_state && mv "$SCAN_STAMP.new" "$SCAN_STAMP"; fi
-  return 0
 }
 
 # known_login_ips: "IP last-seen-epoch" per line (older versions wrote only "IP").
@@ -2208,7 +2135,8 @@ plugin_fetch() {
 # the contract; on failure the reason is in PLUGIN_ERR.
 declare -gA PH=()
 plugin_header() {
-  local l k v w re='^[A-Za-z0-9 ._:/@,&()$+-]*$'
+  local l k v w re='^[A-Za-z0-9 ._:/@,&()$+*-]*$'
+  local -a ws=()
   PH=(); PLUGIN_ERR=""
   while IFS= read -r l; do
     [[ $l =~ ^[[:space:]]*(#.*)?$ ]] && continue
@@ -2218,7 +2146,7 @@ plugin_header() {
       PLUGIN_NAME|PLUGIN_API|PLUGIN_SCHEDULE|PLUGIN_SECTION|PLUGIN_SETTINGS|PLUGIN_LOGS|PLUGIN_READS|PLUGIN_INPUTS|PLUGIN_OS|PLUGIN_MAINTAINER) ;;
       *) PLUGIN_ERR="header: unknown field $k"; return 1 ;;
     esac
-    if ! [[ $v =~ $re ]] || [[ $v == *\$\(* ]] || [[ $k != PLUGIN_LOGS && $v == *\$* ]]; then
+    if ! [[ $v =~ $re ]] || [[ $v == *\$\(* ]] || [[ $k != PLUGIN_LOGS && $v == *[\$*]* ]]; then
       PLUGIN_ERR="header: $k has a value that is not plain text"; return 1
     fi
     PH[$k]=$v
@@ -2239,11 +2167,14 @@ plugin_header() {
   for w in ${PH[PLUGIN_SETTINGS]:-}; do
     if ! [[ $w =~ ^[A-Z][A-Z0-9_]*$ ]]; then PLUGIN_ERR="header: PLUGIN_SETTINGS lists $w, which is not a setting"; return 1; fi
   done
-  for w in ${PH[PLUGIN_LOGS]:-}; do   # a path, $SETTING for a path from the settings, or $SETTING/file
-    [[ $w == /* && $w != *\$* ]] && continue
+  # a path, $SETTING for a path from the settings, or $SETTING/file; * stands for a whole part
+  # of the path ($VHOST_LOGS/*/logs/access_log: that log of every domain). read: no globbing here
+  read -ra ws <<<"${PH[PLUGIN_LOGS]:-}"
+  for w in ${ws[@]+"${ws[@]}"}; do
     k=${w%%/*}
-    if ! [[ $w =~ ^\$[A-Z][A-Z0-9_]*(/[A-Za-z0-9._/-]+)?$ && " ${PH[PLUGIN_SETTINGS]:-} " == *" ${k#\$} "* ]]; then
-      PLUGIN_ERR="header: PLUGIN_LOGS lists $w, which is neither a path nor a setting from PLUGIN_SETTINGS"; return 1
+    if [[ $w =~ ^/([A-Za-z0-9._+-]+|\*)(/([A-Za-z0-9._+-]+|\*))*$ ]]; then continue; fi
+    if ! [[ $w =~ ^\$[A-Z][A-Z0-9_]*(/([A-Za-z0-9._+-]+|\*))*$ && " ${PH[PLUGIN_SETTINGS]:-} " == *" ${k#\$} "* ]]; then
+      PLUGIN_ERR="header: PLUGIN_LOGS lists $w, which is neither a path nor a setting from PLUGIN_SETTINGS (* only as a whole part of the path)"; return 1
     fi
   done
   return 0
@@ -2279,7 +2210,58 @@ plugin_state_seed() {
     php-config)   # the time of the last daily scan, if that scan covered .htaccess & co. already
       [[ -f $STATE_DIR/webshell_scan && -f $STATE_DIR/webshell_conf_full ]] &&
         printf 'last_scan %s\n' "$(stat -c %Y "$STATE_DIR/webshell_scan")" >"$2" ;;
+    wordpress)    # the time of the last scan of the upload folders
+      [[ -f $STATE_DIR/last_scan ]] && printf 'last_scan %s\n' "$(stat -c %Y "$STATE_DIR/last_scan")" >"$2" ;;
   esac
+  return 0
+}
+# plugin_logs – the logs of the plugin whose header is in PH[], in the order of PLUGIN_LOGS:
+# PL_LOGS (paths; empty for a setting that is empty or a * that matches nothing), PL_NUMS (the
+# number of the PLUGIN_LOGS entry each one comes from) and PL_MISS (numbers of the entries
+# with no readable log)
+plugin_logs() {
+  local w v n=0 m found
+  local -a ws=() ms=()
+  PL_LOGS=(); PL_NUMS=(); PL_MISS=""
+  read -ra ws <<<"${PH[PLUGIN_LOGS]:-}"
+  for w in ${ws[@]+"${ws[@]}"}; do
+    n=$((n + 1)); v=$w
+    if [[ $w == \$* ]]; then   # $SETTING or $SETTING/file; nothing if the setting is empty
+      v=${w%%/*}; v=${v#\$}; v=${!v:-}
+      [[ -n $v && $w == */* ]] && v="${v%/}/${w#*/}"
+    fi
+    found=0
+    if [[ -n $v && $v == *\** ]]; then   # one log per match, sorted
+      mapfile -t ms < <(compgen -G "$v" | LC_ALL=C sort)
+      for m in ${ms[@]+"${ms[@]}"}; do
+        [[ -f $m && -r $m ]] || continue
+        PL_LOGS+=("$m"); PL_NUMS+=("$n"); found=1
+      done
+      (( found )) || { PL_LOGS+=(""); PL_NUMS+=("$n"); }
+    else
+      PL_LOGS+=("$v"); PL_NUMS+=("$n")
+      [[ -n $v && -r $v ]] && found=1
+    fi
+    (( found )) || PL_MISS+="${PL_MISS:+ }$n"
+  done
+}
+# plugin_seed_offsets NAME – a plugin keeps its own log positions (new_lines FILE PLUGIN). Where
+# it has none yet, it starts at the position the main script stored for that log in the run
+# before – the check was in the main script then, or the main script reads the log too. Called
+# before the checks of a run, so the main script hasn't moved its positions yet.
+plugin_seed_offsets() {
+  local f="$TMPD/seed-$1.sh" i a b ino off
+  if plugin_fetch "plugins/$1.sh" "$f" && plugin_header "$f" "$1" hourly; then
+    plugin_logs
+    for i in ${PL_LOGS[@]+"${!PL_LOGS[@]}"}; do
+      [[ -n ${PL_LOGS[i]} ]] || continue
+      a="$STATE_DIR/offsets/$(offset_key "${PL_LOGS[i]}")"; b="$STATE_DIR/offsets/$(offset_key "${PL_LOGS[i]}" "$1")"
+      if [[ -f $a && ! -f $b ]] && read -r ino off _ <"$a"; then
+        echo "$ino $off ${PL_LOGS[i]} (plugin $1)" >"$b"
+      fi
+    done
+  fi
+  rm -f "$f"; PH=()
   return 0
 }
 # run_plugin NAME [hourly|daily] – runs plugins/NAME.sh in a process of its own, with an empty
@@ -2291,9 +2273,9 @@ plugin_state_seed() {
 # status or the state files: its new state is stored by this function, and only in a normal run.
 # Hourly plugins write into the report body, daily ones to stdout and $DALERTS (like run_daily).
 run_plugin() {
-  local name=$1 sched=${2:-hourly} f="$TMPD/plugin-$1.sh" lib="$TMPD/plugin-lib.sh" os=other w v i=0 miss="" rc line kw nt=0 na=0 nn=0 nd=0
+  local name=$1 sched=${2:-hourly} f="$TMPD/plugin-$1.sh" lib="$TMPD/plugin-lib.sh" os=other w i rc line kw nt=0 na=0 nn=0 nd=0
   local sdir="$STATE_DIR/plugins/$1" st="$TMPD/plugin.state" sin="$TMPD/plugin.state-in" ctx="" ns=0 sb=0 lim=$FIND_TIMEOUT
-  local -a logs=() envs=()
+  local -a envs=()
   emit_text()  { if [[ $sched == daily ]]; then printf '%s\n' "$1"; else out "$1"; fi; }
   emit_alert() { if [[ $sched == daily ]]; then dalert "$1"; else alert "$1"; fi; }
   if ! { plugin_fetch lib/plugin-lib.sh "$lib" && plugin_fetch "plugins/$name.sh" "$f" && plugin_header "$f" "$name" "$sched"; }; then
@@ -2315,21 +2297,12 @@ run_plugin() {
     ctx="$TMPD/ctx-domains"
   fi
   for w in ${PH[PLUGIN_SETTINGS]:-}; do envs+=("$w=${!w:-}"); done
-  for w in ${PH[PLUGIN_LOGS]:-}; do
-    v=$w
-    if [[ $w == \$* ]]; then   # $SETTING or $SETTING/file; nothing if the setting is empty
-      v=${w%%/*}; v=${v#\$}; v=${!v:-}
-      [[ -n $v && $w == */* ]] && v="${v%/}/${w#*/}"
-    fi
-    logs+=("$v"); i=$((i + 1))
-    [[ -n $v && -r $v ]] || miss+="${miss:+ }$i"
-  done
-  if { i=0
-    for v in ${logs[@]+"${logs[@]}"}; do
-      i=$((i + 1)); printf '\036 %d %s\n' "$i" "$v"
-      if [[ -n $v ]]; then new_lines "$v" || true; fi
+  plugin_logs
+  if { for i in ${PL_LOGS[@]+"${!PL_LOGS[@]}"}; do
+      printf '\036 %d %s\n' "${PL_NUMS[i]}" "${PL_LOGS[i]}"
+      if [[ -n ${PL_LOGS[i]} ]]; then new_lines "${PL_LOGS[i]}" "$name" || true; fi
     done
-     } | timeout --foreground -k 10 "$lim" env -i PATH="$PATH" ${TZ+"TZ=$TZ"} PSR_PLUGIN="$name" PSR_LOGS_MISSING="$miss" \
+     } | timeout --foreground -k 10 "$lim" env -i PATH="$PATH" ${TZ+"TZ=$TZ"} PSR_PLUGIN="$name" PSR_LOGS_MISSING="$PL_MISS" \
         PSR_STATE="$sin" PSR_DOMAINS="${ctx:-/dev/null}" ${envs[@]+"${envs[@]}"} \
         bash --noprofile --norc "$lib" "$f" >"$TMPD/plugin.out" 2>"$TMPD/plugin.err"
   then rc=0; else rc=${PIPESTATUS[1]}; fi
@@ -2448,6 +2421,9 @@ check_needs_dig() { [[ $1 == serverdns || $1 == domaindns || $1 == https ]]; }
 
 run_hourly() {   # run_hourly NAME… – checks write directly into the report body
   local c
+  if can_write_state; then
+    for c in "$@"; do declare -F "check_$c" >/dev/null || plugin_seed_offsets "$c"; done
+  fi
   for c in "$@"; do
     check_enabled "$c" || continue
     step "$c"
@@ -2600,7 +2576,8 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       if ($0 ~ /^Attack patterns/) { sub_ = "att"; next }
       if ($0 ~ /^Traffic peaks/) { sub_ = "peak"; next }
       if ($0 ~ /^ModSecurity/) { sub_ = "modsec"; next }
-      if (sub_ == "table" && $0 ~ /^ +[0-9]+ +[0-9]+ +[0-9]+  /) { wr[$4] += $1; w5[$4] += $2; wl[$4] += $3; next }
+      if (sub_ == "table" && $0 ~ /^ +[0-9]+ +[0-9]+ +[0-9]+  /) { wr[$4] += $1; w5[$4] += $2; wl[$4] += $3; next }   # 1.x: with login POSTs
+      if (sub_ == "table" && $0 ~ /^ +[0-9]+ +[0-9]+  [^ ]/) { wr[$3] += $1; w5[$3] += $2; next }
       if (sub_ == "wp" && $0 ~ /^  /) { l = $0; sub(/^  /, "", l); print "WP\t" tm "\t" t(l); next }
       if (sub_ == "fatal" && $0 ~ /^ +[0-9]+ /) { fa[$2] += $1; if (!($2 in fx)) { m = $0; sub(/^[^–]*– /, "", m); fx[$2] = m }; next }
       if (sub_ == "att" && $0 ~ / SQLi /) {
@@ -2613,7 +2590,18 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       if (sub_ == "modsec" && $0 ~ /^ +[0-9]+ +[0-9]+  /) { mh[$3] += $1; mb[$3] += $2; next }
       next
     }
-    # ---------------- WEBROOTS, LOGINS, SERVICES
+    # ---------------- WORDPRESS (2.0: the plugin; before, part of WEB and WEBROOTS)
+    sec ~ /== WORDPRESS / {
+      if ($0 ~ /^login POSTs /) { sub_ = "wtable"; next }
+      if ($0 ~ /^WordPress login attacks/) { sub_ = "wp"; next }
+      if ($0 ~ /^PHP files in upload folders/) { sub_ = "up"; next }
+      if (sub_ == "wtable" && $0 ~ /^ +[0-9]+  [^ ]/) { if (!($2 in wr)) wr[$2] += 0; wl[$2] += $1; next }
+      if (sub_ == "wp" && $0 ~ /^  /) { l = $0; sub(/^  /, "", l); print "WP\t" tm "\t" t(l); next }
+      if (sub_ == "up" && $0 ~ /^(New since last run|First run)/) { n = $0; sub(/.*: /, "", n); up += n; next }
+      if (sub_ == "up" && $0 ~ /^  \//) { l = $0; sub(/^  /, "", l); print "UPLOAD\t" tm "\t" t(l) }
+      next
+    }
+    # ---------------- WEBROOTS (1.x), LOGINS, SERVICES
     sec ~ /WEBROOTS/ {
       if ($0 ~ /^(New since last run|First run)/) { n = $0; sub(/.*: /, "", n); up += n; next }
       if ($0 ~ /^  \//) { l = $0; sub(/^  /, "", l); print "UPLOAD\t" tm "\t" t(l) }
@@ -3096,9 +3084,8 @@ is always reported). Processes are not stored – they are checked live in every
 | File | Content | Used for |
 |---|---|---|
 | `last_run` | Unix time of the last normal run | everything "since the last run" (journal, web logs). |
-| `offsets/` | one file per log, named after a hash of its path; content `inode bytes-read path` | the script reads only the lines added since the last run. The inode identifies the file after a rotation (`maillog` → `maillog.processed`), so the rest of the old file is still read. Delete a file here and that log is read again from its last 20,000 lines. |
+| `offsets/` | one file per log, named after a hash of its path (for a plugin: of its name and the path, so a log the script reads too is read in full by both); content `inode bytes-read path`, for a plugin followed by `(plugin NAME)` | the script reads only the lines added since the last run. The inode identifies the file after a rotation (`maillog` → `maillog.processed`), so the rest of the old file is still read. Delete a file here and that log is read again from its last 20,000 lines. |
 | `journal_since` | Unix time | position in the systemd journal (only if there is no mail log file). |
-| `last_scan` | empty; its modification time counts | new PHP files in upload folders are files changed after this – by file date or by inode change time, so a file with its date set back is found too. |
 | `webshell_scan` | empty; its modification time counts | the daily scan for suspicious code looks only at PHP files changed since then (file date or inode change time). |
 
 ## Checks that are plugins (`plugins/`)
@@ -3109,6 +3096,7 @@ a normal run, not with `--only`. Delete a file and that plugin starts from scrat
 | File | Content (one entry per line) | Used for |
 |---|---|---|
 | `plugins/php-config/state` | `last_scan` and the Unix time (with fractions of a second) of the last complete daily scan | the daily scan of `.htaccess`, `.user.ini` and `php.ini` in the document roots looks only at files changed since then (file date or inode change time). Without it, the scan checks all of them, whatever their date – a backdoor may be older than the script. Taken over from `webshell_scan` of version 1.x. |
+| `plugins/wordpress/state` | `last_scan` and the Unix time (with fractions of a second) of the last complete scan of the upload folders | new PHP files in `wp-content/uploads` are files changed after this – by file date or by inode change time, so a file with its date set back is found too. Without it, all PHP files there are listed (except `index.php`). Taken over from `last_scan` of version 1.x. |
 
 ## Daily checks
 
@@ -3134,8 +3122,9 @@ EOF
 write_state_readme() {   # keep $STATE_DIR/README.txt in step with this version
   local f="$STATE_DIR/README.txt"
   can_write_state || return 0
-  # of older versions: since 2.0 in plugins/php-config/state (once that exists)
+  # of older versions: since 2.0 in plugins/php-config/state and plugins/wordpress/state (once they exist)
   [[ -f $STATE_DIR/plugins/php-config/state ]] && rm -f "$STATE_DIR/webshell_conf_full"
+  [[ -f $STATE_DIR/plugins/wordpress/state ]] && rm -f "$STATE_DIR/last_scan"
   state_readme | cmp -s - "$f" 2>/dev/null || state_readme >"$f"
 }
 
@@ -3147,9 +3136,7 @@ show_state() {
   echo ""
   f=$STATE_DIR/last_run; [[ -f $f ]] && echo "Last normal run: $(d "$(cat "$f")")"
   f=$STATE_DIR/daily_date; [[ -f $f ]] && echo "Daily checks last run on: $(cat "$f") (day, script version, checksum of script and configuration)"
-  for f in last_scan webshell_scan; do
-    [[ -f $STATE_DIR/$f ]] && echo "$f: $(date -r "$STATE_DIR/$f" '+%Y-%m-%d %H:%M')"
-  done
+  f=$STATE_DIR/webshell_scan; [[ -f $f ]] && echo "webshell_scan: $(date -r "$f" '+%Y-%m-%d %H:%M')"
   for f in "$STATE_DIR"/plugins/*/state; do
     [[ -f $f ]] || continue
     echo "Plugin $(basename "$(dirname "$f")"), state of $(date -r "$f" '+%Y-%m-%d %H:%M'):"

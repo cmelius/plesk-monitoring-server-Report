@@ -37,3 +37,30 @@ section() { sed -n "/^== $1/,/^\$/p" "$2"; }
   echo "$output"
   [ "$status" -eq 0 ]
 }
+
+@test "reports in the layout of 2.0 (WordPress in a section of its own) give the same summary" {
+  # the same reports, rewritten the way 2.0 writes them: WEB without the column login POSTs; login
+  # POSTs, login attacks and PHP files in upload folders in WORDPRESS instead of WEB and WEBROOTS
+  local f
+  for f in "$OUT_DIR"/report-*.txt; do
+    awk '
+      /^== / { sec = $0 }
+      sec ~ /^== WEB / && /^requests \| 5xx \| login POSTs/ { print "requests | 5xx | domain | busiest IP"; tbl = 1; next }
+      tbl && /^ +[0-9]+ +[0-9]+ +[0-9]+  / { r = $0; sub(/^ +[0-9]+ +[0-9]+ +[0-9]+  /, "", r)
+                                             printf "  %7d %5d  %s\n", $1, $2, r; if ($3 > 0) lg = lg sprintf("  %6d  %s\n", $3, $4); next }
+      { tbl = 0 }
+      sec ~ /^== WEB / && /^WordPress login attacks/ { wp = 1; wpt = $0 "\n"; next }
+      wp && /^PHP fatal/ { wp = 0 }
+      wp { wpt = wpt $0 "\n"; next }
+      /^== WEBROOTS/ { print "== WORDPRESS (since last run) =="; print "login POSTs (wp-login.php + xmlrpc.php) | domain:"
+                       printf "%s\n%s", lg, wpt; print "PHP files in upload folders (wp-content/uploads):"; lg = ""; wpt = ""; next }
+      { print }' "$f" >"$f.new"
+    touch -r "$f" "$f.new"; mv "$f.new" "$f"
+  done
+  grep -q '^== WORDPRESS' "$OUT_DIR"/report-20261113-0605.txt
+  ! grep -q 'login POSTs | domain | busiest' "$OUT_DIR"/report-*.txt
+  write_summary "$BATS_TEST_TMPDIR/summary2.txt" || true
+  run diff <(tail -n +2 "$BATS_TEST_TMPDIR/summary2.txt") "$FIX/summary/summary-expected.txt"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}

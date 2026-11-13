@@ -91,6 +91,29 @@ To write next to it:
     42 document root(s) scanned, 0 suspicious file(s)
   ```
 - `panel`, `backups` and `webmail` look as before.
+- *Every hour*: WordPress has a section of its own (check `wordpress`), right after `WEB`. `WEB` loses the column *login POSTs* and the paragraph *WordPress login attacks*; the section `WEBROOTS: PHP files in upload folders` is gone, its lines are the last paragraph of `WORDPRESS`. Alert texts are unchanged. Example:
+
+  ```
+  == WEB (since last run) ==
+  requests | 5xx | domain | busiest IP
+       8272     0  example.com  192.0.2.10 (1650)
+  …
+
+  == WORDPRESS (since last run) ==
+  login POSTs (wp-login.php + xmlrpc.php) | domain:
+        48  example.org
+        20  example.com
+
+  WordPress login attacks (domains with at least 20 login POSTs):
+    example.org: 48 POSTs from 1 IPs (busiest 198.51.100.7 (48))
+      wp-login.php: 48, successful (302): 0 | xmlrpc.php: 0, blocked (4xx): 0
+    example.com: 20 POSTs from 3 IPs (busiest 198.51.100.8 (12))
+      wp-login.php: 20, successful (302): 0 | xmlrpc.php: 0, blocked (4xx): 0
+
+  PHP files in upload folders (wp-content/uploads):
+  New since last run: 0
+  ```
+- The summary (`summary.txt`) is unchanged: it reads reports of both layouts, so the 24 hours around the update add up.
 
 ## Configuration
 
@@ -101,16 +124,18 @@ To write next to it:
 | `PLUGINS_OFF` | empty | names of checks that are plugins and should not run, e.g. `"backups webmail"`. Checks of the main script can't be switched off here – they have their own switches. |
 
 - `WEBSHELL_CHECK` / `WEBSHELL_IGNORE`: switch and ignore list now apply to the checks `webshell` and `php-config`.
-- `FIND_TIMEOUT`: also the time limit of an hourly plugin; a daily plugin gets three times as much, because it scans all document roots in one go.
+- `FIND_TIMEOUT`: also the time limit of an hourly plugin; a daily plugin gets three times as much, because it scans all document roots in one go. `wordpress` gives its scan of the upload folders two thirds of it, so the login figures are never lost.
+- `WARN_LOGIN_POSTS`, `WARN_LOGIN_DETAIL`, `UPLOADS_PHP_IGNORE`: now used by the check `wordpress`; meaning and defaults unchanged.
 
 ## First run, `--only`, `--list`
 
 - `--list` shows `php-config` among the daily checks (after `webshell`). `--only php-config` runs the scan of `.htaccess`, `.user.ini` and `php.ini` alone.
 - First run after the update from 1.x: `php-config` takes the time of the last scan over from 1.x, so these files are not scanned or reported twice.
+- The hourly check `uploads` is part of `wordpress` now: `--only wordpress` shows the login attempts and the PHP files in upload folders. It takes over the time of the last upload scan (`last_scan`) and the log positions of 1.x, so nothing is reported twice and no line is missed. `PLUGINS_OFF="wordpress"` switches it off on servers without WordPress.
 
 ## What the script remembers
 
-- New folder `plugins/<name>/state` (today only `php-config`); `webshell_conf_full` is gone. The text is in STATE-FILES.md already – only check that the README's short description still fits.
+- New folder `plugins/<name>/state` (`php-config`, `wordpress`); `webshell_conf_full` and `last_scan` are gone (`last_scan` is now `plugins/wordpress/state`). `offsets/`: a plugin keeps log positions of its own, so the access logs are read in full by `web` and by `wordpress`. The text is in STATE-FILES.md already – only check that the README's short description still fits.
 
 ## Notes and limitations
 
@@ -121,7 +146,7 @@ To write next to it:
 
 **Where:** the last paragraph of *Using another CMS? Help wanted*. Replace it:
 
-> **Plugins.** Since 2.0, checks tied to specific software (Plesk's own log, backups, Roundcube, PHP settings, and later WordPress) are plugins: small files in `plugins/` with a fixed contract, shipped with each release. Only plugins of the release run – there is no folder for your own, and no sandbox, because every plugin is reviewed like the script. Support for another CMS would be a new plugin; the issue template above is still the way to ask for it.
+> **Plugins.** Since 2.0, checks tied to specific software (Plesk's own log, backups, Roundcube, PHP settings, WordPress) are plugins: small files in `plugins/` with a fixed contract, shipped with each release. Only plugins of the release run – there is no folder for your own, and no sandbox, because every plugin is reviewed like the script. Support for another CMS would be a new plugin; the issue template above is still the way to ask for it.
 
 ## Tests
 

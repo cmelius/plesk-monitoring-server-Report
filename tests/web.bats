@@ -1,13 +1,16 @@
 #!/usr/bin/env bats
-# check_web on anonymized vhost logs (VHOST_LOGS/<domain>/logs/)
+# check_web on anonymized vhost logs (VHOST_LOGS/<domain>/logs/); the WordPress part is the
+# plugin wordpress since 2.0 (wordpress.bats)
 
 load helper
 
 setup() { load_script; VHOST_LOGS="$FIX/web"; check_web || true; }
 
-@test "requests and login POSTs per domain" {
+@test "requests per domain (login POSTs: plugin wordpress)" {
   run report
-  [[ $output =~ 435\ +0\ +18\ +d1\.example\ +198\.18\.0\.69\ \(136\) ]]
+  [[ $output == *"requests | 5xx | domain | busiest IP"* ]]
+  [[ $output =~ 435\ +0\ +d1\.example\ +198\.18\.0\.69\ \(136\) ]]
+  [[ $output != *"WordPress login attacks"* ]]
 }
 
 @test "scanners calling WordPress files directly are not counted as PHP errors" {
