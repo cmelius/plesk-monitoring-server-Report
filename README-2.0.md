@@ -32,11 +32,11 @@ Parts marked **(planned)** describe something the branch has not built yet; chec
 > - **No protection against root.** Whoever can change root's files could change the script as well. The checksums guard against half-finished updates, mixed versions and files slipped into the folder – not against an attacker who is already root. Plugins run as root like the script, without a sandbox.
 > - **A little more run time:** each plugin is a process of its own.
 
-## Quick start, Installation, Updates: install from the release archive (planned)
+## Quick start, Installation, Updates: the release archive and `--self-update`
 
-**Where:** the code blocks in *Quick start*, *Installation* and *Updates*; the sentence about `curl` in *Requirements*.
+**Where:** *Quick start* and *Installation* get the `curl` block below – it is needed only **once**: for a new installation, and for the move from 1.x, which has no `--self-update` yet. *Updates* gets only `--self-update` (further down). The sentence about `curl` in *Requirements* stays.
 
-The script is no longer a single file: `lib/` and `plugins/` must lie next to it. A release is a `tar.gz` archive with a `SHA256SUMS` file; it is unpacked as root into `/usr/local/lib/plesk-server-report/`, with a link in `/usr/local/sbin`, so the cron entry stays valid. Draft:
+The script is no longer a single file: `lib/` and `plugins/` must lie next to it. A release is a `tar.gz` archive with a `SHA256SUMS` file; it is unpacked as root into `/usr/local/lib/plesk-server-report/`, with a link in `/usr/local/sbin`, so the cron entry stays valid. Installation (and the move from 1.x):
 
 ```bash
 cd /root
@@ -52,10 +52,10 @@ ln -sf /usr/local/lib/plesk-server-report/plesk-server-report.sh /usr/local/sbin
 To write next to it:
 
 - `--no-same-owner`: the files must belong to root. The script runs only files that belong to root and that nobody else may write, in folders of the same kind; otherwise the check is not run and the report says why.
-- **Updating from 1.x:** unpack the archive as above; the link replaces the old single file in `/usr/local/sbin`. Settings and state are kept. The old file must not stay a regular file at that path (`ln -sf` replaces it).
+- **Updating from 1.x** (once, in *Updates*): the `curl` block above; the link replaces the old single file in `/usr/local/sbin`. Settings and state are kept. The old file must not stay a regular file at that path (`ln -sf` replaces it). Every update after that is `--self-update`.
 - **An incomplete installation** (only the script, `plugins/` missing, or a file of another version) is reported: every check whose file is missing or differs raises an alert "the check … was not run", naming the reason, and `--verify` lists every file that differs. The script never downloads plugins or itself on its own.
 - *Releases or `main`?*: following `main` means a `git clone` (or the archive of the branch) instead of the raw URL of one file.
-- **Updating 2.x → newer** (the *Updates* section): one command –
+- **Updating 2.x → newer** (the *Updates* section, instead of the `curl` block of 1.x): one command –
 
   ```bash
   plesk-server-report.sh --self-update        # shows the changes and asks; --yes: no question
