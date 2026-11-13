@@ -147,3 +147,12 @@ leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
   run bash "$BATS_TEST_DIRNAME/../plesk-server-report.sh" --major
   [ "$status" -eq 2 ]
 }
+
+@test "nothing of the new version runs before the answer" {
+  { echo '#!/bin/bash'; echo "touch '$BATS_TEST_TMPDIR/ran'"; tail -n +2 "$NEW"; } >"$NEW.x"; mv "$NEW.x" "$NEW"
+  SU_YES=0
+  run self_update_1x <<<"n"
+  [ "$status" -eq 0 ]
+  [ ! -e "$BATS_TEST_TMPDIR/ran" ]
+  [ "$(installed)" = "plesk-server-report 1.12.0" ]
+}

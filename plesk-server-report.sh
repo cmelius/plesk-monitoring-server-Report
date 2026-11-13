@@ -3188,7 +3188,7 @@ show_state() {
 RELEASE_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBwQHy40R5vtIHxSSKofpOmJe3yW8LnONdOoWJyY/THA"   # the maintainer's public key; empty: no --self-update
 SU_YES=0; SU_ROLLBACK=0; SU_MAJOR=0
 su_fail() { echo "self-update: $*" >&2; [[ -n ${SU_WORK:-} ]] && rm -rf "$SU_WORK"; return 1; }
-su_ask() {   # su_ask QUESTION – yes unless the answer is no; with --yes always yes
+su_ask() {   # su_ask QUESTION – yes only for an answer starting with y (or j); with --yes always yes
   local a
   (( SU_YES )) && return 0
   read -r -p "$1 [y/N] " a || return 1
@@ -3201,7 +3201,7 @@ su_lock() {   # wait for a running report (at most 15 min), so nothing is replac
 }
 is_root() { (( EUID == 0 )); }
 su_by_hand() { [[ -t 0 || -t 1 ]]; }   # a terminal: started by hand, not by cron
-su_fetch() { curl -fsSL --connect-timeout 10 --max-time 120 -o "$2" "$1"; }   # su_fetch URL FILE
+su_fetch() { curl -fsSL --proto =https --connect-timeout 10 --max-time 120 --max-filesize 5000000 -o "$2" "$1"; }   # su_fetch URL FILE
 su_major_note() {   # a newer major version: only a note
   local other
   other=$(latest_release)
@@ -3212,6 +3212,9 @@ su_major_note() {   # a newer major version: only a note
 self_update_1x() {
   local self dir d old="$STATE_DIR/plesk-server-report.sh.old" latest v raw
   self=${SU_SELF:-$(readlink -f "${BASH_SOURCE[0]}")}; dir=${self%/*}
+  # no half-downloaded file left next to the script, also after Ctrl-C
+  trap 'rm -f "${SU_WORK:-/nonexistent}" "${SU_WORK:-/nonexistent}.changes"' EXIT
+  trap 'exit 130' INT; trap 'exit 143' TERM HUP
   is_root || { su_fail "run it as root"; return 1; }
   su_by_hand || { su_fail "start it by hand in a terminal, not from cron (--yes only skips the question)"; return 1; }
   d=$dir
@@ -3225,15 +3228,15 @@ self_update_1x() {
   fi
   if (( SU_ROLLBACK )); then
     [[ -f $old ]] || { su_fail "there is no previous version ($old)"; return 1; }
-    v=$(bash "$old" --version 2>/dev/null)
-    su_ask "Go back from $VERSION to ${v#plesk-server-report }?" || { echo "nothing changed"; return 0; }
+    v=$(sed -n 's/^VERSION=//p' "$old" | head -1)
+    su_ask "Go back from $VERSION to ${v:-the kept version}?" || { echo "nothing changed"; return 0; }
     su_lock || return 1
     SU_WORK=$(mktemp "$dir/.plesk-server-report.XXXXXX") || { su_fail "no temporary file in $dir"; return 1; }
     if ! { cp -p "$old" "$SU_WORK" && cp -p "$self" "$old" && mv -f "$SU_WORK" "$self"; }; then
       su_fail "could not swap the versions – check $self and $old"; return 1
     fi
     exec 9>&-                          # release the lock
-    echo "back to ${v#plesk-server-report }; version $VERSION is kept in $old (--self-update --rollback swaps again)"
+    echo "back to ${v:-the kept version}; version $VERSION is kept in $old (--self-update --rollback swaps again)"
     return 0
   fi
   latest=$(latest_release_in_major "${VERSION%%.*}")
@@ -3250,8 +3253,9 @@ self_update_1x() {
   # next to the script, so that mv replaces it in one step
   SU_WORK=$(mktemp "$dir/.plesk-server-report.XXXXXX") || { su_fail "no temporary file in $dir"; return 1; }
   su_fetch "$raw/plesk-server-report.sh" "$SU_WORK" || { su_fail "download of $raw/plesk-server-report.sh failed"; return 1; }
-  # the new version checks itself: syntax and version
-  if ! bash -n "$SU_WORK" 2>/dev/null || [[ $(bash "$SU_WORK" --version 2>/dev/null) != "plesk-server-report $latest" ]]; then
+  # test the new version without running it (nothing of it runs as root before you said yes):
+  # valid bash, and its VERSION line is the expected version
+  if ! bash -n "$SU_WORK" 2>/dev/null || [[ $(sed -n 's/^VERSION=//p' "$SU_WORK" | head -1) != "$latest" ]]; then
     su_fail "the new version failed its test (syntax, or not version $latest) – nothing installed"; return 1
   fi
   echo "test of the new version: good"
