@@ -269,8 +269,9 @@ parity tests against the old functions in `tests/legacy/`). Where it differs fro
   whole plugin covers them.
 - `PLUGIN_API` is `0` until step 6.
 - The changes of this branch are listed in `CHANGELOG-2.0.md` (branch changelog), not
-  in `CHANGELOG.md`, so that merging `main` into this branch stays simple. README and
-  the release archive follow before 2.0.
+  in `CHANGELOG.md`, so that merging `main` into this branch stays simple. The README
+  changes are collected in `README-2.0.md` (branch README); the release archive follows
+  before 2.0.
 
 ## If third-party plugins are ever wanted
 

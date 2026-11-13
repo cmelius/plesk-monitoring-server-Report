@@ -2,7 +2,7 @@
 
 **This is the changelog of the branch `feature/plugin-system`.** It lists what this branch changes compared with `main`, for the later major version 2.0. Nothing here is released. The changes of the 1.x releases stay in [CHANGELOG.md](CHANGELOG.md), which this branch does not edit, so merging `main` into the branch causes no conflict there. When 2.0 is released, these entries move into `CHANGELOG.md` as the section `[2.0.0]` and this file is removed.
 
-The design is described in [docs/plugin-concept.md](docs/plugin-concept.md).
+The design is described in [docs/plugin-concept.md](docs/plugin-concept.md); the README changes for 2.0 are collected in [README-2.0.md](README-2.0.md).
 
 ## Not yet released
 
