@@ -2,7 +2,15 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [1.11.0] – not yet released (on `main`)
+## [1.11.1] – not yet released (on `main`)
+
+### Fixed
+- **Blocklists are asked through the server's own resolver.** All blocklist lookups (IP and domain) went through the system resolver, which often forwards to the hosting provider's DNS – a shared resolver that Spamhaus and URIBL refuse, so results could be `query-refused` (or, before 1.11.0, a false `clean`). Now `127.0.0.1` is asked when a resolver answers there (on Plesk: BIND), else the system resolver as before; new setting `BLOCKLIST_RESOLVER`. The report says which resolver was asked.
+
+### Changed
+- **Barracuda removed from the default IP blocklists** (`DNSBL_LISTS`). It answers only DNS servers registered with Barracuda, and the registration page has not been reachable for some time. Its `clean` so far came through the hosting provider's resolver (registered there); asked through the server's own resolver, it doesn't answer – the test entry shows `no-answer`. README: how to add it again, and how to send blocklist queries through the system resolver.
+
+## [1.11.0] – 2026-11-13
 
 ### Added
 - **Full mailboxes:** mail rejected because a mailbox on this server is full raises an alert in every run, naming the mailbox (Plesk: `4.2.2 Mailbox full` from its mail filter; Dovecot and other local delivery: status `4.2.2`/`5.2.2`, "quota exceeded"; deliveries to other servers are left out).
@@ -12,8 +20,8 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 - **Mailboxes without a size limit** (Plesk: mailbox and subscription set to unlimited) are measured too (`du` on the Maildir folder): the report line names the largest one and the total, and one larger than `WARN_MAILBOX_UNLIMITED_GB` raises a warning (new setting, default 5 GB, `0` = off) – it can't become full, but fills the disk and the backups. The line says "unlimited (no size limit set in Plesk)" instead of "without size limit".
 - `summary.txt` lists full mailboxes (rejected delivery attempts, first – last) and delivery confirmations sent to other servers – both were only in the single reports and the alerts so far.
 - README, *What it found so far*: a full mailbox that rejected mail, and mailboxes without a size limit nobody knew about. Example report and summary show the new lines.
-- **Tests** (`tests/`, [bats](https://github.com/bats-core/bats-core)): the mail, panel, web, login, mailbox and backdoor checks fed with anonymized logs of a real server, run by the GitHub workflow on every push – once with `mawk` and once with `gawk`. `tests/anonymize.py` anonymizes logs for new fixtures. README: section *Tests*.
-- `MAIL_LOG` and `AUTH_LOG` (new settings, default empty = as before): the mail log and the SSH login log, for systems that keep them elsewhere.
+- **Tests** (`tests/`, [bats](https://github.com/bats-core/bats-core)): the mail, panel, web (with ModSecurity), login (SSH and Plesk panel), webmail, backup, fail2ban, mailbox and backdoor checks fed with anonymized logs of a real server, and the daily summary built from a day of its hourly reports, run by the GitHub workflow on every push – once with `mawk` and once with `gawk`. `tests/anonymize.py` anonymizes logs for new fixtures. README: section *Tests*.
+- `MAIL_LOG`, `AUTH_LOG` and `BACKUP_LOG_DIR` (new settings, default empty = as before): the mail log, the SSH login log and the Plesk backup logs, for systems that keep them elsewhere.
 
 ### Changed
 - Every `# shellcheck` directive in the script says why it is there.

@@ -4,7 +4,7 @@ PLUGIN_NAME="backups"
 PLUGIN_API="0"
 PLUGIN_SCHEDULE="hourly"
 PLUGIN_SECTION="BACKUPS"
-PLUGIN_SETTINGS="WARN_BACKUP_HOURS PLESK_BACKUP_LOGS"
+PLUGIN_SETTINGS="WARN_BACKUP_HOURS BACKUP_LOG_DIR"
 PLUGIN_READS="/var/log/plesk/PMM /usr/local/psa/PMM/logs /opt/psa/PMM/logs"
 PLUGIN_OS="debian rhel"
 PLUGIN_MAINTAINER="core"
@@ -14,8 +14,7 @@ PLUGIN_MAINTAINER="core"
 plugin_check() {
   local pmm last age st now mt
   now=$(date +%s)
-  for pmm in /var/log/plesk/PMM /usr/local/psa/PMM/logs /opt/psa/PMM/logs; do [[ -d $pmm ]] && break; pmm=""; done
-  [[ -n ${PLESK_BACKUP_LOGS:-} ]] && pmm=$PLESK_BACKUP_LOGS
+  for pmm in ${BACKUP_LOG_DIR:-/var/log/plesk/PMM /usr/local/psa/PMM/logs /opt/psa/PMM/logs}; do [[ -d $pmm ]] && break; pmm=""; done
   if [[ -n $pmm ]]; then
     last=$(find -L "$pmm" -maxdepth 2 -type d -name 'backup-*' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)
     if [[ -n $last ]]; then

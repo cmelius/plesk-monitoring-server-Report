@@ -26,3 +26,8 @@ setup() { load_script; VHOST_LOGS="$FIX/web"; check_web || true; }
   [ "$status" -eq 0 ]
   [[ $(report) == *"skipped – log directory not found"* ]]
 }
+
+@test "ModSecurity hits per domain with the top rules" {
+  run report
+  [[ $output == *"16     16  d16.example – 210492  ×8; 210730 COMODO WAF: URL file extension is restricted by policy"* ]]
+}

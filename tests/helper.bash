@@ -16,7 +16,7 @@ load_script() {
   TMPD="$BATS_TEST_TMPDIR/tmp"; mkdir -p "$TMPD"
   TMP="$TMPD/t"; BODY="$TMPD/body"; DALERTS="$TMPD/dalerts"; : >"$BODY"; : >"$DALERTS"
   ALERTS=(); ONLY_MODE=0; LOCKED_OUT=0; SUMMARY_ONLY=0
-  PUBIP=203.0.113.10; GEO_OK=0; ALLOWED_COUNTRIES=""; DNSBL_LISTS=""
+  PUBIP=203.0.113.10; GEO_OK=0; ALLOWED_COUNTRIES=""; DNSBL_LISTS=""; BLOCKLIST_RESOLVER=system
   _new_lines() { [[ -r $1 ]] && cat "$1"; return 0; }             # whole fixtures, through log_clean
   postqueue() { :; }
   T() { shift; "$@"; }                   # no time limits needed in tests

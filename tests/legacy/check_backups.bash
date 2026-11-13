@@ -1,13 +1,11 @@
-# check_backups as it was inside the main script before it became plugins/backups.sh – kept
-# for the parity test in backups.bats. One change: the line marked "test" lets the test point
-# it at a fixture, like the setting PLESK_BACKUP_LOGS does for the plugin.
+# check_backups as it was inside the main script (release 1.11.1) before it became
+# plugins/backups.sh – kept, unchanged, for the parity test in backup.bats.
 # shellcheck shell=bash
 legacy_check_backups() {   # latest Plesk backup (time, age, errors), Acronis agent – every run, so the age is current
   local pmm last age st now mt
   now=$(date +%s)
   section "BACKUPS"
-  for pmm in /var/log/plesk/PMM /usr/local/psa/PMM/logs /opt/psa/PMM/logs; do [[ -d $pmm ]] && break; pmm=""; done
-  [[ -n ${PLESK_BACKUP_LOGS:-} ]] && pmm=$PLESK_BACKUP_LOGS   # test
+  for pmm in ${BACKUP_LOG_DIR:-/var/log/plesk/PMM /usr/local/psa/PMM/logs /opt/psa/PMM/logs}; do [[ -d $pmm ]] && break; pmm=""; done
   if [[ -n $pmm ]]; then
     last=$(T "$CMD_TIMEOUT" find -L "$pmm" -maxdepth 2 -type d -name 'backup-*' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)
     if [[ -n $last ]]; then

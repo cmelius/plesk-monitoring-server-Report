@@ -1,0 +1,41 @@
+[2026-11-13 03:23:11.678|668814] INFO: pmm-ras started : /opt/psa/admin/bin/pmm-ras --get-incremental-base --session-path=/opt/psa/PMM/sessions/2026-11-13-032311.559 --dump-prefix=backup --type=server --guid=00000000-0000-0000-0000-000000000000 --name=d1.example --marker=scheduled_daily --dump-storage=ext://google-drive-backup/server/
+[2026-11-13 03:23:11.679|668814] INFO: Repository 'ext://google-drive-backup/server/': Initializing...
+[2026-11-13 03:23:11.679|668814] INFO: Repository name is google-drive-backup
+[2026-11-13 03:23:11.679|668814] INFO: Repository 'ext://google-drive-backup/server/': Initialized
+[2026-11-13 03:23:11.679|668814] INFO: Repository '/var/lib/psa/dumps': Initializing...
+[2026-11-13 03:23:11.679|668814] INFO: Repository '/var/lib/psa/dumps': Initialized
+[2026-11-13 03:23:11.679|668814] INFO: Repository '/var/lib/psa/dumps': List backups of type server for guid=00000000-0000-0000-0000-000000000000 and name d1.example
+[2026-11-13 03:23:11.680|668814] INFO: index item '' for guid '' is malformed
+[2026-11-13 03:23:11.681|668814] INFO: Check TOKEN.xml
+[2026-11-13 03:23:11.681|668814] INFO: Repository '/var/lib/psa/dumps': Get info from .discovered/TOKEN/storages
+[2026-11-13 03:23:11.681|668814] INFO: Backup in storages: google-drive-backup
+[2026-11-13 03:23:11.681|668814] INFO: Check mysql.preupgrade.18.0.82-18.0.82.20261104-062950.dump.gz
+[2026-11-13 03:23:11.681|668814] INFO: Check mysql.daily.dump.3.gz
+[2026-11-13 03:23:11.681|668814] INFO: Check mysql.plesk.apsc.prerm.18.0.79.20260625-095611.dump.gz
+[2026-11-13 03:23:11.681|668814] INFO: Check mysql.preupgrade.18.0.79-18.0.79.20260806-062755.dump.gz
+[2026-11-13 03:23:11.681|668814] INFO: Check mysql.daily.dump.4.gz
+[2026-11-13 03:23:11.681|668814] INFO: Check TOKEN.xml
+[2026-11-13 03:23:11.681|668814] INFO: Repository '/var/lib/psa/dumps': Get info from .discovered/TOKEN/storages
+[2026-11-13 03:23:11.681|668814] INFO: Check mysql.preupgrade.18.0.80-18.0.80.20260813-062749.dump.gz
+[2026-11-13 03:23:11.681|668814] INFO: Check TOKEN.xml
+[2026-11-13 03:23:11.681|668814] INFO: Repository '/var/lib/psa/dumps': Get info from .discovered/TOKEN/storages
+[2026-11-13 03:23:11.681|668814] INFO: Check mysql.preupgrade.18.0.80-18.0.80.20260903-063204.dump.gz
+[2026-11-13 03:23:11.681|668814] INFO: Check mysql.preupgrade.18.0.78-18.0.79.20260625-095530.dump.gz
+[2026-11-13 03:23:24.110|668919] INFO: backup-archiver finished. Exit code: 0
+[2026-11-13 03:23:24.135|668937] INFO: backup-archiver finished. Exit code: 0
+[2026-11-13 03:23:26.694|669023] INFO: backup-archiver finished. Exit code: 0
+[2026-11-13 03:23:26.745|669044] INFO: backup-archiver finished. Exit code: 0
+[2026-11-13 03:23:28.623|669123] INFO: backup-archiver finished. Exit code: 0
+[2026-11-13 03:23:28.645|669140] INFO: backup-archiver finished. Exit code: 0
+[2026-11-13 03:25:21.901|675519] INFO: Repository '/var/lib/psa/dumps': Initialized
+[2026-11-13 03:25:21.901|675519] INFO: Find incremental backups in '' for prefix 'backup' and base version 2611100323
+[2026-11-13 03:25:21.902|675519] INFO: Repository '/var/lib/psa/dumps': Delete backup TOKEN.xml
+[2026-11-13 03:25:21.902|675519] INFO: Repository '/var/lib/psa/dumps': Get info from .discovered/TOKEN/storages
+[2026-11-13 03:25:21.902|675519] INFO: Repository '/var/lib/psa/dumps': Get info from .discovered/TOKEN/props
+[2026-11-13 03:25:21.920|675519] INFO: Repository '/var/lib/psa/dumps': Found 108 files for deleting
+[2026-11-13 03:25:21.924|675519] INFO: Repository '/var/lib/psa/dumps': Get info from .discovered/TOKEN/storages
+[2026-11-13 03:25:21.924|675519] INFO: Repository '/var/lib/psa/dumps': Put info to .discovered/TOKEN/storages
+[2026-11-13 03:25:21.929|675519] INFO: Repository '/var/lib/psa/dumps': Initializing...
+[2026-11-13 03:25:21.929|675519] INFO: Repository '/var/lib/psa/dumps': Initialized
+[2026-11-13 03:25:21.929|675519] INFO: Only remote repositories can be cached
+[2026-11-13 03:25:21.929|675519] INFO: pmm-ras finished. Exit code: 0

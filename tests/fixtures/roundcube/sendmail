@@ -1,0 +1,12 @@
+[02-Nov-2026 19:10:00 +0000]: <p90m4080> User user172@d26.example [198.18.0.22]; Message <user173@d26.example> for user174@d203.example; 250: 2.0.0 Ok: queued as 6E1606001C
+[03-Nov-2026 14:16:55 +0000]: <2v5rvfqc> User office@d21.example [198.18.0.23]; Message <user175@d21.example> for user176@d204.example; 250: 2.0.0 Ok: queued as A8235600F4
+[05-Nov-2026 11:49:12 +0000]: <vq5ml51p> User user45@d34.example [198.18.0.24]; Message <user177@d34.example> for user178@d34.example; 250: 2.0.0 Ok: queued as 1B7D060314
+[09-Nov-2026 05:28:31 +0000]: <l97qrdtq> User user62@d34.example [198.18.0.21]; Message <user179@d34.example> for user47@d34.example; 250: 2.0.0 Ok: queued as 209B860144
+[09-Nov-2026 16:10:41 +0000]: <omqgb9mb> User user62@d34.example [198.18.0.25]; Message <user180@d34.example> for user181@d205.example; 250: 2.0.0 Ok: queued as BC8416018A
+[11-Nov-2026 05:20:48 +0000]: <9r5294dh> User user62@d34.example [198.18.0.21]; Message <user182@d34.example> for user47@d34.example, user62@d34.example; 250: 2.0.0 Ok: queued as C26F66015E
+[11-Nov-2026 07:31:04 +0000]: <q34hs7si> User user39@d1.example [198.18.0.18]; Message <user183@d1.example> for user71@gmail.com; 250: 2.0.0 Ok: queued as 7A11D63204
+[11-Nov-2026 14:34:27 +0000]: <pf360fbm> User user45@d34.example [198.18.0.24]; Message <user184@d34.example> for user47@d34.example; 250: 2.0.0 Ok: queued as 713986002B
+[11-Nov-2026 14:35:01 +0000]: <pf360fbm> User user45@d34.example [198.18.0.24]; Message <user185@d34.example> for user47@d34.example; 250: 2.0.0 Ok: queued as AFEC260159
+[11-Nov-2026 14:35:24 +0000]: <pf360fbm> User user45@d34.example [198.18.0.24]; Message <user186@d34.example> for user47@d34.example; 250: 2.0.0 Ok: queued as 45CDF6002B
+[11-Nov-2026 17:40:22 +0000]: <1i9scbn0> User info@d34.example [198.18.0.24]; Message <user187@d34.example> for user62@d34.example; 250: 2.0.0 Ok: queued as 97F4D63204
+[12-Nov-2026 12:53:13 +0000]: <bhoq5isd> User user62@d34.example [198.18.0.26]; Message <user188@d34.example> for user189@d206.example; 250: 2.0.0 Ok: queued as A7B416015E

@@ -1,10 +1,28 @@
 #!/usr/bin/env bats
-# the plugin webmail (plugins/webmail.sh) on hand-written Roundcube logs (fixtures/webmail)
+# the plugin webmail (plugins/webmail.sh) on Roundcube logs (sendmail, errors):
+# fixtures/roundcube – anonymized logs of a real server; fixtures/webmail – written by hand
+# for what the real logs don't show (a guessed password, a brute-force attack, mails from abroad)
 
 load helper
 
-setup() {
-  load_script
+setup() { load_script; ROUNDCUBE_LOG_DIR="$FIX/roundcube"; run_plugin webmail; }
+
+@test "mails sent through webmail, per mailbox with the client IP" {
+  run report
+  [[ $output == *"rcpt   1 IPs  office@d21.example"* ]]
+  [[ $output == *"198.18.0.23 ×1"* ]]
+}
+
+@test "failed webmail login with mailbox and IP (the IP ends the log sentence)" {
+  run report
+  [[ $output == *"Failed webmail logins: 1 – top IPs:"* ]]
+  [[ $output == *"1  198.18.0.20"* ]]
+  [[ $output == *"1  info@d38.example"* ]]
+}
+
+# the hand-written logs, with low thresholds
+handwritten() {
+  : >"$BODY"; ALERTS=(); : >"$TMPD/notes"
   ROUNDCUBE_LOG_DIR="$FIX/webmail/logs"
   WARN_MAILS_PER_SASL=5; WARN_MAILS_PER_SENDER=20; WARN_IPS_PER_MAILBOX=1; WARN_LOGIN_BRUTE_FAILS=5; WARN_AUTH_FAIL=20
 }
@@ -15,6 +33,7 @@ foreign_ips() {
 }
 
 @test "mails sent per mailbox with the client IPs" {
+  handwritten
   run_plugin webmail
   run report
   [[ $output == *"Webmail (Roundcube) – mails sent (mails, recipients, IPs):"* ]]
@@ -25,6 +44,7 @@ foreign_ips() {
 }
 
 @test "failed webmail logins: total, top IPs, mailboxes in lower case" {
+  handwritten
   run_plugin webmail
   run report
   [[ $output == *"Failed webmail logins: 27 – top IPs:"*"      14  198.18.1.166"*"       6  198.18.5.77"*"       5  198.18.1.9"* ]]
@@ -34,6 +54,7 @@ foreign_ips() {
 }
 
 @test "alerts: many mails, many recipients, several IPs, mails after failed logins" {
+  handwritten
   run_plugin webmail
   run alerts
   [[ $output == *"Mail: webmail user sales@d44.example sent 8 mails"* ]]
@@ -44,6 +65,7 @@ foreign_ips() {
 }
 
 @test "mails sent from abroad raise an alert, naming only the foreign IPs" {
+  handwritten
   foreign_ips
   run_plugin webmail
   run alerts
@@ -55,6 +77,7 @@ foreign_ips() {
 }
 
 @test "empty logs and a missing directory" {
+  handwritten
   ROUNDCUBE_LOG_DIR="$FIX/webmail/quiet"; run_plugin webmail
   run report
   [[ $output == *"Failed webmail logins: 0 – top IPs:"* ]]
@@ -69,6 +92,7 @@ foreign_ips() {
 # The check as it was inside the main script (tests/legacy/check_webmail.bash) and the plugin
 # must write the same report and the same alerts – without and with a GeoIP database.
 @test "parity: the plugin writes what check_webmail wrote" {
+  handwritten
   # shellcheck source=legacy/check_webmail.bash
   source "$BATS_TEST_DIRNAME/legacy/check_webmail.bash"
   both() {
@@ -76,7 +100,8 @@ foreign_ips() {
     : >"$BODY"; ALERTS=(); : >"$TMPD/notes"; run_plugin webmail;           new=$(report; alerts; cat "$TMPD/notes")
     [[ -n $old && $old == "$new" ]]
   }
-  both
+  ROUNDCUBE_LOG_DIR="$FIX/roundcube"; both
+  ROUNDCUBE_LOG_DIR="$FIX/webmail/logs"; both
   WARN_MAILS_PER_SASL=100; WARN_IPS_PER_MAILBOX=5; both
   ROUNDCUBE_LOG_DIR="$FIX/webmail/quiet"; both
   ROUNDCUBE_LOG_DIR=/nonexistent; both

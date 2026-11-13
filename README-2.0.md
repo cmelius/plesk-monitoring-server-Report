@@ -57,12 +57,11 @@ To write next to it:
 
 ## Configuration
 
-**Where:** the table of settings.
+**Where:** the table of settings. (`BACKUP_LOG_DIR` came with 1.11.1 and is in the README already; the plugin `backups` uses it.)
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `PLUGINS_OFF` | empty | names of checks that are plugins and should not run, e.g. `"backups webmail"`. Checks of the main script can't be switched off here – they have their own switches. |
-| `PLESK_BACKUP_LOGS` | auto | directory with the logs of Plesk's backups (`backup-*/backup.log`), default `/var/log/plesk/PMM` or `/usr/local/psa/PMM/logs` or `/opt/psa/PMM/logs` |
 
 - `WEBSHELL_CHECK` / `WEBSHELL_IGNORE`: switch and ignore list now apply to the checks `webshell` and `php-config`.
 - `FIND_TIMEOUT`: also the time limit of an hourly plugin; a daily plugin gets three times as much, because it scans all document roots in one go.
@@ -90,7 +89,7 @@ To write next to it:
 ## Tests
 
 - The tests now also cover the plugin framework (`tests/plugins.bats`) and every plugin with its fixtures; each moved check has a parity test against the function it replaced (`tests/legacy/`).
-- Fixtures written by hand (not from a server): the backup logs and the Roundcube logs – unless real anonymized ones replace them before 2.0.
+- Fixtures written by hand (not from a server): only the Roundcube logs in `tests/fixtures/webmail`, for attacks the real logs don't show; the backup and Roundcube tests of 1.11.1 use real, anonymized logs.
 - For contributors: after changing a file in `lib/` or `plugins/`, run `tools/update-plugin-sums.sh`; the tests fail otherwise.
 
 ## Security

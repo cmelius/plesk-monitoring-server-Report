@@ -1,3 +1,0 @@
-[2026-11-11 01:00:03.118|51902] INFO: pmm-ras started : /opt/psa/admin/sbin/pmm-ras --get-dump-list
-[2026-11-11 01:00:06.044|51921] INFO: Backup of domain d44.example started
-[2026-11-11 01:09:52.713|51902] INFO: pmm-ras finished. Exit code: 0

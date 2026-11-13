@@ -66,7 +66,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.11.0
+VERSION=1.11.1
 
 set -uo pipefail
 export LC_ALL=C
@@ -101,10 +101,10 @@ MAIL_LOG=""                   # default: /var/log/maillog or /var/log/mail.log, 
 AUTH_LOG=""                   # SSH logins; default: /var/log/auth.log or /var/log/secure, else the journal
 PLESK_PANEL_LOG=/var/log/plesk/httpsd_access_log   # access log of the Plesk panel (port 8443) – panel logins
 PLESK_ERROR_LOG=/var/log/plesk/panel.log           # Plesk's own log – failed panel logins, failed certificate renewals
-# shellcheck disable=SC2034  # used by the plugin backups
-PLESK_BACKUP_LOGS=""          # directory with the logs of Plesk's backups (backup-*/backup.log); default: the usual places
 # shellcheck disable=SC2034  # used by the plugin webmail
 ROUNDCUBE_LOG_DIR=""          # default: /var/log/plesk-roundcube (or /usr/share/psa-roundcube/logs)
+# shellcheck disable=SC2034  # used by the plugin backups
+BACKUP_LOG_DIR=""             # Plesk backup logs (backup-*/backup.log); default: /var/log/plesk/PMM (or /usr/local/psa/PMM/logs, /opt/psa/PMM/logs)
 
 # Alert thresholds – per run (with an hourly cron job: per hour)
 WARN_MAILS_PER_SENDER=150     # recipients per envelope sender
@@ -142,6 +142,8 @@ MAILAUTH_IGNORE_DOMAINS=""    # space-separated domains to skip
 # DNS resolver for these checks. A public resolver shows what the world sees; the local
 # one (systemd-resolved, Plesk BIND) may answer from local data, e.g. for the server's
 # own hostname or for zones that exist in Plesk but are hosted elsewhere. "" = system resolver
+BLOCKLIST_RESOLVER=""         # DNS resolver for blocklist lookups (IP and domain blocklists). Empty: 127.0.0.1 if a
+                              # resolver answers there (Plesk: BIND), else the system resolver; "system" forces that
 MAILAUTH_RESOLVER="1.1.1.1"
 MAILAUTH_SHOW_ALL=0           # 1 = list every domain, 0 = only domains with findings
 DKIM_KEY_DIR=/etc/domainkeys  # Plesk DKIM private keys: <dir>/<domain>/<selector>
@@ -169,7 +171,7 @@ WEBSHELL_FIRST_DAYS=7         # first run: scan PHP files changed within this ma
 PERSISTENCE_CHECK=1           # SSH keys, accounts with a login shell, sudo, cron/autostart, suspicious processes, new listening ports
 PERSISTENCE_IGNORE=""         # regex on the text of findings to ignore (e.g. a known tool running from /tmp)
 
-DNSBL_LISTS="zen.spamhaus.org bl.spamcop.net b.barracudacentral.org psbl.surriel.com"
+DNSBL_LISTS="zen.spamhaus.org bl.spamcop.net psbl.surriel.com"   # Barracuda: see README (answers registered resolvers only)
 WEB_IGNORE_DOMAINS=""         # space-separated domains without web alerts (still listed)
 # Known legitimate PHP files inside wp-content/uploads (regex on the full path)
 UPLOADS_PHP_IGNORE='/uploads/borlabs-cookie/|/uploads/mailchimp-for-wp/debug-log\.php$'
@@ -206,7 +208,7 @@ PLUGIN_MAX_STATE=1048576       # bytes of STATE lines per plugin
 # sha256sum of lib/*.sh and plugins/*.sh – written by tools/update-plugin-sums.sh, checked by the tests
 # >>> plugin sums
 PLUGIN_SUMS='c2a7e353d70e1f00e8e97ee5106a51f90854c98a014b69ec6ce2505551b8c377  lib/plugin-lib.sh
-9e7bc59eaf72d53e9aa71dba1cfd8db1589b74342b4139d1f420f462bafb17d9  plugins/backups.sh
+f9d83e6d25384577348e8f94c74c9c1ccc853f2c69513cb13d7964c98dde3e8d  plugins/backups.sh
 abab3680694f294bac2d2dc5fc52f4cc8090644ce27075cb0fbb35eea64c643a  plugins/panel.sh
 62c05f2ba28f2da961ed0181df78ecd800a9e477e3d10f46fb3432d83d660825  plugins/php-config.sh
 27ab6638bb38af2c4be885dc8d0c74b83cb635fb2e26b313c2b7d8cdd83dd317  plugins/webmail.sh'
@@ -485,6 +487,30 @@ _spf() {
   if [[ -n $red ]]; then SPF_LOOKUPS=$((SPF_LOOKUPS + 1)); _spf "$red" "$ip" $((depth + 1)); return; fi
   SPF_RES=fail
 }
+# Blocklists (Spamhaus, URIBL, …) refuse queries from large shared resolvers – the hosting
+# provider's DNS that the system resolver often forwards to. So ask the server's own resolver
+# on 127.0.0.1 when one answers there (on Plesk: BIND). bl_lookup NAME → first A record or "".
+bl_init() {
+  [[ -n ${BL_VIA:-} ]] && return 0
+  BL_SERVER=""
+  case $BLOCKLIST_RESOLVER in
+    system) ;;
+    "") command -v dig >/dev/null &&
+          dig +time=2 +tries=1 @127.0.0.1 . NS 2>/dev/null | grep -q 'status: NOERROR' && BL_SERVER=127.0.0.1 ;;
+    *)  command -v dig >/dev/null && BL_SERVER=$BLOCKLIST_RESOLVER ;;
+  esac
+  BL_VIA=${BL_SERVER:-system resolver}
+}
+bl_lookup() {
+  bl_init
+  if [[ -n $BL_SERVER ]]; then
+    dig +short +time=3 +tries=1 @"$BL_SERVER" "$1" A 2>/dev/null | grep -m1 -E '^[0-9]+(\.[0-9]+){3}$'
+  else
+    getent ahostsv4 "$1" 2>/dev/null | awk 'NR == 1 { print $1 }'
+  fi
+  return 0
+}
+
 dig_status() {   # dig_status NAME TYPE → NOERROR | NXDOMAIN | SERVFAIL | … (via MAILAUTH_RESOLVER)
   dig +time=3 +tries=2 ${MAILAUTH_RESOLVER:+"@$MAILAUTH_RESOLVER"} "$2" "$1" 2>/dev/null |
     sed -n 's/.*status: \([A-Z]*\).*/\1/p' | head -1
@@ -765,19 +791,19 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
 
   if is_public_ipv4 "$PUBIP"; then
     REV=$(awk -F. '{print $4"."$3"."$2"."$1}' <<<"$PUBIP")
-    BLRES=""
+    BLRES=""; bl_init   # here, not inside $( ) – the choice of resolver must stick
     for bl in $DNSBL_LISTS; do
       # the test entry 127.0.0.2 (RFC 5782) must be listed – no answer means the list doesn't
       # answer this server (not registered, rate limited, resolver blocked), not "clean"
-      t=$(getent ahostsv4 "2.0.0.127.$bl" 2>/dev/null | awk 'NR==1{print $1}')
-      r=$(getent ahostsv4 "$REV.$bl" 2>/dev/null | awk 'NR==1{print $1}')
+      t=$(bl_lookup "2.0.0.127.$bl")
+      r=$(bl_lookup "$REV.$bl")
       if [[ $t == 127.255.255.* || $r == 127.255.255.* ]]; then BLRES+=" $bl:query-refused"
       elif [[ -z $t ]]; then BLRES+=" $bl:no-answer"
       elif [[ -z $r ]]; then BLRES+=" $bl:clean"
       else BLRES+=" $bl:LISTED($r)"; alert "Mail: server IP $PUBIP is listed on $bl"
       fi
     done
-    out "DNS blocklists for $PUBIP:$BLRES"
+    out "DNS blocklists for $PUBIP:$BLRES (queried via $BL_VIA)"
   fi
 
   out ""; out "Top senders (total recipients):"
@@ -1919,7 +1945,7 @@ check_mailtls() {   # certificate of the mail server on the mail ports
 check_domaindns() {   # still pointing here?, CAA vs. Let's Encrypt, DNSSEC, domain blocklists
   local d st a aaaa here caa par n=0 out="" r bl
   cert_scan   # Let's Encrypt sites for the CAA check
-  BL_REFUSED=""
+  BL_REFUSED=""; bl_init
   for d in $(site_domains); do
     [[ $d == "$HOST" || $d =~ ^[0-9.]+$ ]] && continue
     n=$((n + 1))
@@ -1957,7 +1983,7 @@ check_domaindns() {   # still pointing here?, CAA vs. Let's Encrypt, DNSSEC, dom
     fi
     # domain blocklists (listed domains: phishing/malware on a hacked site, or spam links)
     for bl in $DOMAIN_BLOCKLISTS; do
-      r=$(getent ahostsv4 "$d.$bl" 2>/dev/null | awk 'NR==1{print $1}')
+      r=$(bl_lookup "$d.$bl")
       [[ -z $r ]] && continue
       case "$bl:$r" in
         *:127.255.255.*|dbl.spamhaus.org:127.0.1.255|multi.surbl.org:127.0.0.1|multi.uribl.com:127.0.0.1) BL_REFUSED+=" $bl" ;;
@@ -1969,6 +1995,7 @@ check_domaindns() {   # still pointing here?, CAA vs. Let's Encrypt, DNSSEC, dom
   echo ""; echo "Domain DNS (points here? CAA, DNSSEC, domain blocklists):"
   [[ -n $out ]] && printf '%s' "$out"
   echo "  $n domain(s) checked, findings listed above"
+  [[ -n ${DOMAIN_BLOCKLISTS// /} ]] && { bl_init; echo "  domain blocklists queried via $BL_VIA"; }
   [[ -n ${BL_REFUSED:-} ]] && echo "  note: some blocklists refused queries from this resolver:$(tr ' ' '\n' <<<"$BL_REFUSED" | sort -u | xargs -r echo ' ')"
   return 0
 }
