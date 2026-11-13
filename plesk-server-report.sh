@@ -2442,6 +2442,16 @@ run_daily() {   # run_daily NAME… – section text to stdout, alerts to $DALER
 # After an update or a change of the configuration file they run again right away, so the
 # daily checks show the new results (and the new version line) at once instead of from the
 # next night on. "Update" means the script file changed – also between two releases.
+# They also run again after packages were installed or removed (apt/dnf upgrade): otherwise a
+# security update you just installed would stay in the report as pending until the next day.
+PKG_DB=""   # the package database whose time counts; empty: dpkg's, or the RPM database
+pkgdb_stamp() {   # pkgdb_stamp – modification time of the package database, or nothing
+  local f
+  for f in ${PKG_DB:-/var/lib/dpkg/status /var/lib/rpm/rpmdb.sqlite /var/lib/rpm/Packages}; do
+    [[ -f $f ]] && { stat -c %Y "$f" 2>/dev/null; return 0; }
+  done
+  return 0
+}
 self_sum() {   # self_sum – short checksum of this script and its configuration file
   cat "$(readlink -f "$0" 2>/dev/null || echo "$0")" "$CONF" 2>/dev/null |
     { sha256sum 2>/dev/null || cksum; } | awk '{print substr($1, 1, 12)}'
@@ -2449,7 +2459,7 @@ self_sum() {   # self_sum – short checksum of this script and its configuratio
 daily_checks() {
   local daily="$STATE_DIR/daily.txt" a stamp
   DALERTS="$STATE_DIR/daily_alerts.txt"
-  stamp="$(date +%F) $VERSION $(self_sum)"
+  stamp="$(date +%F) $VERSION $(self_sum) $(pkgdb_stamp)"
   if [[ $(cat "$STATE_DIR/daily_date" 2>/dev/null) != "$stamp" ]]; then
     # mark the day first: if a daily check makes the run abort, the next runs still report hourly
     echo "$stamp" >"$STATE_DIR/daily_date"
@@ -3076,7 +3086,7 @@ is always reported). Processes are not stored – they are checked live in every
 
 | File | Content |
 |---|---|
-| `daily_date` | the day (YYYY-MM-DD), the script version and a checksum of the script and its configuration file of the last daily checks – they run in the first run of a new day, and right after the script or the configuration file changed. Delete it to run them again in the next run. |
+| `daily_date` | the day (YYYY-MM-DD), the script version, a checksum of the script and its configuration file, and the time of the package database at the last daily checks – they run in the first run of a new day, and right after the script or the configuration file changed or packages were installed (so an installed update leaves the report at once). Delete it to run them again in the next run. |
 | `daily.txt` | their output, repeated in every report of that day under DAILY CHECKS. |
 | `daily_alerts.txt` | their alerts, repeated in every report of that day. |
 

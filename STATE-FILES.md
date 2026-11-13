@@ -70,7 +70,7 @@ is always reported). Processes are not stored – they are checked live in every
 
 | File | Content |
 |---|---|
-| `daily_date` | the day (YYYY-MM-DD), the script version and a checksum of the script and its configuration file of the last daily checks – they run in the first run of a new day, and right after the script or the configuration file changed. Delete it to run them again in the next run. |
+| `daily_date` | the day (YYYY-MM-DD), the script version, a checksum of the script and its configuration file, and the time of the package database at the last daily checks – they run in the first run of a new day, and right after the script or the configuration file changed or packages were installed (so an installed update leaves the report at once). Delete it to run them again in the next run. |
 | `daily.txt` | their output, repeated in every report of that day under DAILY CHECKS. |
 | `daily_alerts.txt` | their alerts, repeated in every report of that day. |
 
