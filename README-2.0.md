@@ -6,6 +6,32 @@ Parts marked **(planned)** describe something the branch has not built yet; chec
 
 ---
 
+## Introduction: "A single bash script"
+
+**Where:** the first sentence of the README. "A single bash script that writes …" → "A bash script with a few plugin files that writes …" (or similar).
+
+## Why plugins (new section)
+
+**Where:** a new section right after the introduction, before *Quick start*, with a link in *Contents*. Text:
+
+> ### Why plugins
+>
+> Since 2.0, the checks that depend on specific software – Plesk's own log, Plesk backups, Roundcube, PHP settings in `.htaccess`, `.user.ini` and `php.ini` – are plugins: small files in `plugins/`, shipped with each release. The rest of the script does what is the same on every server.
+>
+> - **Only checked plugins run.** The script holds a SHA-256 checksum of every plugin file of its release. A file that is missing, changed or not on that list does not run, and the report says so. The file must also belong to root and be writable by nobody else. There is no folder for plugins of your own or from third parties: every plugin is reviewed like the script and released with it.
+> - **Clear limits.** A plugin answers only with report lines, notes, alerts and its own state. It can't touch the alerts of other checks, the status line or the state files, and it sees only the settings it needs – not the upload target or the mail settings, for example.
+> - **A failure costs one section, not the run.** A plugin that fails or hangs is stopped at its time limit and reported; the other checks run as usual.
+> - **Software-specific parts in one place.** Support for another CMS or mail setup (see [Using another CMS?](#using-another-cms-help-wanted)) has a clear home: a new plugin.
+> - **Each plugin can be switched off** with `PLUGINS_OFF`.
+> - **Each plugin is tested on its own**, and the automatic checks make sure no plugin contains network or changing commands. When a check became a plugin, a test showed that it reports exactly what it reported before.
+>
+> What it costs:
+>
+> - **More than one file.** Installation and updates use a release archive with checksums instead of a single `curl` command, see [Installation](#installation).
+> - **More parts that must fit together.** A partial update – the script of one release, a plugin of another – is not run silently: every check whose file is missing or differs raises an alert.
+> - **No protection against root.** Whoever can change root's files could change the script as well. The checksums guard against half-finished updates, mixed versions and files slipped into the folder – not against an attacker who is already root. Plugins run as root like the script, without a sandbox.
+> - **A little more run time:** each plugin is a process of its own.
+
 ## Quick start, Installation, Updates: install from the release archive (planned)
 
 **Where:** the code blocks in *Quick start*, *Installation* and *Updates*; the sentence about `curl` in *Requirements*.
