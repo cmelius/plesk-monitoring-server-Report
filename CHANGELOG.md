@@ -2,7 +2,7 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [1.12.0] – not yet released (on `main`)
+## [1.12.0] – 2026-11-14
 
 ### Added
 - **`--self-update`**: the script updates itself to the newest **1.x** release – started by hand, as root, in a terminal (never from cron; a git checkout is refused). It downloads the script of the release tag from GitHub into a temporary file next to the installed one, checks it without running it (`bash -n`, its `VERSION` line must be the expected version), shows the CHANGELOG sections since the installed version and asks (`--yes` skips the question). It waits for a running report, keeps the previous version as `plesk-server-report.sh.old` in the state directory and replaces the script with `mv`. `--self-update --rollback` brings the kept version back. With the same version number it compares the files, so a copy taken from `main` before the release is replaced by the release; it lists the commits the release adds to that copy (found by git's checksum of the file, without git installed).
