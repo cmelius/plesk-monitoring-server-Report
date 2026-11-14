@@ -5,6 +5,7 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 ## [1.12.1] – not yet released (on `main`)
 
 ### Fixed
+- **"Reboot required" stayed after the reboot** until the next day: the daily checks (where it comes from) ran again after a package update, but not after a reboot. Now the boot ID is part of their stamp, so they run again in the first run after a reboot.
 - **`--self-update` showed too much of the CHANGELOG** when the installed version has no section of its own – a number that never became a release, as on a copy taken from `main` (e.g. 1.11.1): it printed everything down to its 80-line limit. It now shows the sections newer than the installed version, and stops at the first one that isn't.
 
 ## [1.12.0] – 2026-11-14

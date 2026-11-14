@@ -2453,8 +2453,9 @@ run_daily() {   # run_daily NAME… – section text to stdout, alerts to $DALER
 # After an update or a change of the configuration file they run again right away, so the
 # daily checks show the new results (and the new version line) at once instead of from the
 # next night on. "Update" means the script file changed – also between two releases.
-# They also run again after packages were installed or removed (apt/dnf upgrade): otherwise a
-# security update you just installed would stay in the report as pending until the next day.
+# They also run again after packages were installed or removed (apt/dnf upgrade), and after a
+# reboot: otherwise an installed security update, or "reboot required" after the reboot, would
+# stay in the report until the next day.
 PKG_DB=""   # the package database whose time counts; empty: dpkg's, or the RPM database
 pkgdb_stamp() {   # pkgdb_stamp – modification time of the package database, or nothing
   local f
@@ -2463,6 +2464,8 @@ pkgdb_stamp() {   # pkgdb_stamp – modification time of the package database, o
   done
   return 0
 }
+BOOT_ID_FILE=/proc/sys/kernel/random/boot_id   # changes with every boot (Linux)
+boot_stamp() { [[ -r $BOOT_ID_FILE ]] && cat "$BOOT_ID_FILE"; return 0; }
 self_sum() {   # self_sum – short checksum of this script and its configuration file
   cat "$(readlink -f "$0" 2>/dev/null || echo "$0")" "$CONF" 2>/dev/null |
     { sha256sum 2>/dev/null || cksum; } | awk '{print substr($1, 1, 12)}'
@@ -2470,7 +2473,7 @@ self_sum() {   # self_sum – short checksum of this script and its configuratio
 daily_checks() {
   local daily="$STATE_DIR/daily.txt" a stamp
   DALERTS="$STATE_DIR/daily_alerts.txt"
-  stamp="$(date +%F) $VERSION $(self_sum) $(pkgdb_stamp)"
+  stamp="$(date +%F) $VERSION $(self_sum) $(pkgdb_stamp) $(boot_stamp)"
   if [[ $(cat "$STATE_DIR/daily_date" 2>/dev/null) != "$stamp" ]]; then
     # mark the day first: if a daily check makes the run abort, the next runs still report hourly
     echo "$stamp" >"$STATE_DIR/daily_date"
@@ -3104,7 +3107,7 @@ is always reported). Processes are not stored – they are checked live in every
 
 | File | Content |
 |---|---|
-| `daily_date` | the day (YYYY-MM-DD), the script version, a checksum of the script and its configuration file, and the time of the package database at the last daily checks – they run in the first run of a new day, and right after the script or the configuration file changed or packages were installed (so an installed update leaves the report at once). Delete it to run them again in the next run. |
+| `daily_date` | the day (YYYY-MM-DD), the script version, a checksum of the script and its configuration file, the time of the package database and the boot ID of the last daily checks – they run in the first run of a new day, and right after the script or the configuration file changed, packages were installed or the server was rebooted (so an installed update, and "reboot required" after the reboot, leave the report at once). Delete it to run them again in the next run. |
 | `daily.txt` | their output, repeated in every report of that day under DAILY CHECKS. |
 | `daily_alerts.txt` | their alerts, repeated in every report of that day. |
 
