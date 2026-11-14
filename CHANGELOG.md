@@ -2,14 +2,22 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [1.12.0] – not yet released (on `main`)
+## [1.12.1] – not yet released (on `main`)
+
+### Fixed
+- `--self-update` removes control characters from the downloaded CHANGELOG before it shows it, as it did for commit messages already – text from the download can't put terminal control sequences on the screen.
+- **"Reboot required" stayed after the reboot** until the next day: the daily checks (where it comes from) ran again after a package update, but not after a reboot. Now the boot ID is part of their stamp, so they run again in the first run after a reboot.
+- **`--self-update` showed too much of the CHANGELOG** when the installed version has no section of its own – a number that never became a release, as on a copy taken from `main` (e.g. 1.11.1): it printed everything down to its 80-line limit. It now shows the sections newer than the installed version, and stops at the first one that isn't.
+
+## [1.12.0] – 2026-11-14
 
 ### Added
-- **`--self-update`**: the script updates itself to the newest **1.x** release – started by hand, as root, in a terminal (never from cron; a git checkout is refused). It downloads the script of the release tag from GitHub into a temporary file next to the installed one, checks it (`bash -n`, `--version` must report the expected version), shows the CHANGELOG sections since the installed version and asks (`--yes` skips the question). It waits for a running report, keeps the previous version as `plesk-server-report.sh.old` in the state directory and replaces the script with `mv`. `--self-update --rollback` brings the kept version back.
+- **`--self-update`**: the script updates itself to the newest **1.x** release – started by hand, as root, in a terminal (never from cron; a git checkout is refused). It downloads the script of the release tag from GitHub into a temporary file next to the installed one, checks it without running it (`bash -n`, its `VERSION` line must be the expected version), shows the CHANGELOG sections since the installed version and asks (`--yes` skips the question). It waits for a running report, keeps the previous version as `plesk-server-report.sh.old` in the state directory and replaces the script with `mv`. `--self-update --rollback` brings the kept version back. With the same version number it compares the files, so a copy taken from `main` before the release is replaced by the release; it lists the commits the release adds to that copy (found by git's checksum of the file, without git installed).
 - **Version 2 is not installed by it.** 1.x looks for the newest 1.x release, so 1.x can still get fixes after version 2 is out; a newer major version is only mentioned (by `--self-update` and the daily check). `--self-update --major` is reserved for the switch to version 2 and says that it isn't available yet. The public key that will check the signed version 2 archives is built in already (`RELEASE_KEY`), so that this check won't depend on a download.
 - README: *Updates* (with `--self-update`, `curl` for installations up to 1.11.x), *Updating from 1.x*, *Security*, *Check it before you run it as root*; STATE-FILES: `plesk-server-report.sh.old`.
 
 ### Changed
+- Release key replaced (the previous one was never used to sign a release).
 - **Deferred deliveries: attempts and mails.** The table of outgoing deliveries counted deferred *attempts* – Postfix logs one line per retry, so a single mail that a provider kept refusing could show up as dozens. Now the number of distinct mails follows in brackets, e.g. `29 (7 mails)`, in the report and in `summary.txt` (for the summary from the new state file `deferred_mails`).
 - The daily update check compares with the newest release of the installed major version (`latest 1.x release`) and names a newer major version separately.
 - **Barracuda removed from the default IP blocklists** (`DNSBL_LISTS`). It answers only DNS servers registered with Barracuda, and the registration page has not been reachable for some time. Its `clean` so far came through the hosting provider's resolver (registered there); asked through the server's own resolver, it doesn't answer – the test entry shows `no-answer`. README: how to add it again, and how to send blocklist queries through the system resolver.

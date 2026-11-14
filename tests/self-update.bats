@@ -16,6 +16,7 @@ setup() {
   LATEST=9.9.9; OVERALL=9.9.9
   latest_release_in_major() { echo "$LATEST"; }   # the newest release of this major version
   latest_release() { echo "$OVERALL"; }           # the newest of all
+  su_fetch() { [[ -f ${1#file://} ]] && cp "${1#file://}" "$2"; }   # the real one takes HTTPS only
 }
 
 # release [VERSION] – builds the release 9.9.9 (the files of this checkout, with that version) in $R
@@ -204,4 +205,30 @@ untouched() { [ ! -e "$I.old" ] && [ ! -e "$I.new" ] && grep -q "^VERSION=$VERSI
   ! grep -E '^.....w|^........w' <<<"$output"
   grep -E '^-rwxr-xr-x .* plesk-server-report.sh$' <<<"$output"
   (cd "$BATS_TEST_TMPDIR/dist" && sha256sum -c SHA256SUMS)
+}
+
+# repack – the release from the stage folder again, after a test changed it, signed
+repack() {
+  (cd "$BATS_TEST_TMPDIR/stage" && tar -czf "$R/v9.9.9/plesk-server-report.tar.gz" .)
+  (cd "$R/v9.9.9" && sha256sum plesk-server-report.tar.gz >SHA256SUMS); sign
+}
+
+@test "nothing of the new version runs before the answer" {
+  release
+  sed -i "2i touch '$BATS_TEST_TMPDIR/ran'" "$BATS_TEST_TMPDIR/stage/plesk-server-report.sh"; repack
+  run self_update <<<"n"
+  [ "$status" -eq 0 ]; [[ $output == *"test of the new version: good"*"nothing changed"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/ran" ]
+  untouched
+}
+
+@test "changes: only the sections newer than the installed version, without control sequences" {
+  release
+  printf '# Changelog\n\n## [9.9.9] – new\n- a fix \033[2J\033]0;owned\a\n\n## [9.0.0] – between\n- between entry\n\n## [1.0.0] – older\n- older entry\n' >"$BATS_TEST_TMPDIR/stage/CHANGELOG.md"
+  repack
+  run self_update <<<"n"
+  [[ $output == *"- a fix"*"- between entry"* ]]   # 9.0.0 is newer than the installed version, though it has no section of its own here
+  [[ $output != *"older entry"* ]]
+  run bash -c "LC_ALL=C grep -c \$'\\x1b' <<<\"\$1\"" _ "$output"
+  [ "$output" = 0 ]
 }

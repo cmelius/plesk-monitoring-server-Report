@@ -79,7 +79,7 @@ a normal run, not with `--only`. Delete a file and that plugin starts from scrat
 
 | File | Content |
 |---|---|
-| `daily_date` | the day (YYYY-MM-DD), the script version, a checksum of the script and its configuration file, and the time of the package database at the last daily checks – they run in the first run of a new day, and right after the script or the configuration file changed or packages were installed (so an installed update leaves the report at once). Delete it to run them again in the next run. |
+| `daily_date` | the day (YYYY-MM-DD), the script version, a checksum of the script and its configuration file, the time of the package database and the boot ID of the last daily checks – they run in the first run of a new day, and right after the script or the configuration file changed, packages were installed or the server was rebooted (so an installed update, and "reboot required" after the reboot, leave the report at once). Delete it to run them again in the next run. |
 | `daily.txt` | their output, repeated in every report of that day under DAILY CHECKS. |
 | `daily_alerts.txt` | their alerts, repeated in every report of that day. |
 

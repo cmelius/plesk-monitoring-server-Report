@@ -75,7 +75,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.12.0
+VERSION=1.12.1
 
 set -uo pipefail
 export LC_ALL=C
@@ -2483,8 +2483,9 @@ run_daily() {   # run_daily NAME… – section text to stdout, alerts to $DALER
 # After an update or a change of the configuration file they run again right away, so the
 # daily checks show the new results (and the new version line) at once instead of from the
 # next night on. "Update" means the script file changed – also between two releases.
-# They also run again after packages were installed or removed (apt/dnf upgrade): otherwise a
-# security update you just installed would stay in the report as pending until the next day.
+# They also run again after packages were installed or removed (apt/dnf upgrade), and after a
+# reboot: otherwise an installed security update, or "reboot required" after the reboot, would
+# stay in the report until the next day.
 PKG_DB=""   # the package database whose time counts; empty: dpkg's, or the RPM database
 pkgdb_stamp() {   # pkgdb_stamp – modification time of the package database, or nothing
   local f
@@ -2493,6 +2494,8 @@ pkgdb_stamp() {   # pkgdb_stamp – modification time of the package database, o
   done
   return 0
 }
+BOOT_ID_FILE=/proc/sys/kernel/random/boot_id   # changes with every boot (Linux)
+boot_stamp() { [[ -r $BOOT_ID_FILE ]] && cat "$BOOT_ID_FILE"; return 0; }
 self_sum() {   # self_sum – short checksum of this script and its configuration file
   cat "$(readlink -f "$0" 2>/dev/null || echo "$0")" "$CONF" 2>/dev/null |
     { sha256sum 2>/dev/null || cksum; } | awk '{print substr($1, 1, 12)}'
@@ -2500,7 +2503,7 @@ self_sum() {   # self_sum – short checksum of this script and its configuratio
 daily_checks() {
   local daily="$STATE_DIR/daily.txt" a stamp
   DALERTS="$STATE_DIR/daily_alerts.txt"
-  stamp="$(date +%F) $VERSION $(self_sum) $(pkgdb_stamp)"
+  stamp="$(date +%F) $VERSION $(self_sum) $(pkgdb_stamp) $(boot_stamp)"
   if [[ $(cat "$STATE_DIR/daily_date" 2>/dev/null) != "$stamp" ]]; then
     # mark the day first: if a daily check makes the run abort, the next runs still report hourly
     echo "$stamp" >"$STATE_DIR/daily_date"
@@ -3154,7 +3157,7 @@ a normal run, not with `--only`. Delete a file and that plugin starts from scrat
 
 | File | Content |
 |---|---|
-| `daily_date` | the day (YYYY-MM-DD), the script version, a checksum of the script and its configuration file, and the time of the package database at the last daily checks – they run in the first run of a new day, and right after the script or the configuration file changed or packages were installed (so an installed update leaves the report at once). Delete it to run them again in the next run. |
+| `daily_date` | the day (YYYY-MM-DD), the script version, a checksum of the script and its configuration file, the time of the package database and the boot ID of the last daily checks – they run in the first run of a new day, and right after the script or the configuration file changed, packages were installed or the server was rebooted (so an installed update, and "reboot required" after the reboot, leave the report at once). Delete it to run them again in the next run. |
 | `daily.txt` | their output, repeated in every report of that day under DAILY CHECKS. |
 | `daily_alerts.txt` | their alerts, repeated in every report of that day. |
 
@@ -3271,7 +3274,7 @@ RELEASE_SIGNER=cmelius
 RELEASE_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBwQHy40R5vtIHxSSKofpOmJe3yW8LnONdOoWJyY/THA"   # the maintainer's public key; empty: no --self-update
 SU_YES=0; SU_ROLLBACK=0; SU_MAJOR=0
 su_fail() { echo "self-update: $*" >&2; [[ -n ${SU_WORK:-} ]] && rm -rf "$SU_WORK"; return 1; }
-su_ask() {   # su_ask QUESTION – yes unless the answer is no; with --yes always yes
+su_ask() {   # su_ask QUESTION – yes only for an answer starting with y (or j); with --yes always yes
   local a
   (( SU_YES )) && return 0
   read -r -p "$1 [y/N] " a || return 1
@@ -3321,6 +3324,7 @@ su_verify() {
   fi
 }
 su_by_hand() { [[ -t 0 || -t 1 ]]; }   # a terminal: started by hand, not by cron
+su_fetch() { curl -fsSL --proto =https --connect-timeout 10 --max-time 300 --max-filesize 20000000 -o "$2" "$1"; }   # su_fetch URL FILE – HTTPS only, at most 20 MB
 su_major_note() {   # a newer major version: only a note
   local other
   other=$(latest_release)
@@ -3338,13 +3342,14 @@ self_update() {
   fi
   if (( SU_ROLLBACK )); then
     [[ -f $PSR_HOME.old/plesk-server-report.sh ]] || { su_fail "there is no previous version ($PSR_HOME.old)"; return 1; }
-    v=$(bash "$PSR_HOME.old/plesk-server-report.sh" --version 2>/dev/null)
-    su_ask "Go back from $VERSION to ${v#plesk-server-report }?" || { echo "nothing changed"; return 0; }
+    v=$(sed -n 's/^VERSION=//p' "$PSR_HOME.old/plesk-server-report.sh" | head -1)
+    su_ask "Go back from $VERSION to ${v:-the kept version}?" || { echo "nothing changed"; return 0; }
     su_lock || return 1
     if ! { rm -rf "$PSR_HOME.back" && mv "$PSR_HOME" "$PSR_HOME.back" && mv "$PSR_HOME.old" "$PSR_HOME" && mv "$PSR_HOME.back" "$PSR_HOME.old"; }; then
       su_fail "could not swap the folders – check $PSR_HOME, $PSR_HOME.old and $PSR_HOME.back"; return 1
     fi
-    echo "back to ${v#plesk-server-report }; version $VERSION is kept in $PSR_HOME.old (--self-update --rollback swaps again)"
+    exec 9>&-                          # release the lock
+    echo "back to ${v:-the kept version}; version $VERSION is kept in $PSR_HOME.old (--self-update --rollback swaps again)"
     return 0
   fi
   latest=$(latest_release_in_major "${VERSION%%.*}")
@@ -3361,31 +3366,44 @@ self_update() {
   SU_WORK=$(mktemp -d "$STATE_DIR/self-update.XXXXXX") || { su_fail "no temporary folder in $STATE_DIR"; return 1; }
   d=$SU_WORK
   for v in "$RELEASE_ARCHIVE" SHA256SUMS SHA256SUMS.sig; do
-    curl -fsSL --connect-timeout 10 --max-time 300 -o "$d/$v" "$RELEASE_URL/v$latest/$v" ||
-      { su_fail "download of $RELEASE_URL/v$latest/$v failed"; return 1; }
+    su_fetch "$RELEASE_URL/v$latest/$v" "$d/$v" || { su_fail "download of $RELEASE_URL/v$latest/$v failed"; return 1; }
   done
   su_verify "$d" || return 1
   if ! { rm -rf "$new" && mkdir -m 755 "$new" && tar -xzf "$d/$RELEASE_ARCHIVE" -C "$new" --no-same-owner; }; then
     rm -rf "$new"; su_fail "could not unpack the archive into $new"; return 1
   fi
   chmod 755 "$new/plesk-server-report.sh"   # cron runs it through the link in /usr/local/sbin
-  # the new version checks itself: syntax, version, its plugin files
-  if ! bash -n "$new/plesk-server-report.sh" || [[ $(bash "$new/plesk-server-report.sh" --version 2>/dev/null) != "plesk-server-report $latest" ]] ||
-     ! v=$(bash "$new/plesk-server-report.sh" --verify 2>&1); then
-    rm -rf "$new"; su_fail "the new version failed its test – nothing installed${v:+: $v}"; return 1
+  # test the new version without running it (nothing of it runs as root before you said yes):
+  # valid bash, and its VERSION line is the expected version
+  if ! bash -n "$new/plesk-server-report.sh" 2>/dev/null || [[ $(sed -n 's/^VERSION=//p' "$new/plesk-server-report.sh" | head -1) != "$latest" ]]; then
+    rm -rf "$new"; su_fail "the new version failed its test (syntax, or not version $latest) – nothing installed"; return 1
   fi
   echo "test of the new version: good"
   if [[ -f $new/CHANGELOG.md ]]; then
     echo ""; echo "Changes:"
-    awk -v cur="$VERSION" '/^## \[/ { if (index($0, "[" cur "]")) exit; p = 1 } p' "$new/CHANGELOG.md" | head -80
+    # every section newer than the installed version – also when that version has no section of
+    # its own (a number that never became a release, e.g. a copy from main)
+    awk -v cur="$VERSION" '
+      function newer(a, b,   x, y, i) {
+        split(a, x, "."); split(b, y, ".")
+        for (i = 1; i <= 3; i++) { if (x[i] + 0 > y[i] + 0) return 1; if (x[i] + 0 < y[i] + 0) return 0 }
+        return 0
+      }
+      /^## \[/ { v = $0; sub(/^## \[/, "", v); sub(/\].*/, "", v); if (!newer(v, cur)) exit; p = 1 } p' "$new/CHANGELOG.md" |
+      LC_ALL=C tr -d '\000-\010\013-\037\177' | head -80   # downloaded text: no terminal control sequences
     echo ""
   fi
   su_ask "Install version $latest now?" || { rm -rf "$new" "$d"; echo "nothing changed"; return 0; }
+  # only now the new version runs: it checks its own plugin files
+  if ! v=$(bash "$new/plesk-server-report.sh" --verify 2>&1); then
+    rm -rf "$new"; su_fail "the new version failed its test – nothing installed${v:+: $v}"; return 1
+  fi
   su_lock || { rm -rf "$new"; return 1; }
   if ! { rm -rf "$PSR_HOME.old" && mv "$PSR_HOME" "$PSR_HOME.old" && mv "$new" "$PSR_HOME"; }; then
     [[ -d $PSR_HOME ]] || mv "$PSR_HOME.old" "$PSR_HOME"
     su_fail "could not swap the folders – check $PSR_HOME and $PSR_HOME.old"; return 1
   fi
+  exec 9>&-                            # release the lock
   rm -rf "$d"
   echo "installed version $latest. The previous version $VERSION is kept in $PSR_HOME.old (--self-update --rollback goes back)."
   echo "Test it with your configuration: plesk-server-report.sh --only services"
