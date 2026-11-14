@@ -12,7 +12,7 @@ setup() {
   cp -r "$FIX/web/." "$VHOST_LOGS/"
   U1="$V/d1.example/httpdocs/wp-content/uploads"; U2="$V/d2.example/httpdocs/wp-content/uploads"
   : >"$U1/index.php"; : >"$U1/2026/11/photo.jpg"; : >"$U1/2026/11/x.php"; : >"$U2/shell.phtml"
-  mkdir -p "$U1/borlabs-cookie"; : >"$U1/borlabs-cookie/ok.php"
+  mkdir -p "$U1/mailchimp-for-wp"; : >"$U1/mailchimp-for-wp/debug-log.php"   # the log of Mailchimp for WP: ignored by default
   mkdir -p "$VHOST_LOGS/d1.example/wp-content/uploads"; : >"$VHOST_LOGS/d1.example/wp-content/uploads/no.php"   # below system/: not a site
   # git keeps no file times: everything was changed two days ago (the inode change time is now,
   # so a test that needs files older than a scan waits a second: wait_)
@@ -74,7 +74,7 @@ attacks() {
   run report
   [[ $output == *"PHP files in upload folders (wp-content/uploads):"*"First run – existing PHP files (excluding index.php): 2"* ]]
   [[ $output == *"  $U1/2026/11/x.php"* && $output == *"  $U2/shell.phtml"* ]]
-  [[ $output != *"index.php"*"index.php"* && $output != *"ok.php"* && $output != *"no.php"* ]]   # UPLOADS_PHP_IGNORE, system/
+  [[ $output != *"index.php"*"index.php"* && $output != *"debug-log.php"* && $output != *"no.php"* ]]   # UPLOADS_PHP_IGNORE, system/
   [[ $(alerts) == *"Web: 2 PHP file(s) found in wp-content/uploads – check whether legitimate"* ]]
   [[ $(state) =~ ^last_scan\ [0-9]{10}\.[0-9]{9}$ ]]
   wait_; ALERTS=(); : >"$BODY"

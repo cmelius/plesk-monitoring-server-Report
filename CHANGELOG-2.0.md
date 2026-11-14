@@ -31,3 +31,4 @@ The design is described in [docs/plugin-concept.md](docs/plugin-concept.md); the
 - The script no longer consists of one file: `lib/` and `plugins/` must be installed next to it, from the release archive (README: Installation).
 - File names with a line break: `php-config` and `wordpress` read file lists separated by NUL, so a folder whose name holds a line break hides no file from them; such a line break is shown as `?`. A plugin's line can't be split into two any more (`out`, `alert`, `note`, `state` turn a line break into a space), so a file name can't forge an alert or a state line.
 - The release workflow refuses to build from a branch other than `main`.
+- `UPLOADS_PHP_IGNORE` no longer ignores everything in `wp-content/uploads/borlabs-cookie/` by default: Borlabs Cookie keeps no PHP files there, and a webshell placed in that folder went unreported. The log of Mailchimp for WP (`mailchimp-for-wp/debug-log.php`) stays ignored. (Also for `main`.)

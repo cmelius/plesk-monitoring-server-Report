@@ -187,7 +187,7 @@ DNSBL_LISTS="zen.spamhaus.org bl.spamcop.net psbl.surriel.com"   # Barracuda: se
 WEB_IGNORE_DOMAINS=""         # space-separated domains without web alerts (still listed)
 # Known legitimate PHP files inside wp-content/uploads (regex on the full path)
 # shellcheck disable=SC2034  # used by the plugin wordpress
-UPLOADS_PHP_IGNORE='/uploads/borlabs-cookie/|/uploads/mailchimp-for-wp/debug-log\.php$'
+UPLOADS_PHP_IGNORE='/uploads/mailchimp-for-wp/debug-log\.php$'
 
 # GeoIP: country + network operator of IPs from a local DB-IP Lite database
 # (downloaded and refreshed monthly by the script). Needs mmdblookup:
