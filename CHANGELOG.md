@@ -5,6 +5,7 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 ## [1.12.1] – not yet released (on `main`)
 
 ### Fixed
+- **Greylisting raised the blocklist alert.** A reply like `450 4.2.0 … Greylisted` (postgrey) matched the word "listed" and counted as a rejection for spam or a blocklist. Greylisting only delays the first mail from an unknown server by a few minutes; it is no longer counted.
 - **A line break in a folder name hid files from the scans.** The webshell scan, the `.htaccess`/`.user.ini` scan and the scan for PHP files in upload folders passed file names separated by line breaks: a folder named with a line break split the name, so a backdoor inside was not checked. File names are now separated by NUL; a line break in a name is shown as `?`.
 - **`UPLOADS_PHP_IGNORE` no longer skips the whole `uploads/borlabs-cookie/` folder** – Borlabs Cookie keeps no PHP there, and a webshell in it went unnoticed. The default is now only Mailchimp for WP's debug log. If you set `UPLOADS_PHP_IGNORE` yourself, check it for whole plugin folders.
 - `--self-update` removes control characters from the downloaded CHANGELOG before it shows it, as it did for commit messages already – text from the download can't put terminal control sequences on the screen.
