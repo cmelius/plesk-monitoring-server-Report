@@ -144,7 +144,7 @@ untouched() { [ ! -e "$I.old" ] && [ ! -e "$I.new" ] && grep -q "^VERSION=$VERSI
   [ "$status" -eq 1 ]; [[ $output == *"checksum of plesk-server-report.tar.gz does not match"* ]]
   untouched
   release; sign
-  (cd "$R/v9.9.9" && sha256sum plesk-server-report.tar.gz | sed 's/^./0/' >SHA256SUMS)   # SHA256SUMS changed after signing
+  (cd "$R/v9.9.9" && sha256sum plesk-server-report.tar.gz | sed 's/^0/1/;t;s/^./0/' >SHA256SUMS)   # SHA256SUMS changed after signing (the first character, always to another one)
   SU_YES=1 run self_update
   [ "$status" -eq 1 ]; [[ $output == *"signature of the release is NOT valid"* ]]
   untouched
