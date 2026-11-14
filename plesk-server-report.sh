@@ -2592,7 +2592,8 @@ write_report() {
 }
 # utf8_clean – drop byte sequences that are not UTF-8 (a log line can hold any bytes; JSON must be UTF-8)
 utf8_clean() {
-  if command -v iconv >/dev/null; then iconv -c -f UTF-8 -t UTF-8 2>/dev/null; return 0
+  # glibc iconv -c exits with 1 when it dropped something – that is the point, not an error
+  if command -v iconv >/dev/null; then iconv -c -f UTF-8 -t UTF-8 2>/dev/null || true
   else LC_ALL=C tr '\200-\377' '?'; fi
 }
 # write_json – the JSON report next to the text report (JSON_REPORT=1): report-<date>-<time>.json.
