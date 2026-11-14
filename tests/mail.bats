@@ -69,3 +69,15 @@ mail_on() { MAIL_LOG="$FIX/mail/$1"; check_mail || true; }
   [[ $output == *"d903.example               0 / 2 (1 mail) / 0"* ]]
   [ "$(cut -f2,3 "$STATE_DIR/deferred_mails")" = "$(printf 'd903.example\t51B2460193')" ]
 }
+
+@test "greylisting is no rejection for spam or a blocklist" {
+  printf '%s\n' \
+   'Nov 14 10:07:00 host postfix/smtp[1]: AB12345678: to=<info@d20.example>, relay=mail.d20.example[198.18.0.40]:25, delay=1, delays=0/0/0.5/0.1, dsn=4.2.0, status=deferred (host mail.d20.example[198.18.0.40] said: 450 4.2.0 <info@d20.example>: Recipient address rejected: Greylisted, see http://postgrey.schweikert.ch/help/d20.example.html (in reply to RCPT TO command))' \
+   'Nov 14 10:08:00 host postfix/smtp[1]: CD12345678: to=<x@d21.example>, relay=mx.d21.example[198.18.0.41]:25, delay=1, delays=0/0/0.5/0.1, dsn=5.7.1, status=bounced (host mx.d21.example[198.18.0.41] said: 554 5.7.1 Service unavailable; Client host [203.0.113.10] blocked using zen.spamhaus.org (in reply to RCPT TO command))' \
+   >"$BATS_TEST_TMPDIR/grey.log"
+  MAIL_LOG="$BATS_TEST_TMPDIR/grey.log"; check_mail || true
+  run report
+  [[ $output == *"Rejections mentioning blocklist/reputation/spam/rate limit: 1"* ]]
+  [[ $output != *Greylisted* ]]
+  [[ $output == *"zen.spamhaus.org"* ]]
+}

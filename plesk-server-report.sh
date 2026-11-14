@@ -651,7 +651,10 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       #   Apple iCloud: "local policy" [CS01]/[HM08], SPF+DKIM failed [HME1], "excessive volume", Proofpoint DNSBL
       #   Yahoo/AOL: [TSS04] "unexpected volume or user complaints"
       #   GMX/web.de: "policy restrictions"; T-Online: "contact tosa@rx.t-online.de"; any DMARC rejection
-      if (l ~ /blacklist|blocklist|block list|blocked|spamhaus|barracuda|spamcop|listed|reputation|poor ip|banned|unsolicited|spam|rate limit|rate-limit|unusual rate|4\.7\.28|5\.7\.26|4\.7\.650|local policy|\[cs0[0-9]\]|\[hm0[0-9]\]|\[hme[0-9]\]|excessive volume|unexpected volume|user complaints|\[ts+[0-9]+\]|dnsbl|policy restrictions|tosa@rx\.t-online|dmarc|spf and dkim/) {
+      # Greylisting ("Greylisted", postgrey) is no rejection: every first mail from an unknown
+      # server waits a few minutes, then it is accepted – it matched "listed" before.
+      if (l ~ /greylist|graylist|grey-list|gray-list|postgrey/) { }
+      else if (l ~ /blacklist|blocklist|block list|blocked|spamhaus|barracuda|spamcop|listed|reputation|poor ip|banned|unsolicited|spam|rate limit|rate-limit|unusual rate|4\.7\.28|5\.7\.26|4\.7\.650|local policy|\[cs0[0-9]\]|\[hm0[0-9]\]|\[hme[0-9]\]|excessive volume|unexpected volume|user complaints|\[ts+[0-9]+\]|dnsbl|policy restrictions|tosa@rx\.t-online|dmarc|spf and dkim/) {
         # example: time, recipient domain and the remote reply (without the delivery details)
         if (blx < 3) { d=$0
           e=substr($0, 1, 15); sub(/.* to=<[^@>]*@?/, "", d); sub(/>.*/, "", d); r=$0; sub(/.* status=(deferred|bounced) \(/, "", r)
