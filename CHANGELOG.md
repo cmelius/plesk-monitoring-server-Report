@@ -2,7 +2,7 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [1.12.1] – not yet released (on `main`)
+## [1.12.1] – 2026-11-14
 
 ### Fixed
 - **Greylisting raised the blocklist alert.** A reply like `450 4.2.0 … Greylisted` (postgrey) matched the word "listed" and counted as a rejection for spam or a blocklist. Greylisting only delays the first mail from an unknown server by a few minutes; it is no longer counted.
