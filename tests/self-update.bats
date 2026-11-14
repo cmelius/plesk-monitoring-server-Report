@@ -222,3 +222,16 @@ fake_api() {
   [[ $output == *"- a fix"* ]]
   [[ $output != *"older entry"* ]]
 }
+
+@test "the downloaded CHANGELOG can't put terminal control sequences on the screen" {
+  su_fetch() {
+    case $1 in
+      */plesk-server-report.sh) cp "$NEW" "$2" ;;
+      */CHANGELOG.md) printf '## [1.12.1] – new\n- a fix \033[2J\033]0;owned\a\n\n## [1.12.0] – before\n' >"$2" ;;
+    esac
+  }
+  run self_update_1x
+  [[ $output == *"- a fix"* ]]
+  run bash -c "LC_ALL=C grep -c \$'\\x1b' <<<\"\$1\"" _ "$output"
+  [ "$output" = 0 ]
+}

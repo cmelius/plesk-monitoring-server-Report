@@ -3237,7 +3237,8 @@ su_dev_changes() {
     msgs+=("${m:0:120}"); i=$((i + 1))
   done <<<"$list"
   echo ""; echo "Changes in $ver (your copy may contain some of them already):"
-  [[ -s $log ]] && awk -v v="$ver" '/^## \[/ { if (p) exit; if (index($0, "[" v "]")) p = 1 } p' "$log" | head -60
+  [[ -s $log ]] && awk -v v="$ver" '/^## \[/ { if (p) exit; if (index($0, "[" v "]")) p = 1 } p' "$log" |
+    LC_ALL=C tr -d '\000-\010\013-\037\177' | head -60   # downloaded text: no terminal control sequences
   echo ""
 }
 self_update_1x() {
@@ -3310,7 +3311,8 @@ self_update_1x() {
         for (i = 1; i <= 3; i++) { if (x[i] + 0 > y[i] + 0) return 1; if (x[i] + 0 < y[i] + 0) return 0 }
         return 0
       }
-      /^## \[/ { v = $0; sub(/^## \[/, "", v); sub(/\].*/, "", v); if (!newer(v, cur)) exit; p = 1 } p' "$SU_WORK.changes" | head -80
+      /^## \[/ { v = $0; sub(/^## \[/, "", v); sub(/\].*/, "", v); if (!newer(v, cur)) exit; p = 1 } p' "$SU_WORK.changes" |
+      LC_ALL=C tr -d '\000-\010\013-\037\177' | head -80   # downloaded text: no terminal control sequences
     echo ""
   fi
   rm -f "$SU_WORK.changes"
