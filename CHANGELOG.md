@@ -2,6 +2,11 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
+## [1.12.1] – not yet released (on `main`)
+
+### Fixed
+- **`--self-update` showed too much of the CHANGELOG** when the installed version has no section of its own – a number that never became a release, as on a copy taken from `main` (e.g. 1.11.1): it printed everything down to its 80-line limit. It now shows the sections newer than the installed version, and stops at the first one that isn't.
+
 ## [1.12.0] – 2026-11-14
 
 ### Added

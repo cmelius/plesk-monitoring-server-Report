@@ -8,7 +8,9 @@ setup() {
   load_script
   INST="$BATS_TEST_TMPDIR/sbin"; mkdir -p "$INST"
   SU_SELF="$INST/plesk-server-report.sh"
-  cp "$BATS_TEST_DIRNAME/../plesk-server-report.sh" "$SU_SELF"; chmod 700 "$SU_SELF"
+  # the tests pretend 1.12.0 is installed, whatever the version of the script under test
+  sed 's/^VERSION=.*/VERSION=1.12.0/' "$BATS_TEST_DIRNAME/../plesk-server-report.sh" >"$SU_SELF"; chmod 700 "$SU_SELF"
+  VERSION=1.12.0; ORIG="$BATS_TEST_TMPDIR/orig.sh"; cp "$SU_SELF" "$ORIG"
   NEW="$BATS_TEST_TMPDIR/new.sh"
   sed 's/^VERSION=.*/VERSION=1.12.1/' "$SU_SELF" >"$NEW"
   LATEST=1.12.1; OVERALL=1.12.1
@@ -64,7 +66,7 @@ leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
   run self_update_1x
   [ "$status" -eq 0 ]
   [[ $output == *"version 1.12.0 is newer than the latest 1.x release 1.11.0 (development version from main) – nothing to do"* ]]
-  cmp -s "$SU_SELF" "$BATS_TEST_DIRNAME/../plesk-server-report.sh"
+  cmp -s "$SU_SELF" "$ORIG"
 }
 
 @test "version 2 released: 1.x is not replaced by it, only a note" {
@@ -72,7 +74,7 @@ leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
   run self_update_1x
   [ "$status" -eq 0 ]
   [[ $output == *"Version 2.0.0 is available. It can't be installed with --self-update of version 1"* ]]
-  cmp -s "$SU_SELF" "$BATS_TEST_DIRNAME/../plesk-server-report.sh"
+  cmp -s "$SU_SELF" "$ORIG"
   [ ! -e "$STATE_DIR/plesk-server-report.sh.old" ]
 }
 
@@ -81,7 +83,7 @@ leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
   run self_update_1x
   [ "$status" -eq 0 ]
   [[ $output == *"switching to version 2 is not available in this version yet"* ]]
-  cmp -s "$SU_SELF" "$BATS_TEST_DIRNAME/../plesk-server-report.sh"
+  cmp -s "$SU_SELF" "$ORIG"
 }
 
 @test "a broken download (bash -n) is not installed" {
@@ -206,4 +208,17 @@ fake_api() {
   [[ $output == *"Changes in 1.12.0 (your copy may contain some of them already):"* ]]
   [[ $output == *"- the release section"* ]]
   [[ $output != *"- old"* ]]
+}
+
+@test "changes: only the sections newer than the installed version, also without a section of its own" {
+  su_fetch() {
+    case $1 in
+      */plesk-server-report.sh) cp "$NEW" "$2" ;;
+      */CHANGELOG.md) printf '# Changelog\n\n## [1.12.1] – new\n- a fix\n\n## [1.11.0] – older\n- older entry\n' >"$2" ;;
+    esac
+  }
+  # the installed 1.12.0 has no section here (like a number that never became a release)
+  run self_update_1x
+  [[ $output == *"- a fix"* ]]
+  [[ $output != *"older entry"* ]]
 }

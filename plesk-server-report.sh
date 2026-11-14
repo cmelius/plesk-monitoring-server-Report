@@ -70,7 +70,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.12.0
+VERSION=1.12.1
 
 set -uo pipefail
 export LC_ALL=C
@@ -3299,7 +3299,15 @@ self_update_1x() {
   fi
   if (( ! same )) && su_fetch "$raw/CHANGELOG.md" "$SU_WORK.changes" 2>/dev/null; then
     echo ""; echo "Changes:"
-    awk -v cur="$VERSION" '/^## \[/ { if (index($0, "[" cur "]")) exit; p = 1 } p' "$SU_WORK.changes" | head -80
+    # every section newer than the installed version – also when that version has no section of
+    # its own (a number that never became a release, e.g. a copy from main)
+    awk -v cur="$VERSION" '
+      function newer(a, b,   x, y, i) {
+        split(a, x, "."); split(b, y, ".")
+        for (i = 1; i <= 3; i++) { if (x[i] + 0 > y[i] + 0) return 1; if (x[i] + 0 < y[i] + 0) return 0 }
+        return 0
+      }
+      /^## \[/ { v = $0; sub(/^## \[/, "", v); sub(/\].*/, "", v); if (!newer(v, cur)) exit; p = 1 } p' "$SU_WORK.changes" | head -80
     echo ""
   fi
   rm -f "$SU_WORK.changes"
