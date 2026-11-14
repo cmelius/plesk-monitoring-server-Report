@@ -35,6 +35,8 @@
 #   --no-upload       print the report to stdout; nothing is uploaded or mailed
 #   --only CHECK,...  run only these checks right now and print the result; nothing
 #                     is uploaded and no state is changed (log offsets, known IPs, …)
+#   --json            also write the JSON report for this run (as JSON_REPORT=1); with --only
+#                     and --no-upload the JSON is printed instead of the text
 #   --list            list the check names for --only
 #   --summary         print the summary of the last SUMMARY_HOURS from the stored reports (runs no checks)
 #   --show-state      show what the script remembers (known IPs, countries, log positions)
@@ -92,6 +94,7 @@ REPORT_MAIL_FROM=""                      # sender address of the mails (default:
 LOCAL_KEEP_DAYS=7                        # keep local reports x days (0 = never delete; summary.txt needs at least SUMMARY_HOURS)
 SUMMARY=1                                # write summary.txt (all reports of the last SUMMARY_HOURS condensed) and upload it
 SUMMARY_HOURS=24
+JSON_REPORT=0                            # 1 = also write report-<date>-<time>.json next to every text report (same run, machine-readable, for dashboards); the text reports stay exactly the same
 # Limits, so that a hanging command or a huge log can't block the script or fill disk/RAM
 MAX_RUNTIME=50                # minutes: an unattended (cron) run is stopped after this – keep it below the cron interval (0 = no limit)
 CMD_TIMEOUT=120               # seconds per external command (plesk db, fail2ban-client, postqueue, journalctl, apt-get/dnf, rclone)
@@ -199,8 +202,12 @@ DAILY_CHECKS="updates certificates https serverdns mailtls domaindns exposed web
 # =============================================================================
 
 # ---------------------------------------------------------------- report output
-alert() { ALERTS+=("$*"); }                       # hourly alert → STATUS line
-dalert() { echo "$*" >>"$DALERTS"; }              # daily alert, cached with the daily checks
+alert() { ALERTS+=("$*"); ALERT_CHK+=("$CUR_CHECK $ALERT_DAILY"); }   # hourly alert → STATUS line
+dalert() {                                        # daily alert, cached with the daily checks
+  echo "$*" >>"$DALERTS"
+  json_on && [[ -n ${DJSON:-} ]] && jline A "$CUR_CHECK" >>"$DJSON"
+  return 0
+}
 section() { printf '\n== %s ==\n' "$1" >>"$BODY"; }
 out() { printf '%s\n' "$*" >>"$BODY"; }
 ignored_domain() { [[ " $WEB_IGNORE_DOMAINS " == *" $1 "* ]]; }
@@ -211,9 +218,31 @@ can_write_state() { (( ! ONLY_MODE && ! SUMMARY_ONLY && ! LOCKED_OUT )); }
 # note TEXT – data problem (missing log, shortened log), shown as " i " line below the STATUS line
 note() {
   [[ -n ${TMPD:-} ]] || return 0
-  grep -qxF -- "$*" "$TMPD/notes" 2>/dev/null || printf '%s\n' "$*" >>"$TMPD/notes"
+  grep -qxF -- "$*" "$TMPD/notes" 2>/dev/null && return 0
+  printf '%s\n' "$*" >>"$TMPD/notes"
+  jrec N "$CUR_CHECK" "$*"
   return 0
 }
+# ---------------------------------------------------------------- JSON report (JSON_REPORT=1)
+# Collected next to the text, never instead of it: the text report is written exactly as without
+# JSON_REPORT. The check of each alert is in ALERT_CHK ("check daily", same index as ALERTS).
+# Records in $TMPD/json, one per line, fields separated by tabs:
+#   N check text                  a note
+#   M name value                  a figure
+#   S check daily start end       a section: bytes start..end of the report body, or with
+#                                 daily = 1 of the daily checks' text ($DAILY_TEXT)
+CUR_CHECK=script; ALERT_DAILY=0; ALERT_CHK=()   # the check that is running; alerts and notes outside a check: "script"
+json_on() { (( ${JSON_REPORT:-0} )) && [[ -n ${TMPD:-} ]]; }
+# jline FIELD… – one record; tabs and line breaks inside a field become spaces
+jline() {
+  local a=("$@") IFS=$'\t'
+  a=("${a[@]//$'\t'/ }"); a=("${a[@]//$'\n'/ }")
+  printf '%s\n' "${a[*]}"
+}
+jrec() { json_on || return 0; jline "$@" >>"$TMPD/json"; }
+# metric NAME VALUE – a figure for the JSON report (graphs over time); plain numbers only
+metric() { json_on || return 0; [[ $2 =~ ^-?(0|[1-9][0-9]*)([.][0-9]+)?$ ]] && jrec M "$1" "$2"; return 0; }
+fsize() { stat -L -c %s "$1" 2>/dev/null || echo 0; }
 # T SECONDS COMMAND… – run an external command with a time limit; a timeout becomes an alert
 T() {
   local s=$1 rc c; shift
@@ -722,6 +751,8 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   QUEUE=$(T "$CMD_TIMEOUT" postqueue -j 2>/dev/null | wc -l)
   out "Delivered: $SENT | deferred: $DEF | bounced: $BOU | queue: $QUEUE"
   out "Rejections mentioning blocklist/reputation/spam/rate limit: $BL"
+  metric mail_delivered "$SENT"; metric mail_deferred "$DEF"; metric mail_bounced "$BOU"
+  metric mail_queue "$QUEUE"; metric mail_blocklist_rejections "$BL"
   (( DEF > WARN_DEFERRED )) && alert "Mail: $DEF deferred deliveries"
   (( BL >= WARN_BLOCKLIST )) && alert "Mail: $BL rejections by remote servers mentioning a blocklist, reputation, spam or rate limit – check the server IP and the examples"
   (( QUEUE > WARN_QUEUE )) && alert "Mail: $QUEUE messages in the queue"
@@ -928,6 +959,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     note "mail: $n log lines of the IMAP/POP3 server, but no login recognized – log format unknown (supported: Dovecot, Courier), IMAP/POP3 figures are 0"
   out ""; out "Failed mail logins: SMTP $SF | IMAP/POP3 $DF – top IPs:"
   (( SF + DF > WARN_AUTH_FAIL )) && alert "Mail: $((SF + DF)) failed mail logins (brute force?)"
+  metric mail_failed_logins_smtp "$SF"; metric mail_failed_logins_imap "$DF"
   while IFS=$'\t' read -r c ip; do
     geo "$ip"; printf '  %6d  %s%s\n' "$c" "$ip" "${GEO_LABEL:+ ($GEO_LABEL)}" >>"$BODY"
   done < <(grep -E '^(SFIP|DFIP)' <<<"$MAILSTATS" | awk -F'\t' '{a[$3]+=$2} END{for(i in a) print a[i]"\t"i}' | sort -nr | head -5)
@@ -1063,6 +1095,7 @@ check_system() {   # load, CPU per system user, top processes, RAM, filesystems
   CORES=$(nproc)
   read -r L1 L5 L15 _ </proc/loadavg
   out "Load: $L1 / $L5 / $L15 (1/5/15 min) on $CORES cores | $(uptime -p)"
+  metric load1 "$L1"; metric load5 "$L5"; metric load15 "$L15"; metric cpu_cores "$CORES"
   LIMIT=$(awk -v c="$CORES" -v f="$WARN_LOAD_FACTOR" 'BEGIN{print c*f}')
   num_gt "$L5" "$LIMIT" && alert "CPU: load $L5 above $LIMIT"
 
@@ -1083,20 +1116,25 @@ check_system() {   # load, CPU per system user, top processes, RAM, filesystems
   read -r MT MA MP <<<"$MEM"
   SWAP=$(free -m | awk '/^Swap:/{print $3"/"$2}')
   out ""; out "RAM: $MA of $MT MB available ($MP %) | swap used: $SWAP MB"
+  metric mem_total_mb "$MT"; metric mem_avail_mb "$MA"; metric mem_avail_pct "$MP"
   (( MP < WARN_MEM_AVAIL_PCT )) && alert "RAM: only $MP % available"
 
   # space and inodes: a filesystem with many small files (sessions, mails, caches) can run out
   # of inodes – "no space left on device" – while df still shows free space
   out ""; out "Filesystems (space used, inodes used):"
   local -A INO=()
+  local dmax=0 imax=0
   while read -r pct mnt; do INO[$mnt]=${pct%\%}; done < <(df -P -i -x tmpfs -x devtmpfs -x overlay -x squashfs 2>/dev/null | awk 'NR>1{print $5, $6}')
   while read -r pct mnt; do
     p=${pct%\%}; ip=${INO[$mnt]:-}
     [[ $ip =~ ^[0-9]+$ ]] || ip=""                    # "-" on filesystems without a fixed number of inodes
     printf '  %4s  %s%s\n' "$pct" "$mnt" "${ip:+  (inodes $ip%)}" >>"$BODY"
+    [[ $p =~ ^[0-9]+$ ]] && (( p > dmax )) && dmax=$p
+    [[ -n $ip ]] && (( ip > imax )) && imax=$ip
     (( p > WARN_DISK_PCT )) && alert "Disk: $mnt is $pct full"
     [[ -n $ip ]] && (( ip > WARN_DISK_PCT )) && alert "Disk: $mnt has used $ip% of its inodes (too many small files) – no new files can be created when they run out"
   done < <(df -P -x tmpfs -x devtmpfs -x overlay -x squashfs 2>/dev/null | awk 'NR>1{print $5, $6}')
+  metric disk_max_pct "$dmax"; metric inodes_max_pct "$imax"
 }
 
 # known_mail_ips ("IP mailbox last-seen-epoch"): client IPs of successful IMAP/POP3 and SMTP
@@ -1251,6 +1289,11 @@ check_web() {   # requests, 5xx, WordPress logins, PHP errors, attack patterns, 
                            printf "%d\t%d\t%s\t%s\n", mb+mw, mb, d, top >> msf } }' >>"$TMP.php"
   done
   out "requests | 5xx | login POSTs | domain | busiest IP"
+  if json_on; then
+    local wreq t5 tl
+    read -r wreq t5 tl < <(awk -F'\t' '{ r += $1; e += $2; l += $3 } END { print r + 0, e + 0, l + 0 }' "$TMP")
+    metric web_requests "$wreq"; metric web_5xx "$t5"; metric web_login_posts "$tl"
+  fi
   sort -t$'\t' -k1,1nr "$TMP" | head -10 | awk -F'\t' '{printf "  %7d %5d %6d  %s  %s\n", $1, $2, $3, $4, $5}' >>"$BODY"
   while IFS=$'\t' read -r n e5 lp dom _; do
     ignored_domain "$dom" && continue
@@ -2438,21 +2481,55 @@ check_enabled() {
 check_needs_dig() { [[ $1 == serverdns || $1 == domaindns || $1 == https ]]; }
 
 run_hourly() {   # run_hourly NAME… – checks write directly into the report body
-  local c
-  for c in "$@"; do check_enabled "$c" && { step "$c"; "check_$c"; }; done
+  local c s=0
+  for c in "$@"; do
+    check_enabled "$c" || continue
+    step "$c"; CUR_CHECK=$c
+    json_on && s=$(fsize "$BODY")
+    "check_$c"
+    json_on && jrec S "$c" 0 "$s" "$(fsize "$BODY")"
+  done
+  CUR_CHECK=script
   return 0
 }
-run_daily() {   # run_daily NAME… – section text to stdout, alerts to $DALERTS
-  local c
+# run_daily NAME… – section text to stdout, alerts to $DALERTS; with JSON_REPORT=1 the check of
+# each alert and the byte range of each check's text in $DAILY_OUT (the file stdout goes to) go
+# to $DJSON, cached like the text
+run_daily() {
+  local c s=0
   : >"$DALERTS"
+  json_on && [[ -n ${DJSON:-} ]] && : >"$DJSON"
   echo "As of: $(date '+%Y-%m-%d %H:%M %Z')"
   detect_pubip6
   for c in "$@"; do
     check_enabled "$c" || continue
     check_needs_dig "$c" && ! command -v dig >/dev/null && continue
-    step "daily: $c"
+    step "daily: $c"; CUR_CHECK=$c
+    json_on && s=$(fsize "${DAILY_OUT:-}")
     "check_$c"
+    json_on && [[ -n ${DJSON:-} ]] && jline S "$c" 1 "$s" "$(fsize "${DAILY_OUT:-}")" >>"$DJSON"
   done
+  CUR_CHECK=script
+  return 0
+}
+# replay_daily_alerts – the cached daily alerts become alerts of this report; with JSON_REPORT=1
+# each keeps the name of its check (from $DJSON), and the sections of the daily checks are added
+replay_daily_alerts() {
+  local a i=0 chk=()
+  if json_on && [[ -s ${DJSON:-} ]]; then
+    mapfile -t chk < <(awk -F'\t' '$1 == "A" { print $2 }' "$DJSON")
+    (( ${#chk[@]} == $(grep -c '' "$DALERTS" 2>/dev/null) )) || chk=()
+    awk -F'\t' '$1 == "S"' "$DJSON" >>"$TMPD/json"
+  elif json_on && [[ -s ${DAILY_TEXT:-} ]]; then
+    # cached without JSON_REPORT (switched on by --json): the daily text as one section
+    jrec S daily 1 0 "$(fsize "$DAILY_TEXT")"
+  fi
+  ALERT_DAILY=1
+  [[ -f $DALERTS ]] && while IFS= read -r a; do
+    CUR_CHECK=${chk[i]:-daily}; i=$(( i + 1 ))
+    [[ -n $a ]] && alert "$a"
+  done <"$DALERTS"
+  ALERT_DAILY=0; CUR_CHECK=script
   return 0
 }
 # daily checks run once per day (first run after midnight); later runs reuse the cached text.
@@ -2477,18 +2554,21 @@ self_sum() {   # self_sum – short checksum of this script and its configuratio
     { sha256sum 2>/dev/null || cksum; } | awk '{print substr($1, 1, 12)}'
 }
 daily_checks() {
-  local daily="$STATE_DIR/daily.txt" a stamp
-  DALERTS="$STATE_DIR/daily_alerts.txt"
+  local daily="$STATE_DIR/daily.txt" stamp
+  DALERTS="$STATE_DIR/daily_alerts.txt"; DAILY_TEXT=$daily; DJSON="$STATE_DIR/daily_json.txt"
+  json_on || { rm -f "$DJSON"; DJSON=""; }
   stamp="$(date +%F) $VERSION $(self_sum) $(pkgdb_stamp) $(boot_stamp)"
   if [[ $(cat "$STATE_DIR/daily_date" 2>/dev/null) != "$stamp" ]]; then
     # mark the day first: if a daily check makes the run abort, the next runs still report hourly
     echo "$stamp" >"$STATE_DIR/daily_date"
+    [[ -n $DJSON ]] && DJSON+=.new         # text and JSON index of the same run, both or neither
     # shellcheck disable=SC2086  # a list of check names, one argument each – split on purpose
-    run_daily $DAILY_CHECKS >"$daily.new" 2>/dev/null; mv "$daily.new" "$daily"
+    DAILY_OUT=$daily.new run_daily $DAILY_CHECKS >"$daily.new" 2>/dev/null; mv "$daily.new" "$daily"
+    [[ -n $DJSON ]] && { DJSON=${DJSON%.new}; mv "$DJSON.new" "$DJSON" 2>/dev/null; }
   fi
   section "DAILY CHECKS"
   cat "$daily" >>"$BODY" 2>/dev/null
-  [[ -f $DALERTS ]] && while IFS= read -r a; do [[ -n $a ]] && alert "$a"; done <"$DALERTS"
+  replay_daily_alerts
   return 0
 }
 
@@ -2508,6 +2588,106 @@ write_report() {
     elif [[ -n $GEO_NOTE ]]; then echo "$GEO_NOTE"; fi
   } | LC_ALL=C tr -d '\000-\010\013-\037\177' >"$REPORT"   # file names and the like: no terminal control sequences
   chmod 600 "$REPORT"
+  write_json
+}
+# utf8_clean – drop byte sequences that are not UTF-8 (a log line can hold any bytes; JSON must be UTF-8)
+utf8_clean() {
+  if command -v iconv >/dev/null; then iconv -c -f UTF-8 -t UTF-8 2>/dev/null; return 0
+  else LC_ALL=C tr '\200-\377' '?'; fi
+}
+# write_json – the JSON report next to the text report (JSON_REPORT=1): report-<date>-<time>.json.
+# Format in the README ("JSON report"). Built from ALERTS/ALERT_CHK and $TMPD/json; the text
+# report is not parsed. alerts[].new: the alert's key (alert_key, figures left out) was not in
+# any report of the last 24 hours ($STATE_DIR/json_alerts_seen).
+write_json() {
+  json_on || return 0
+  local f=${REPORT%.txt}.json sf="$STATE_DIR/json_alerts_seen" line typ chk d s e src i now asof="" geo=""
+  local -a keys=()
+  now=$(date +%s)
+  local seenf=$sf; [[ -f $seenf ]] || seenf=/dev/null
+  [[ -n ${DAILY_TEXT:-} && $DAILY_TEXT != "${BODY:-}" && -s $DAILY_TEXT ]] && asof=$(sed -n '1s/^As of: //p' "$DAILY_TEXT")
+  if (( GEO_OK )); then geo="DB-IP.com Lite databases (CC BY 4.0)"; else geo=${GEO_NOTE:-}; fi
+  for i in "${!ALERTS[@]}"; do keys[i]=$(alert_key "${ALERTS[i]}"); done
+  {
+    for i in "${!ALERTS[@]}"; do
+      read -r chk d <<<"${ALERT_CHK[i]:-script 0}"
+      jline A "$chk" "$d" "${keys[i]}" "${ALERTS[i]}"
+    done
+    [[ -f $TMPD/json ]] && while IFS= read -r line; do
+      typ=${line%%$'\t'*}
+      if [[ $typ == S ]]; then
+        IFS=$'\t' read -r _ chk d s e <<<"$line"
+        if (( d )); then src=${DAILY_TEXT:-}; else src=$BODY; fi
+        [[ -r $src && $s =~ ^[0-9]+$ && $e =~ ^[0-9]+$ ]] || continue
+        (( e > s )) || continue
+        printf 'S\t%s\t%s\n' "$chk" "$d"
+        tail -c +"$(( s + 1 ))" "$src" | head -c "$(( e - s ))" | sed 's/^/L\t/'
+      else
+        printf '%s\n' "$line"
+      fi
+    done <"$TMPD/json"
+  } | LC_ALL=C tr -d '\000-\010\013-\037\177' | utf8_clean |
+    awk -F'\t' -v seenf="$seenf" -v now="$now" -v version="$VERSION" -v host="$HOST" \
+        -v utc="$(date -u -d "@${RUN_START:-$now}" '+%Y-%m-%dT%H:%M:%SZ')" -v loc="${NOW:-}" \
+        -v only="${ONLY:-}" -v report="${REPORT##*/}" -v asof="$asof" -v geo="$geo" '
+      function esc(x) { gsub(/\\/, "\\\\", x); gsub(/"/, "\\\"", x); gsub(/\t/, "\\t", x); return "\"" x "\"" }
+      function str(x) { return x == "" ? "null" : esc(x) }
+      function after(x, n,   p) { while (n-- > 0) { p = index(x, "\t"); if (!p) return ""; x = substr(x, p + 1) } return x }
+      FILENAME == seenf { if (now - $2 < 86400) seen[$1] = 1; next }
+      $1 == "A" { na++; ac[na] = $2; ad[na] = $3; ak[na] = $4; at[na] = after($0, 4); next }
+      $1 == "N" { nn++; nc[nn] = $2; nt[nn] = after($0, 2); next }
+      $1 == "M" { if (!($2 in mv)) { nm++; mn[nm] = $2; mv[$2] = $3 } next }
+      $1 == "S" { ns++; sc[ns] = $2; sd[ns] = $3; st[ns] = ""; sl[ns] = 0; next }
+      $1 == "L" && ns { l = after($0, 1)
+        if (sd[ns] == 0 && st[ns] == "" && sl[ns] == 0 && l ~ /^== .* ==$/) { st[ns] = substr(l, 4, length(l) - 6); next }
+        if (sl[ns] == 0 && l ~ /^ *$/) next
+        sx[ns, ++sl[ns]] = l; next }
+      END {
+        print "{"
+        print "  \"schema\": 1,"
+        print "  \"generator\": \"plesk-server-report\","
+        print "  \"version\": " esc(version) ","
+        print "  \"host\": " esc(host) ","
+        print "  \"time\": " esc(utc) ","
+        print "  \"time_local\": " esc(loc) ","
+        print "  \"only\": " str(only) ","
+        print "  \"report\": " esc(report) ","
+        print "  \"pseudonymised\": false,"
+        print "  \"status\": " (na ? "\"warning\"" : "\"ok\"") ","
+        printf "  \"alerts\": ["
+        for (i = 1; i <= na; i++)
+          printf "%s\n    {\"check\": %s, \"daily\": %s, \"key\": %s, \"new\": %s, \"text\": %s}", (i > 1 ? "," : ""),
+            esc(ac[i]), (ad[i] ? "true" : "false"), esc(ak[i]), ((ak[i] in seen) ? "false" : "true"), esc(at[i])
+        print (na ? "\n  ]," : "],")
+        printf "  \"notes\": ["
+        for (i = 1; i <= nn; i++) printf "%s\n    {\"check\": %s, \"text\": %s}", (i > 1 ? "," : ""), esc(nc[i]), esc(nt[i])
+        print (nn ? "\n  ]," : "],")
+        printf "  \"metrics\": {"
+        for (i = 1; i <= nm; i++) printf "%s\n    %s: %s", (i > 1 ? "," : ""), esc(mn[i]), mv[mn[i]]
+        print (nm ? "\n  }," : "},")
+        printf "  \"sections\": ["
+        for (i = 1; i <= ns; i++) {
+          n = sl[i]; while (n > 0 && sx[i, n] ~ /^ *$/) n--
+          printf "%s\n    {\"check\": %s, \"daily\": %s, \"title\": %s, \"lines\": [", (i > 1 ? "," : ""),
+            esc(sc[i]), (sd[i] ? "true" : "false"), str(st[i])
+          for (j = 1; j <= n; j++) printf "%s\n      %s", (j > 1 ? "," : ""), esc(sx[i, j])
+          printf "%s]}", (n ? "\n    " : "")
+        }
+        print (ns ? "\n  ]," : "],")
+        print "  \"daily_as_of\": " str(asof) ","
+        print "  \"geo\": " str(geo)
+        print "}"
+      }' "$seenf" - >"$f.new" 2>/dev/null
+  if [[ -s $f.new ]]; then mv "$f.new" "$f"
+  else rm -f "$f.new"; logger -t plesk-server-report "writing the JSON report $f failed" 2>/dev/null; return 0; fi
+  chmod 600 "$f"
+  # remember the keys of this report's alerts for "new" (last seen; entries older than 24 h go)
+  if can_write_state; then
+    { [[ -f $sf ]] && cat "$sf"; for i in "${!keys[@]}"; do printf '%s\t%s\n' "${keys[i]}" "$now"; done; } |
+      awk -F'\t' -v now="$now" '$2 ~ /^[0-9]+$/ && now - $2 < 86400 { if ($2 > t[$1]) t[$1] = $2 }
+        END { for (k in t) printf "%s\t%s\n", k, t[k] }' | sort >"$sf.new" && mv "$sf.new" "$sf"
+  fi
+  return 0
 }
 
 # ---------------------------------------------------------------- 24-hour summary
@@ -2822,6 +3002,7 @@ mask_key() {
   cat "$k"
 }
 # upload_copy FILE – the file to upload: FILE itself, or with MASK_MAILBOXES=1 a pseudonymised copy
+# (a JSON report gets "pseudonymised": true instead of the note line)
 upload_copy() {
   (( MASK_MAILBOXES )) || { printf '%s\n' "$1"; return 0; }
   local c map="$TMPD/pseudonyms" key a t now f="$STATE_DIR/mailbox_pseudonyms"
@@ -2834,13 +3015,14 @@ upload_copy() {
     t=$(printf '%s:%s' "$key" "$a" | sha256sum | cut -c1-6)
     printf '%s mbx-%s@%s\n' "$a" "$t" "${a#*@}" >>"$map"
   done < <(grep -oE "$MAIL_RE" "$1" | tr '[:upper:]' '[:lower:]' | sort -u)
-  awk -v re="$MAIL_RE" -v note="Mailbox addresses are pseudonymised (MASK_MAILBOXES=1) – decode on the server: plesk-server-report.sh --decode" '
+  awk -v re="$MAIL_RE" -v json="$([[ $1 == *.json ]] && echo 1 || echo 0)" -v note="Mailbox addresses are pseudonymised (MASK_MAILBOXES=1) – decode on the server: plesk-server-report.sh --decode" '
     NR == FNR { m[$1] = $2; next }
+    json && $0 == "  \"pseudonymised\": false," { print "  \"pseudonymised\": true,"; next }
     { out = ""; rest = $0
       while (match(rest, re)) { a = substr(rest, RSTART, RLENGTH)
         out = out substr(rest, 1, RSTART - 1) ((tolower(a) in m) ? m[tolower(a)] : a); rest = substr(rest, RSTART + RLENGTH) }
       print out rest
-      if (!done && (FNR == 1 && $0 !~ /^Server report/ || $0 ~ /^STATUS:/)) { print note; done = 1 } }' "$map" "$1" >"$c" ||
+      if (!json && !done && (FNR == 1 && $0 !~ /^Server report/ || $0 ~ /^STATUS:/)) { print note; done = 1 } }' "$map" "$1" >"$c" ||
     { printf '%s\n' "$1"; return 0; }
   # remember the pseudonyms for --decode, as long as the uploaded reports may exist (at least 30 days)
   if can_write_state; then
@@ -2869,8 +3051,9 @@ decode_pseudonyms() {
   fi
 }
 upload_report() {
+  local js=${REPORT%.txt}.json
   if (( ! UPLOAD )); then
-    cat "$REPORT"
+    if (( JSON_STDOUT )) && [[ -s $js ]]; then cat "$js"; else cat "$REPORT"; fi
   elif [[ -n $REMOTE ]] && command -v rclone >/dev/null; then
     local up sm
     local ok=1 err="$TMPD/rclone.err" uf="$STATE_DIR/upload_failed"
@@ -2878,6 +3061,12 @@ upload_report() {
     { rcl copyto "$up" "$REMOTE/$(basename "$REPORT")" --quiet &&
       replace_remote "$up" latest.txt; } 2>"$err" ||
       { ok=0; logger -t plesk-server-report "upload to $REMOTE failed"; }
+    if json_on && [[ -s $js ]]; then
+      up=$(upload_copy "$js")
+      { rcl copyto "$up" "$REMOTE/${js##*/}" --quiet &&
+        replace_remote "$up" latest.json; } 2>>"$err" ||
+        { ok=0; logger -t plesk-server-report "upload of the JSON report to $REMOTE failed"; }
+    fi
     if (( SUMMARY )) && [[ -s $OUT_DIR/summary.txt ]]; then
       sm=$(upload_copy "$OUT_DIR/summary.txt")
       replace_remote "$sm" summary.txt 2>>"$err" ||
@@ -2895,7 +3084,7 @@ upload_report() {
     fi
     if (( RETENTION_DAYS > 0 )); then
       # delete old reports permanently (Google Drive: not into the trash)
-      rcl delete "$REMOTE" --include 'report-*.txt' --min-age "${RETENTION_DAYS}d" \
+      rcl delete "$REMOTE" --include 'report-*.txt' --include 'report-*.json' --min-age "${RETENTION_DAYS}d" \
         --drive-use-trash=false --quiet 2>>"$err" ||
         logger -t plesk-server-report "deleting old reports in $REMOTE failed"
     fi
@@ -3116,12 +3305,14 @@ is always reported). Processes are not stored – they are checked live in every
 | `daily_date` | the day (YYYY-MM-DD), the script version, a checksum of the script and its configuration file, the time of the package database and the boot ID of the last daily checks – they run in the first run of a new day, and right after the script or the configuration file changed, packages were installed or the server was rebooted (so an installed update, and "reboot required" after the reboot, leave the report at once). Delete it to run them again in the next run. |
 | `daily.txt` | their output, repeated in every report of that day under DAILY CHECKS. |
 | `daily_alerts.txt` | their alerts, repeated in every report of that day. |
+| `daily_json.txt` | only with `JSON_REPORT=1`: the check of each daily alert and where each check's text is in `daily.txt`, for the JSON report. |
 
 ## Other
 
 | File / folder | Content |
 |---|---|
-| `out/` | the reports and `summary.txt`, kept for `LOCAL_KEEP_DAYS`. `summary.txt` is built from these files. |
+| `out/` | the reports and `summary.txt`, kept for `LOCAL_KEEP_DAYS`. `summary.txt` is built from these files. With `JSON_REPORT=1` also the JSON reports (`report-*.json`). |
+| `json_alerts_seen` | only with `JSON_REPORT=1`: `key last-seen` of every alert of the last 24 hours (key as in the JSON report). An alert whose key is not in it is `"new": true` in the JSON report. |
 | `geoip/` | the DB-IP Lite databases for country and network operator (`GEOIP_DIR`), refreshed monthly. |
 | `lock` | lock file, so that only one run at a time is active (it is never deleted). |
 | `running` | exists only while a run is active: `PID start now step exit-code`. If it is still there at the next run, that run did not finish, and the report says so (alert "Script: …"). |
@@ -3344,10 +3535,11 @@ list_checks() {
   echo "groups: hourly, daily, all"
 }
 parse_args() {
-  UPLOAD=1; ONLY=""; ONLY_MODE=0; SUMMARY_ONLY=0
+  UPLOAD=1; ONLY=""; ONLY_MODE=0; SUMMARY_ONLY=0; JSON_CLI=0
   while (( $# )); do
     case $1 in
       --no-upload) UPLOAD=0 ;;
+      --json) JSON_CLI=1 ;;
       --only) [[ -n ${2:-} ]] || { echo "--only needs a check name (see --list)" >&2; exit 2; }
               ONLY=$2; shift ;;
       --only=*) ONLY=${1#--only=} ;;
@@ -3431,6 +3623,7 @@ on_exit() {
 init() {
   local opid="" ostart="" onow="" ostep="" orc="" why
   load_conf
+  (( JSON_CLI )) && JSON_REPORT=1; JSON_STDOUT=$JSON_CLI   # --json: this run, and print it instead of the text
   if [[ -z $STATE_DIR || $STATE_DIR == / ]]; then
     echo "plesk-server-report: STATE_DIR must not be empty or / – check $CONF" >&2
     logger -t plesk-server-report "STATE_DIR must not be empty or /" 2>/dev/null
@@ -3449,7 +3642,7 @@ init() {
   chmod 700 "$STATE_DIR"
   NOW=$(date '+%Y-%m-%d %H:%M %Z')
   RUN_START=$(date +%s)
-  ALERTS=()
+  ALERTS=(); ALERT_CHK=()
   trap on_exit EXIT
   trap 'exit 143' TERM HUP
   trap 'exit 130' INT
@@ -3557,15 +3750,15 @@ main() {
     # shellcheck disable=SC2086  # a list of check names, one argument each – split on purpose
     [[ -n $hourly ]] && run_hourly $hourly
     if [[ -n $daily ]]; then
-      DALERTS=$TMPD/daily_alerts
+      DALERTS=$TMPD/daily_alerts; DAILY_TEXT=$BODY; DJSON=$TMPD/daily_json
       section "DAILY CHECKS"
       # shellcheck disable=SC2086  # a list of check names, one argument each – split on purpose
-      run_daily $daily >>"$BODY" 2>/dev/null
-      while IFS= read -r a; do [[ -n $a ]] && alert "$a"; done <"$DALERTS"
+      DAILY_OUT=$BODY run_daily $daily >>"$BODY" 2>/dev/null
+      replay_daily_alerts
     fi
     timeout_alerts
     write_report
-    cat "$REPORT"
+    if (( JSON_STDOUT )) && [[ -s $TMPD/report.json ]]; then cat "$TMPD/report.json"; else cat "$REPORT"; fi
     return 0
   fi
   write_state_readme
@@ -3581,13 +3774,13 @@ main() {
   step "mail"
   mail_reports
   # -mmin instead of -mtime: "-mtime +7" only matches files at least 8 full days old
-  (( LOCAL_KEEP_DAYS > 0 )) && find "$OUT_DIR" -name 'report-*.txt' -mmin +$(( LOCAL_KEEP_DAYS * 1440 )) -delete
+  (( LOCAL_KEEP_DAYS > 0 )) && find "$OUT_DIR" \( -name 'report-*.txt' -o -name 'report-*.json' \) -mmin +$(( LOCAL_KEEP_DAYS * 1440 )) -delete
   echo "$RUN_START" >"$STATE_DIR/last_run"
 }
 
 # Sourced (by the tests in tests/): define the functions and settings, run nothing.
 [[ ${BASH_SOURCE[0]} != "$0" ]] && return 0
 
-SELF_UPDATE=0; LOCKED_OUT=0; DONE=0; STEP=""; RUNFILE=""; SUMMARY_ONLY=0; ONLY_MODE=0; SHOW_STATE=0; TEST_MAIL=0; DECODE=0; DECODE_ARGS=(); PSEUDO_FILE=""
+SELF_UPDATE=0; LOCKED_OUT=0; DONE=0; STEP=""; RUNFILE=""; SUMMARY_ONLY=0; ONLY_MODE=0; SHOW_STATE=0; TEST_MAIL=0; DECODE=0; DECODE_ARGS=(); PSEUDO_FILE=""; JSON_CLI=0; JSON_STDOUT=0
 main "$@"
 DONE=1

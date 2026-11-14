@@ -656,6 +656,7 @@ Every run uploads three kinds of files:
 |---|---|
 | `report-YYYYMMDD-HHMM.txt` | the full report of one run (time in the server's time zone, usually UTC) |
 | `latest.txt` | a copy of the newest report, including the daily checks and fail2ban |
+| `report-YYYYMMDD-HHMM.json`, `latest.json` | only with `JSON_REPORT=1`: the same run as JSON, see [JSON report](#json-report-optional-json_report1) |
 | `summary.txt` | all reports of the last 24 hours condensed into one file: every run with its status (gaps are easy to spot), every alert with how often and when it was seen, mail and web totals, deliveries per provider, peaks of load and RAM, the backup status of the newest report, and every line of the sections that are normally empty (successful logins, changes of SSH keys, accounts, cron jobs and ports, suspicious processes, IMAP/POP3 logins from other countries, new PHP files in uploads, login ≠ from, webmail, WordPress attacks, traffic peaks, files served with 200) |
 
 - **Yourself:** open `latest.txt`. The first lines tell you everything: `STATUS: OK` or `STATUS: WARNING (n)` followed by the list of alerts (` ! `) and, if any, notes about missing data (` i `, e.g. a log file that was not found – the figures of that section are then 0, not "all clear"). `summary.txt` shows what happened during the day.
@@ -664,6 +665,53 @@ Every run uploads three kinds of files:
   > In the folder `server-reports/<hostname>`, search for the files `summary.txt` and `latest.txt` by name – don't list the whole folder. Read both. `summary.txt` condenses all reports of the last 24 hours (runs with status, every alert with count and first/last time, totals, every successful login); `latest.txt` is the newest full report with the daily checks and fail2ban. If `summary.txt` is missing or its newest run is more than 2 hours old, report that as an issue. Check the run list for gaps (more than 2 hours between runs). (Both limits assume the hourly cron job – if it runs every N hours, use N + 1 hours.) Alerts starting with "Script:" and the section SCRIPT NOTES mean the report itself is incomplete (a run aborted or still hanging, a command timed out, a log file not found) – report them too. Only if an alert needs more detail, read the single report of that time (`report-YYYYMMDD-HHMM.txt`). Summarise: outgoing spam signals, blocklist listings and rejections by the big mail providers, deliveries to watched recipient domains, mailbox logins from new countries (a login that read no mail is less likely an attack than one that downloaded the mailbox), customers banned by fail2ban (alert starting with "fail2ban:" – include the unban command) and customer devices with an outdated password before the ban ("failed logins of … – a device with an outdated password?"), new PHP files in uploads, logins from unknown IPs, new SSH keys, accounts, cron jobs, processes or ports (alerts starting with "Access:", "Cron:", "Process:", "Ports:"), failed services, 5xx/PHP errors, pending security updates, a newer script version (mention once), expiring certificates and failed automatic renewals, refused blocklist lookups of the spam filter, delivery confirmations sent to other servers, a new IP address of the server, full mailboxes, mail authentication, exposed files, backup status. Lines marked as a recommendation (e.g. missing HSTS) are not an issue – mention them once at the end. Start with "All OK" or "Action required: …", max. 10 bullet points with a concrete next step. Read only, change nothing.
 
 - A daily review **does not replace real-time alerting**. For "server down" use an uptime monitor (e.g. Plesk 360 Monitoring, Uptime Kuma), and set **outgoing mail limits** in Plesk (*Tools & Settings → Outgoing Mail Control*) so a hijacked mailbox is throttled immediately.
+
+### JSON report (optional, `JSON_REPORT=1`)
+
+For dashboards and other tools the script can write a machine-readable copy of every run: `report-YYYYMMDD-HHMM.json` next to the text report, uploaded together with `latest.json`. It is **off by default**, and switching it on changes nothing in the text reports, `summary.txt` or the mails – the JSON is an extra file, built in the same run from the same alerts and lines (the tests check that the text is byte-identical with and without it). `--json` writes it for a single run; with `--only` or `--no-upload` the JSON is printed instead of the text, e.g. `plesk-server-report.sh --only system,mail --json`.
+
+```json
+{
+  "schema": 1,
+  "generator": "plesk-server-report",
+  "version": "1.13.0",
+  "host": "host.example.com",
+  "time": "2026-11-14T10:05:00Z",
+  "time_local": "2026-11-14 10:05 UTC",
+  "only": null,
+  "report": "report-20261114-1005.txt",
+  "pseudonymised": false,
+  "status": "warning",
+  "alerts": [
+    {"check": "mail", "daily": false, "key": "3f9c1a2b7d0e4c51", "new": true, "text": "Mail: 240 deferred deliveries"},
+    {"check": "certificates", "daily": true, "key": "a71d0e44c2b9f013", "new": false, "text": "TLS: shop.example expires in 9 days"}
+  ],
+  "notes": [
+    {"check": "panel", "text": "panel: /var/log/plesk/panel.log not found"}
+  ],
+  "metrics": {
+    "load5": 1.42, "cpu_cores": 4, "mem_avail_pct": 38, "disk_max_pct": 71,
+    "mail_delivered": 812, "mail_deferred": 240, "mail_queue": 12, "web_5xx": 31
+  },
+  "sections": [
+    {"check": "mail", "daily": false, "title": "MAIL", "lines": ["Delivered: 812 | deferred: 240 | bounced: 3 | queue: 12", "…"]}
+  ],
+  "daily_as_of": "2026-11-14 00:05 UTC",
+  "geo": "DB-IP.com Lite databases (CC BY 4.0)"
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `schema` | format version. It only changes when a field changes its meaning or goes away; new fields don't change it – ignore fields you don't know. |
+| `status` | `ok` or `warning`, as in the `STATUS:` line |
+| `alerts` | every alert of the text report, in the same order. `check` is the check that raised it (names as in `--list`; `script` for the script's own alerts, `daily` for daily checks cached before `JSON_REPORT` was switched on). `daily`: from the daily checks. `key`: the alert without its figures – stable from run to run, for "new / known / gone". `new`: the key was not in any report of the last 24 hours. |
+| `notes` | the ` i ` lines: missing or shortened data |
+| `metrics` | figures for graphs over time: `load1`, `load5`, `load15`, `cpu_cores`, `mem_total_mb`, `mem_avail_mb`, `mem_avail_pct`, `disk_max_pct`, `inodes_max_pct`, `mail_delivered`, `mail_deferred`, `mail_bounced`, `mail_queue`, `mail_blocklist_rejections`, `mail_failed_logins_smtp`, `mail_failed_logins_imap`, `web_requests`, `web_5xx`, `web_login_posts`. A figure is missing (not 0) when its check did not run. |
+| `sections` | the text of each check, line by line, exactly as in the text report; `title` is its `== … ==` heading (none for the daily checks and for checks that add to another section, like `webmail`) |
+| `pseudonymised` | `true` in the uploaded copy when `MASK_MAILBOXES=1` |
+
+The text is cleaned like the text report (no control characters); bytes that are not UTF-8 are dropped.
 
 ---
 
@@ -747,6 +795,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 | `WARN_BACKUP_HOURS` | 26 | maximum age of the last Plesk backup |
 | `REMOTE` | `reports:server-reports/<host>` | rclone `remote:path` for the upload, `""` = keep reports locally only |
 | `RETENTION_DAYS` / `LOCAL_KEEP_DAYS` | 7 / 7 | delete reports older than this many days remotely / locally (0 = never). Remote deletion is permanent, not into the trash. `latest.txt` and `summary.txt` are replaced as new files on every run instead of being overwritten, so Google Drive keeps no older versions of them. Keep at least one day locally, `summary.txt` is built from the local reports |
+| `JSON_REPORT` | 0 | 1 = also write `report-YYYYMMDD-HHMM.json` (and upload it with `latest.json`), see [JSON report](#json-report-optional-json_report1). The text reports stay the same |
 | `SUMMARY` / `SUMMARY_HOURS` | 1 / 24 | write and upload `summary.txt`, built from the local reports of the last `SUMMARY_HOURS` (see [Reading the reports](#reading-the-reports)), 0 = off |
 | `MAX_RUNTIME` | 50 | minutes after which an unattended (cron) run is stopped, together with every command it started. Keep it below the cron interval. The next run reports the aborted one as an alert. 0 = no limit |
 | `CMD_TIMEOUT` | 120 | seconds per external command that can hang (`plesk db`, `fail2ban-client`, `postqueue`, `journalctl`, `systemctl`, `apt-get`, `rclone`). A timeout raises an alert `Script: command timed out …` |
