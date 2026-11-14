@@ -25,3 +25,9 @@ setup() { load_script; }
 @test "tests use the awk chosen by AWK_DIR" {
   [ -z "$AWK_DIR" ] || [ "$(command -v awk)" = "$AWK_DIR/awk" ]
 }
+
+@test "UPLOADS_PHP_IGNORE no longer skips the whole borlabs-cookie folder" {
+  run grep -qE "$UPLOADS_PHP_IGNORE" <<<"/var/www/vhosts/d1.example/httpdocs/wp-content/uploads/borlabs-cookie/x.php"
+  [ "$status" -ne 0 ]
+  grep -qE "$UPLOADS_PHP_IGNORE" <<<"/var/www/vhosts/d1.example/httpdocs/wp-content/uploads/mailchimp-for-wp/debug-log.php"
+}

@@ -681,7 +681,7 @@ Between runs the script keeps its memory in `/var/lib/plesk-server-report`: wher
 REMOTE="reports:server-reports/myhost"   # "" = local only
 RETENTION_DAYS=7                         # 0 = never delete remotely
 WEB_IGNORE_DOMAINS="legacy.example old.example"   # no web alerts, still listed
-UPLOADS_PHP_IGNORE='/uploads/borlabs-cookie/|/uploads/mailchimp-for-wp/debug-log\.php$|/uploads/my-plugin/'
+UPLOADS_PHP_IGNORE='/uploads/mailchimp-for-wp/debug-log\.php$|/uploads/my-plugin/'
 WARN_IPS_PER_MAILBOX=6
 WARN_MAILS_PER_SENDER=300
 ALLOWED_COUNTRIES="DE AT CH"              # alert on logins from other countries
@@ -714,7 +714,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 | `WARN_5XX_PER_DOMAIN` / `WARN_PHP_FATAL` | 100 / 20 | web errors per domain |
 | `WARN_LOGIN_POSTS` | 300 | POSTs to `wp-login.php`/`xmlrpc.php` per domain |
 | `WEB_IGNORE_DOMAINS` | empty | space-separated domains without web alerts (still listed in the report) |
-| `UPLOADS_PHP_IGNORE` | Borlabs Cookie, Mailchimp for WP | regex of legitimate PHP files inside `wp-content/uploads` |
+| `UPLOADS_PHP_IGNORE` | Mailchimp for WP's debug log | regex of legitimate PHP files inside `wp-content/uploads` |
 | `WARN_LOGIN_DETAIL` | 20 | show login-attack details for domains with at least this many login POSTs |
 | `WARN_LOGIN_BRUTE_FAILS` | 5 | alert when an IP logs in to WordPress successfully after at least this many failures |
 | `GEOIP` | 1 | 0 switches geolocation off |
@@ -775,7 +775,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 
 ## First run
 
-- **PHP files in `wp-content/uploads`:** the first run lists all existing ones. Some plugins legitimately store PHP files there (Borlabs Cookie and Mailchimp for WP are excluded by default). Add your own to `UPLOADS_PHP_IGNORE`. Anything else deserves a look: this is the classic place for web shells.
+- **PHP files in `wp-content/uploads`:** the first run lists all existing ones. Some plugins legitimately store PHP files there (the debug log of Mailchimp for WP is excluded by default – exclude single files, not whole plugin folders: a webshell is often put exactly there). Add your own to `UPLOADS_PHP_IGNORE`. Anything else deserves a look: this is the classic place for web shells.
 - **IMAP/POP3 countries:** mailboxes already read from abroad at the first run are stored as known (`known_imap_countries`) without an alert.
 - **Logins:** all IPs with a successful SSH/panel login in the current logs are stored as known (`/var/lib/plesk-server-report/known_login_ips`). Every later login from a new IP raises an alert once. Remove lines from that file to "forget" an IP.
 - **SSH keys, accounts, sudo, cron jobs, autostart files, listening ports:** the first run stores what is there as the baseline (`/var/lib/plesk-server-report/baseline/`) without alerts – except cron jobs and autostart files with suspicious content and suspicious processes, which are reported right away. From then on every change is listed once.

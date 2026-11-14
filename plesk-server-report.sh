@@ -175,7 +175,7 @@ PERSISTENCE_IGNORE=""         # regex on the text of findings to ignore (e.g. a 
 DNSBL_LISTS="zen.spamhaus.org bl.spamcop.net psbl.surriel.com"   # Barracuda: see README (answers registered resolvers only)
 WEB_IGNORE_DOMAINS=""         # space-separated domains without web alerts (still listed)
 # Known legitimate PHP files inside wp-content/uploads (regex on the full path)
-UPLOADS_PHP_IGNORE='/uploads/borlabs-cookie/|/uploads/mailchimp-for-wp/debug-log\.php$'
+UPLOADS_PHP_IGNORE='/uploads/mailchimp-for-wp/debug-log\.php$'
 
 # GeoIP: country + network operator of IPs from a local DB-IP Lite database
 # (downloaded and refreshed monthly by the script). Needs mmdblookup:
@@ -1340,11 +1340,12 @@ check_uploads() {   # new PHP files in wp-content/uploads
     if [[ -f $SCAN_STAMP ]]; then
       # changed since the last scan – by file date (mtime) OR by inode change time (ctime): malware
       # sets the file date back (PHP touch()) to look old; the change time can't be set by a user
-      T "$FIND_TIMEOUT" find "$up" -type f \( -iname '*.php' -o -iname '*.php[0-9]' -o -iname '*.phtml' -o -iname '*.phar' \) \( -newer "$SCAN_STAMP" -o -cnewer "$SCAN_STAMP" \) 2>/dev/null
+      T "$FIND_TIMEOUT" find "$up" -type f \( -iname '*.php' -o -iname '*.php[0-9]' -o -iname '*.phtml' -o -iname '*.phar' \) \( -newer "$SCAN_STAMP" -o -cnewer "$SCAN_STAMP" \) -print0 2>/dev/null
     else
-      T "$FIND_TIMEOUT" find "$up" -type f \( -iname '*.php' -o -iname '*.php[0-9]' -o -iname '*.phtml' -o -iname '*.phar' \) ! -name 'index.php' 2>/dev/null
+      T "$FIND_TIMEOUT" find "$up" -type f \( -iname '*.php' -o -iname '*.php[0-9]' -o -iname '*.phtml' -o -iname '*.phar' \) ! -name 'index.php' -print0 2>/dev/null
     fi
   done < <(T "$FIND_TIMEOUT" find "$(dirname "$VHOST_LOGS")" -mindepth 2 -maxdepth 7 -type d -path '*/wp-content/uploads' ! -path '*/system/*' 2>/dev/null) |
+    tr '\n\0' '?\n' |   # one name per line: a line break in a name is shown as ?
     grep -vE "$UPLOADS_PHP_IGNORE" >"$TMP"
   CNT=$(wc -l <"$TMP")
   if [[ -f $SCAN_STAMP ]]; then
@@ -2201,9 +2202,9 @@ check_exposed() {   # .env, .git, dumps, backups, config copies in document root
 # loaded before every PHP request (auto_prepend_file/auto_append_file, except known security
 # plugins), PHP executed for image or text files, and the signature of a widespread WordPress
 # malware campaign that blocks every PHP file except its own. Prints "FILE<TAB>LINE" per hit.
-php_config_backdoors() {   # php_config_backdoors < list of files
+php_config_backdoors() {   # php_config_backdoors < list of files, each ending with NUL
   # shellcheck disable=SC2016  # awk program: its $0 is awk's, not the shell's
-  T "$FIND_TIMEOUT" xargs -r -d '\n' awk '
+  T "$FIND_TIMEOUT" xargs -r -0 awk '
     FNR == 1 { img = 0; done_ = 0 }
     done_ { next }
     { l = tolower($0); sub(/^[ \t]+/, "", l) }
@@ -2214,7 +2215,7 @@ php_config_backdoors() {   # php_config_backdoors < list of files
     img && l ~ /sethandler[^#]*php/ { hit(); next }
     l ~ /<\/filesmatch/ { img = 0 }
     l ~ /<filesmatch[^>]*\.\(py\|exe\|php\)/ { hit(); next }
-    function hit() { printf "%s\t%s\n", FILENAME, substr($0, 1, 160); done_ = 1 }
+    function hit() { fn = FILENAME; gsub(/[\n\t]/, "?", fn); printf "%s\t%s\n", fn, substr($0, 1, 160); done_ = 1 }
   ' 2>/dev/null
 }
 check_webshell() {   # recently changed PHP files with typical backdoor code, PHP settings in .htaccess/.user.ini
@@ -2230,20 +2231,22 @@ check_webshell() {   # recently changed PHP files with typical backdoor code, PH
     while IFS= read -r f; do
       [[ -n $WEBSHELL_IGNORE && $f =~ $WEBSHELL_IGNORE ]] && continue
       hits=$((hits + 1))
-      out+="  $f (file date $(date -r "$f" '+%Y-%m-%d %H:%M'), last change $(date -d "@$(stat -c %Z "$f" 2>/dev/null || echo 0)" '+%Y-%m-%d %H:%M'))"$'\n'
+      out+="  $f (file date $(date -r "$f" '+%Y-%m-%d %H:%M' 2>/dev/null), last change $(date -d "@$(stat -c %Z "$f" 2>/dev/null || echo 0)" '+%Y-%m-%d %H:%M'))"$'\n'
       dalert "Web: suspicious code in recently changed file $f – check it (webshell/backdoor?)"
-    done < <(if [[ -f $stamp ]]; then T "$FIND_TIMEOUT" find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) \( -newer "$stamp" -o -cnewer "$stamp" \) 2>/dev/null
-             else T "$FIND_TIMEOUT" find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) \( -mtime -"$WEBSHELL_FIRST_DAYS" -o -ctime -"$WEBSHELL_FIRST_DAYS" \) 2>/dev/null; fi |
-             T "$FIND_TIMEOUT" xargs -r -d '\n' grep -lE "$re" 2>/dev/null | head -30)
+    # names end with NUL, not a line break: a folder name with a line break hides nothing; such a
+    # line break is shown as ?
+    done < <(if [[ -f $stamp ]]; then T "$FIND_TIMEOUT" find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) \( -newer "$stamp" -o -cnewer "$stamp" \) -print0 2>/dev/null
+             else T "$FIND_TIMEOUT" find "$root" -type f \( -iname '*.php' -o -iname '*.phtml' -o -iname '*.php[0-9]' \) \( -mtime -"$WEBSHELL_FIRST_DAYS" -o -ctime -"$WEBSHELL_FIRST_DAYS" \) -print0 2>/dev/null; fi |
+             T "$FIND_TIMEOUT" xargs -r -0 grep -lZE "$re" 2>/dev/null | tr '\n\0' '?\n' | head -30)
     while IFS=$'\t' read -r f ln; do
       [[ -n $WEBSHELL_IGNORE && $f =~ $WEBSHELL_IGNORE ]] && continue
       hits=$((hits + 1))
-      out+="  $f: $ln (file date $(date -r "$f" '+%Y-%m-%d %H:%M'))"$'\n'
+      out+="  $f: $ln (file date $(date -r "$f" '+%Y-%m-%d %H:%M' 2>/dev/null))"$'\n'
       dalert "Web: suspicious PHP setting in recently changed $f: $ln – check it (backdoor?)"
     # these files are few and small: the first scan (and the first after the update that added
     # them) checks all of them, whatever their date – a backdoor may be older than the script
-    done < <(if [[ -f $stamp && -f $STATE_DIR/webshell_conf_full ]]; then T "$FIND_TIMEOUT" find "$root" -type f \( -name .htaccess -o -name .user.ini -o -name php.ini \) \( -newer "$stamp" -o -cnewer "$stamp" \) 2>/dev/null
-             else T "$FIND_TIMEOUT" find "$root" -type f \( -name .htaccess -o -name .user.ini -o -name php.ini \) 2>/dev/null; fi |
+    done < <(if [[ -f $stamp && -f $STATE_DIR/webshell_conf_full ]]; then T "$FIND_TIMEOUT" find "$root" -type f \( -name .htaccess -o -name .user.ini -o -name php.ini \) \( -newer "$stamp" -o -cnewer "$stamp" \) -print0 2>/dev/null
+             else T "$FIND_TIMEOUT" find "$root" -type f \( -name .htaccess -o -name .user.ini -o -name php.ini \) -print0 2>/dev/null; fi |
              php_config_backdoors | head -30)
   done < <(docroots)
   # after a timeout the scan was incomplete: keep the old stamp, so the next scan looks again

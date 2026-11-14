@@ -6,7 +6,7 @@ load helper
 setup() { load_script; }
 
 @test "backdoor patterns are found, security plugins and normal files are not" {
-  run php_config_backdoors < <(find "$FIX/htaccess" -type f | sort)
+  run php_config_backdoors < <(find "$FIX/htaccess" -type f -print0 | sort -z)
   for d in prepend image-handler addtype campaign; do
     [[ $output == *"/htaccess/$d/"* ]]
   done
