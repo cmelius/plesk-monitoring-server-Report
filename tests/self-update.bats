@@ -235,3 +235,88 @@ fake_api() {
   run bash -c "LC_ALL=C grep -c \$'\\x1b' <<<\"\$1\"" _ "$output"
   [ "$output" = 0 ]
 }
+
+# --self-update --edge: fake GitHub – the newest commit on main, its tests (CHECKS: success,
+# failure or running) and the script at that commit ($NEW, version 1.12.1)
+edge_api() {
+  local sha=4444444444444444444444444444444444444444
+  case $1 in
+    commits/main) printf '{\n  "sha": "%s",\n  "commit": {\n  }\n}\n' $sha ;;
+    commits/$sha/check-runs*)
+      case ${CHECKS:-success} in
+        success) printf '{\n  "total_count": 2,\n  "check_runs": [\n    {\n      "status": "completed",\n      "conclusion": "success"\n    },\n    {\n      "status": "completed",\n      "conclusion": "success"\n    }\n  ]\n}\n' ;;
+        failure) printf '{\n  "total_count": 2,\n  "check_runs": [\n    {\n      "status": "completed",\n      "conclusion": "success"\n    },\n    {\n      "status": "completed",\n      "conclusion": "failure"\n    }\n  ]\n}\n' ;;
+        running) printf '{\n  "total_count": 1,\n  "check_runs": [\n    {\n      "status": "in_progress",\n      "conclusion": null\n    }\n  ]\n}\n' ;;
+      esac ;;
+    commits\?*sha=$sha*) printf '[\n  {\n    "sha": "%s",\n    "commit": {\n      "message": "A change on main",\n    }\n  }\n]\n' $sha ;;
+    contents/*ref=$sha) printf '{\n  "sha": "%s",\n}\n' 0000000000000000000000000000000000000000 ;;
+  esac
+}
+edge_setup() {
+  SU_EDGE=1
+  su_api() { edge_api "$@"; }
+  su_fetch() {
+    case $1 in
+      */4444444444444444444444444444444444444444/plesk-server-report.sh) cp "$NEW" "$2" ;;
+      */4444444444444444444444444444444444444444/CHANGELOG.md) printf '## [1.12.1] – not yet released (on `main`)\n- edge change\n\n## [1.12.0] – before\n- old\n' >"$2" ;;
+      *) return 1 ;;
+    esac
+  }
+}
+
+@test "--edge: tests passed – the script of the newest commit on main is installed, the old copy kept" {
+  edge_setup
+  run self_update_1x
+  [ "$status" -eq 0 ]
+  [[ $output == *"commit 4444444, version 1.12.1 (installed: 1.12.0) – tests passed"* ]]
+  [[ $output == *"NOT A RELEASE"* ]]
+  [[ $output == *"- edge change"* ]]
+  [ "$(installed)" = "plesk-server-report 1.12.1" ]
+  [ "$(bash "$STATE_DIR/plesk-server-report.sh.old" --version)" = "plesk-server-report 1.12.0" ]
+  [ "$(leftovers)" -eq 0 ]
+}
+
+@test "--edge: failed or running tests – nothing is installed" {
+  edge_setup
+  CHECKS=failure run self_update_1x
+  [ "$status" -eq 1 ]
+  [[ $output == *"did not pass – not installed"* ]]
+  CHECKS=running run self_update_1x
+  [ "$status" -eq 1 ]
+  [[ $output == *"still running"* ]]
+  cmp -s "$SU_SELF" "$ORIG"
+  [ "$(leftovers)" -eq 0 ]
+}
+
+@test "--edge: another major version on main is not installed" {
+  edge_setup
+  sed -i 's/^VERSION=.*/VERSION=2.0.0/' "$NEW"
+  run self_update_1x
+  [ "$status" -eq 1 ]
+  [[ $output == *"main is at version 2.0.0 – --edge stays within version 1"* ]]
+  cmp -s "$SU_SELF" "$ORIG"
+}
+
+@test "--edge: already the newest version on main" {
+  edge_setup
+  cp "$SU_SELF" "$NEW"
+  run self_update_1x
+  [ "$status" -eq 0 ]
+  [[ $output == *"your copy is the newest version on main"* ]]
+  [ "$(leftovers)" -eq 0 ]
+}
+
+@test "--edge: answer no – nothing changes" {
+  edge_setup; SU_YES=0
+  run self_update_1x <<<"n"
+  [[ $output == *"nothing changed"* ]]
+  cmp -s "$SU_SELF" "$ORIG"
+  [ "$(leftovers)" -eq 0 ]
+}
+
+@test "--edge only with --self-update, not with --rollback or --major" {
+  run bash "$BATS_TEST_DIRNAME/../plesk-server-report.sh" --edge
+  [ "$status" -eq 2 ]
+  run bash "$BATS_TEST_DIRNAME/../plesk-server-report.sh" --self-update --edge --rollback
+  [ "$status" -eq 2 ]
+}

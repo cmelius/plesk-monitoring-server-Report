@@ -56,6 +56,8 @@
 #                     is kept in the state directory. --yes: don't ask.
 #                     --self-update --rollback: back to the kept version.
 #                     --self-update --major: switch to version 2 (not available in 1.x yet)
+#                     --self-update --edge: the development version, the script of the
+#                     newest commit on main (only when its tests on GitHub passed; not a release)
 #   --help            show this help
 #
 # Settings: edit the defaults below or – recommended, survives updates –
@@ -3492,7 +3494,7 @@ show_state() {
 # (built in now, so that this check will not depend on a download).
 # shellcheck disable=SC2034  # for --self-update --major (version 2), not used by 1.x yet
 RELEASE_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBwQHy40R5vtIHxSSKofpOmJe3yW8LnONdOoWJyY/THA"   # the maintainer's public key; empty: no --self-update
-SU_YES=0; SU_ROLLBACK=0; SU_MAJOR=0
+SU_YES=0; SU_ROLLBACK=0; SU_MAJOR=0; SU_EDGE=0
 su_fail() { echo "self-update: $*" >&2; [[ -n ${SU_WORK:-} ]] && rm -rf "$SU_WORK"; return 1; }
 su_ask() {   # su_ask QUESTION – yes only for an answer starting with y (or j); with --yes always yes
   local a
@@ -3516,15 +3518,16 @@ su_major_note() {   # a newer major version: only a note
   echo "version 2 comes as a release archive (script with lib/ and plugins/) – see README: Updating from 1.x"
 }
 su_api() { T 20 curl -fsS --proto =https --connect-timeout 5 --max-time 15 -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$SCRIPT_REPO/$1" 2>/dev/null; }
-# su_dev_changes FILE VERSION CHANGELOG – for a copy taken from main before the release: find the
-# commit it came from (git's blob checksum, computed without git) among the last 20 commits that
-# changed the script up to the release tag, and list the commits after it. Otherwise the release's
-# CHANGELOG section. Uses at most 21 GitHub API requests (60 an hour are allowed without login).
+# su_dev_changes FILE VERSION CHANGELOG [REF WHAT] – for a copy taken from main: find the commit
+# it came from (git's blob checksum, computed without git) among the last 20 commits that changed
+# the script up to REF (default: the release tag of VERSION), and list the commits after it.
+# Otherwise VERSION's CHANGELOG section. WHAT names the target in the text ("the release").
+# Uses at most 21 GitHub API requests (60 an hour are allowed without login).
 su_dev_changes() {
-  local f=$1 ver=$2 log=$3 blob list i=0 c b msgs=()
+  local f=$1 ver=$2 log=$3 ref=${4:-v$2} what=${5:-the release} blob list i=0 c b msgs=()
   blob=$({ printf 'blob %d\0' "$(stat -c %s "$f")"; cat "$f"; } | sha1sum | cut -d' ' -f1)
   # newest first: top-level "sha" (4 spaces) and the first line of "message" (6 spaces) of each commit
-  list=$(su_api "commits?path=plesk-server-report.sh&sha=v$ver&per_page=20" |
+  list=$(su_api "commits?path=plesk-server-report.sh&sha=$ref&per_page=20" |
          awk '/^    "sha": "/ { s = $0; sub(/.*"sha": "/, "", s); sub(/".*/, "", s) }
               /^      "message": "/ && s != "" { m = $0; sub(/.*"message": "/, "", m); sub(/\\n.*|",?$/, "", m)
                                                  gsub(/\\u[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]|[\001-\037\177]/, "", m)
@@ -3533,8 +3536,8 @@ su_dev_changes() {
     [[ $c =~ ^[0-9a-f]{40}$ ]] || continue
     b=$(su_api "contents/plesk-server-report.sh?ref=$c" | sed -n 's/^  "sha": "\([0-9a-f]*\)".*/\1/p' | head -1)
     if [[ -n $b && $b == "$blob" ]]; then
-      if (( i == 0 )); then echo "your copy is the release's file except for its line endings or mode"; return 0; fi
-      echo ""; echo "Your copy is from commit ${c:0:7}; the release adds:"
+      if (( i == 0 )); then echo "your copy is the file of $what except for its line endings or mode"; return 0; fi
+      echo ""; echo "Your copy is from commit ${c:0:7}; $what adds:"
       printf '  - %s\n' "${msgs[@]}"; echo ""; return 0
     fi
     msgs+=("${m:0:120}"); i=$((i + 1))
@@ -3543,6 +3546,53 @@ su_dev_changes() {
   [[ -s $log ]] && awk -v v="$ver" '/^## \[/ { if (p) exit; if (index($0, "[" v "]")) p = 1 } p' "$log" |
     LC_ALL=C tr -d '\000-\010\013-\037\177' | head -60   # downloaded text: no terminal control sequences
   echo ""
+}
+# su_edge SELF DIR OLD – --self-update --edge: the development version, the script of the newest
+# commit on main. Only when GitHub's tests of that commit passed, and only within the installed
+# major version. Same test, question, lock and kept copy as an update to a release.
+su_edge() {
+  local self=$1 dir=$2 old=$3 sha checks total ok v raw
+  sha=$(su_api "commits/main" | sed -n 's/^  "sha": "\([0-9a-f]\{40\}\)".*/\1/p' | head -1)
+  [[ -n $sha ]] || { su_fail "no answer from GitHub about the newest commit on main"; return 1; }
+  # the tests of that commit (GitHub Actions): all finished, none failed
+  checks=$(su_api "commits/$sha/check-runs?per_page=100")
+  total=$(sed -n 's/^  "total_count": \([0-9]*\).*/\1/p' <<<"$checks" | head -1)
+  ok=$(grep -c '^      "conclusion": "\(success\|skipped\|neutral\)"' <<<"$checks")
+  if [[ -z $total ]]; then su_fail "no answer from GitHub about the tests of commit ${sha:0:7}"; return 1; fi
+  if (( total == 0 || ok < total )); then
+    if grep -q '^      "status": "\(queued\|in_progress\)"' <<<"$checks"; then
+      su_fail "the tests of commit ${sha:0:7} on main are still running – try again in a few minutes"
+    else su_fail "the tests of commit ${sha:0:7} on main did not pass – not installed"; fi
+    return 1
+  fi
+  raw="https://raw.githubusercontent.com/$SCRIPT_REPO/$sha"
+  SU_WORK=$(mktemp "$dir/.plesk-server-report.XXXXXX") || { su_fail "no temporary file in $dir"; return 1; }
+  su_fetch "$raw/plesk-server-report.sh" "$SU_WORK" || { su_fail "download of $raw/plesk-server-report.sh failed"; return 1; }
+  v=$(sed -n 's/^VERSION=//p' "$SU_WORK" | head -1)
+  if ! bash -n "$SU_WORK" 2>/dev/null || ! [[ $v =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+    su_fail "the version on main failed its test (syntax, or no version number) – nothing installed"; return 1
+  fi
+  if [[ ${v%%.*} != "${VERSION%%.*}" ]]; then
+    su_fail "main is at version $v – --edge stays within version ${VERSION%%.*} (see README: Updating from 1.x)"; return 1
+  fi
+  if cmp -s "$SU_WORK" "$self"; then
+    rm -f "$SU_WORK"; echo "your copy is the newest version on main (commit ${sha:0:7}, version $v)"; return 0
+  fi
+  echo "development version on main: commit ${sha:0:7}, version $v (installed: $VERSION) – tests passed"
+  echo "NOT A RELEASE: it may change again before the release. --self-update without --edge goes back to"
+  echo "releases (the next release replaces it); --self-update --rollback brings back your copy."
+  su_fetch "$raw/CHANGELOG.md" "$SU_WORK.changes" 2>/dev/null
+  su_dev_changes "$self" "$v" "$SU_WORK.changes" "$sha" "main"
+  rm -f "$SU_WORK.changes"
+  su_ask "Install the development version $v (commit ${sha:0:7}) now?" || { rm -f "$SU_WORK"; echo "nothing changed"; return 0; }
+  su_lock || return 1
+  if ! { cp -p "$self" "$old" && chown --reference="$self" "$SU_WORK" && chmod --reference="$self" "$SU_WORK" &&
+         mv -f "$SU_WORK" "$self"; }; then
+    su_fail "could not replace $self – it is unchanged"; return 1
+  fi
+  exec 9>&-                            # release the lock
+  echo "installed the development version $v (commit ${sha:0:7}). The previous copy ($VERSION) is kept in $old (--self-update --rollback goes back)."
+  echo "Test it with your configuration: plesk-server-report.sh --only services"
 }
 self_update_1x() {
   local self dir d old="$STATE_DIR/plesk-server-report.sh.old" latest v raw same
@@ -3574,6 +3624,7 @@ self_update_1x() {
     echo "back to ${v:-the kept version}; version $VERSION is kept in $old (--self-update --rollback swaps again)"
     return 0
   fi
+  if (( SU_EDGE )); then su_edge "$self" "$dir" "$old"; return $?; fi
   latest=$(latest_release_in_major "${VERSION%%.*}")
   [[ $latest =~ ^[0-9]+(\.[0-9]+)*$ ]] || { su_fail "no answer from GitHub about the latest release"; return 1; }
   # same number: the file can still differ – a copy taken from main before the release
@@ -3656,6 +3707,7 @@ parse_args() {
       --rollback) SU_ROLLBACK=1 ;;
       --yes) SU_YES=1 ;;
       --major) SU_MAJOR=1 ;;
+      --edge) SU_EDGE=1 ;;
       --state-readme) state_readme; exit 0 ;;
       --test-mail) TEST_MAIL=1 ;;
       --show-state) SHOW_STATE=1 ;;
@@ -3670,6 +3722,8 @@ parse_args() {
   done
   if (( (SU_ROLLBACK || SU_YES) && ! SELF_UPDATE )); then echo "--rollback and --yes go with --self-update" >&2; exit 2; fi
   if (( SU_MAJOR && ! SELF_UPDATE )); then echo "--major goes with --self-update" >&2; exit 2; fi
+  if (( SU_EDGE && ! SELF_UPDATE )); then echo "--edge goes with --self-update" >&2; exit 2; fi
+  if (( SU_EDGE && (SU_ROLLBACK || SU_MAJOR) )); then echo "--edge doesn't go with --rollback or --major" >&2; exit 2; fi
   if [[ -n $ONLY ]]; then
     local c
     ONLY_MODE=1; UPLOAD=0

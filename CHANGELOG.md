@@ -6,6 +6,7 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 
 ### Added
 - **Severity** in the JSON report: every alert has `"severity": "critical"` (signs of a compromise or an outage: outgoing spam, a hijacked mailbox, malware or a backdoor, a failed service, …) or `"warning"`; the run has a `level` (`ok`, `warning`, `critical`). The list of critical alerts is in the README. The text report doesn't change.
+- **`--self-update --edge`**: the development version – the script of the newest commit on `main`, for those who want changes before the release. Only installed when GitHub's tests of that commit passed (otherwise it says whether they failed or are still running), and only within the installed major version. Downloaded from that commit, not from the moving branch; checked, the commits since your copy listed, asked, the previous copy kept for `--rollback` – as with a release. `--self-update` without `--edge` goes back to releases with the next one.
 - **`summary.json`** (with `JSON_REPORT=1` and `SUMMARY=1`): the JSON reports of the last `SUMMARY_HOURS` condensed – every run with status, level, number of alerts and its figures (for graphs), every alert once with severity, count, first and last time, critical ones first. Uploaded next to `summary.txt`, which doesn't change. `--summary --json` prints it.
 
 ### Note

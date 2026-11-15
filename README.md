@@ -1072,6 +1072,14 @@ The script runs on a production Plesk server with about 40 domains and is **acti
 
 It looks for the newest **1.x** release, downloads its script from GitHub, checks it without running it (valid bash, the expected version), shows the CHANGELOG sections since your version and asks before it replaces anything. With the same version number it compares the files: a copy taken from `main` before the release can differ from the release, and is then offered to be replaced by it. It also finds the commit your copy came from – by git's checksum of the file, computed without git, among the last 20 commits that changed the script (one GitHub API request each; 60 an hour are allowed without login) – and lists the commits the release adds; if it can't find it, it shows the release's CHANGELOG section. It waits for a running report to finish. The previous version is kept as `/var/lib/plesk-server-report/plesk-server-report.sh.old`; `--self-update --rollback` brings it back (and swaps again if called twice). `--yes` skips the question – it still has to be started from a terminal, never from cron. A git checkout is refused: update it with `git pull`. Your settings in `/etc/plesk-server-report.conf` and the state are kept.
 
+**On the edge: the development version.** To get changes before they are released (from version 1.14.0 on):
+
+```bash
+/usr/local/sbin/plesk-server-report.sh --self-update --edge
+```
+
+It installs the script of the newest commit on `main` – **not a release**: it may still change before the release, and it is what the author runs on his own server first. It is only installed when GitHub's tests of that commit (syntax, shellcheck, the bats tests with mawk and gawk) passed, and only within your major version (1.x stays 1.x). Everything else works as above: the file is downloaded from that commit (not from the moving branch), checked, the commits since your copy are listed, you are asked, and your previous copy is kept for `--self-update --rollback`. To go back to releases, simply use `--self-update` without `--edge`: the next release replaces the development version.
+
 **Up to version 1.11.x**, or if you prefer it, download the script again – your settings and the state are kept as well:
 
 ```bash
@@ -1083,7 +1091,7 @@ curl -fsSL -o /usr/local/sbin/plesk-server-report.sh \
 
 The test run matters: if something keeps the script from running – since 1.9.0 for example a configuration file that another user may write – you see it right away, not only when the reports stop coming. `--version` doesn't load the configuration and won't tell you.
 
-(or the `main` URL from [Installation](#installation) to get changes before they are released)
+(or the `main` URL from [Installation](#installation) to get changes before they are released – from 1.14.0 on `--self-update --edge` does that with the checks above)
 
 ### Updating from 1.x
 
