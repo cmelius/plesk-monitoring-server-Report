@@ -80,7 +80,7 @@ is always reported). Processes are not stored – they are checked live in every
 
 | File / folder | Content |
 |---|---|
-| `out/` | the reports and `summary.txt`, kept for `LOCAL_KEEP_DAYS`. `summary.txt` is built from these files. With `JSON_REPORT=1` also the JSON reports (`report-*.json`) and the newest one as `latest.json`. |
+| `out/` | the reports and `summary.txt`, kept for `LOCAL_KEEP_DAYS`. `summary.txt` is built from these files. With `JSON_REPORT=1` also the JSON reports (`report-*.json`), the newest one as `latest.json`, and `summary.json` (built from the JSON reports). |
 | `json_alerts_seen` | only with `JSON_REPORT=1`: `key last-seen` of every alert of the last 24 hours (key as in the JSON report). An alert whose key is not in it is `"new": true` in the JSON report. |
 | `geoip/` | the DB-IP Lite databases for country and network operator (`GEOIP_DIR`), refreshed monthly. |
 | `lock` | lock file, so that only one run at a time is active (it is never deleted). |

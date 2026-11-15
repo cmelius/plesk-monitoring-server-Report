@@ -35,8 +35,8 @@
 #   --no-upload       print the report to stdout; nothing is uploaded or mailed
 #   --only CHECK,...  run only these checks right now and print the result; nothing
 #                     is uploaded and no state is changed (log offsets, known IPs, …)
-#   --json            also write the JSON report for this run (as JSON_REPORT=1); with --only
-#                     and --no-upload the JSON is printed instead of the text
+#   --json            also write the JSON report for this run (as JSON_REPORT=1); with --only,
+#                     --no-upload and --summary the JSON is printed instead of the text
 #   --list            list the check names for --only
 #   --summary         print the summary of the last SUMMARY_HOURS from the stored reports (runs no checks)
 #   --show-state      show what the script remembers (known IPs, countries, log positions)
@@ -72,7 +72,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.13.0
+VERSION=1.14.0
 
 set -uo pipefail
 export LC_ALL=C
@@ -2590,6 +2590,27 @@ write_report() {
   chmod 600 "$REPORT"
   write_json
 }
+# alert_severity TEXT – "critical" (signs of a compromise or an outage: act now) or "warning"
+# (check it). Only in the JSON reports – the text report doesn't show it. Listed in the README
+# ("Severity"); tests/json.bats checks one example of every critical alert.
+alert_severity() {
+  case $1 in
+    # "password compromised?", but often a trip or a phone on the move
+    "Mail: mailbox "*" logged in via IMAP/POP3 from a new country"*) echo warning ;;
+    # critical: outgoing spam, a hijacked mailbox or WordPress login; malware, backdoors, exposed
+    # secrets; outages
+    "Mail: server IP "*" is listed on "*|"DNS: domain "*" is listed on "*|\
+    *"password compromised?"*|*"password guessed?"*|"Mail: mailbox "*" with a foreign sender domain – spam?"|\
+    "Web: "*"brute force succeeded?"*|\
+    "Web: "*" new PHP file(s) in wp-content/uploads"*|"Web: suspicious "*|\
+    "Web: "*" served the sensitive file "*|"Web: "*" exposes "*" publicly"*|\
+    "Access: new SSH key "*|"Access: account "*" has UID 0"*|"Access: /etc/ld.so.preload "*|\
+    "Cron: "*"suspicious"*|"Process: "*|\
+    "Service(s) failed: "*|"fail2ban is not running"|"RAM: the kernel killed processes"*|\
+    "DNS: "*" does not resolve"*|"TLS: mail certificate on port "*" has expired"*) echo critical ;;
+    *) echo warning ;;
+  esac
+}
 # utf8_clean – drop byte sequences that are not UTF-8 (a log line can hold any bytes; JSON must be UTF-8)
 utf8_clean() {
   # glibc iconv -c exits with 1 when it dropped something – that is the point, not an error
@@ -2613,7 +2634,7 @@ write_json() {
   {
     for i in "${!ALERTS[@]}"; do
       read -r chk d <<<"${ALERT_CHK[i]:-script 0}"
-      jline A "$chk" "$d" "${keys[i]}" "${ALERTS[i]}"
+      jline A "$chk" "$d" "${keys[i]}" "$(alert_severity "${ALERTS[i]}")" "${ALERTS[i]}"
     done
     [[ -f $TMPD/json ]] && while IFS= read -r line; do
       typ=${line%%$'\t'*}
@@ -2636,7 +2657,7 @@ write_json() {
       function str(x) { return x == "" ? "null" : esc(x) }
       function after(x, n,   p) { while (n-- > 0) { p = index(x, "\t"); if (!p) return ""; x = substr(x, p + 1) } return x }
       FILENAME == seenf { if (now - $2 < 86400) seen[$1] = 1; next }
-      $1 == "A" { na++; ac[na] = $2; ad[na] = $3; ak[na] = $4; at[na] = after($0, 4); next }
+      $1 == "A" { na++; ac[na] = $2; ad[na] = $3; ak[na] = $4; av[na] = $5; at[na] = after($0, 5); if ($5 == "critical") crit = 1; next }
       $1 == "N" { nn++; nc[nn] = $2; nt[nn] = after($0, 2); next }
       $1 == "M" { if (!($2 in mv)) { nm++; mn[nm] = $2; mv[$2] = $3 } next }
       $1 == "S" { ns++; sc[ns] = $2; sd[ns] = $3; st[ns] = ""; sl[ns] = 0; next }
@@ -2658,10 +2679,11 @@ write_json() {
         print "  \"report\": " esc(report) ","
         print "  \"pseudonymised\": false,"
         print "  \"status\": " (na ? "\"warning\"" : "\"ok\"") ","
+        print "  \"level\": " (crit ? "\"critical\"" : na ? "\"warning\"" : "\"ok\"") ","
         printf "  \"alerts\": ["
         for (i = 1; i <= na; i++)
-          printf "%s\n    {\"check\": %s, \"daily\": %s, \"key\": %s, \"new\": %s, \"text\": %s}", (i > 1 ? "," : ""),
-            esc(ac[i]), (ad[i] ? "true" : "false"), esc(ak[i]), ((ak[i] in seen) ? "false" : "true"), esc(at[i])
+          printf "%s\n    {\"check\": %s, \"daily\": %s, \"severity\": %s, \"key\": %s, \"new\": %s, \"text\": %s}", (i > 1 ? "," : ""),
+            esc(ac[i]), (ad[i] ? "true" : "false"), esc(av[i]), esc(ak[i]), ((ak[i] in seen) ? "false" : "true"), esc(at[i])
         print (na ? "\n  ]," : "],")
         printf "  \"notes\": ["
         for (i = 1; i <= nn; i++) printf "%s\n    {\"check\": %s, \"text\": %s}", (i > 1 ? "," : ""), esc(nc[i]), esc(nt[i])
@@ -2703,6 +2725,78 @@ write_json() {
 # A reviewer (human or AI) reads this file plus latest.txt (daily checks, fail2ban)
 # instead of every single report. Built from the report files, so nothing is lost
 # that a report contains; the per-run reports stay as they are.
+# write_summary_json OUTFILE – summary.json (JSON_REPORT=1): the JSON reports of the last
+# SUMMARY_HOURS condensed – every run with status, level, number of alerts and its figures, every
+# alert once with severity, count, first and last time. Reads only the JSON the script wrote
+# itself (one alert or figure per line, see write_json), never the text reports. Format: README.
+write_summary_json() {
+  local outf=$1 files
+  if ! json_on; then (( ${ONLY_MODE:-0} || ${SUMMARY_ONLY:-0} )) || rm -f "$outf"; return 0; fi
+  files=$(find "$OUT_DIR" -maxdepth 1 -name 'report-*.json' -mmin -$(( SUMMARY_HOURS * 60 )) 2>/dev/null | sort)
+  if [[ -z $files ]]; then rm -f "$outf"; return 0; fi
+  # shellcheck disable=SC2086  # a list of report files (names without spaces, made by the script) – split on purpose
+  awk -v version="$VERSION" -v host="$HOST" -v hours="$SUMMARY_HOURS" \
+      -v utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')" '
+    function esc(x) { gsub(/\\/, "\\\\", x); gsub(/"/, "\\\"", x); return "\"" x "\"" }
+    # tok(NAME) – the raw JSON value of "NAME": in line L (a string with its quotes, or a word)
+    function tok(name,   p, r) {
+      p = index(L, "\"" name "\": "); if (!p) return ""
+      r = substr(L, p + length(name) + 4)
+      if (substr(r, 1, 1) == "\"") { match(r, /^"([^"\\]|\\.)*"/); return substr(r, 1, RLENGTH) }
+      match(r, /^[a-z0-9.-]+/); return substr(r, 1, RLENGTH)
+    }
+    FNR == 1 { nr++; inm = 0; rs[nr] = "\"ok\""; rl[nr] = ""; rn[nr] = 0; rm[nr] = ""; rc[nr] = 0 }
+    { L = $0; sub(/,$/, "", L) }
+    L ~ /^  "(time|report|status|level)": / { v = tok(substr(L, 4, index(substr(L, 4), "\"") - 1))
+      if (L ~ /^  "time"/) rt[nr] = v; else if (L ~ /^  "report"/) rr[nr] = v
+      else if (L ~ /^  "status"/) rs[nr] = v; else rl[nr] = v
+      next }
+    L ~ /^  "metrics": \{$/ { inm = 1; next }
+    inm && L ~ /^  \}/ { inm = 0; next }
+    inm { sub(/^ +/, "", L); rm[nr] = rm[nr] (rm[nr] == "" ? "" : ", ") L; next }
+    L ~ /^    \{"check": / && index(L, "\"key\": ") && index(L, "\"text\": ") {
+      k = tok("key"); sv = tok("severity"); if (sv == "") sv = "\"warning\""   # 1.13.0 had no severity
+      rn[nr]++; if (sv == "\"critical\"") { rc[nr] = 1; crit = 1 }
+      if (!(k in cnt)) { na++; order[na] = k; first[k] = rt[nr] }
+      cnt[k]++; last[k] = rt[nr]; chk[k] = tok("check"); dly[k] = tok("daily"); sev[k] = sv
+      txt[k] = substr(L, index(L, "\"text\": ") + 8); sub(/\}$/, "", txt[k])
+      next }
+    function alertobj(k) {
+      return "{\"check\": " chk[k] ", \"daily\": " dly[k] ", \"severity\": " sev[k] ", \"key\": " k \
+             ", \"count\": " cnt[k] ", \"first\": " first[k] ", \"last\": " last[k] ", \"text\": " txt[k] "}"
+    }
+    END {
+      if (!nr) exit 1
+      print "{"
+      print "  \"schema\": 1,"
+      print "  \"generator\": \"plesk-server-report\","
+      print "  \"version\": " esc(version) ","
+      print "  \"host\": " esc(host) ","
+      print "  \"time\": " esc(utc) ","
+      print "  \"hours\": " hours ","
+      print "  \"pseudonymised\": false,"
+      print "  \"reports\": " nr ","
+      print "  \"from\": " (rt[1] == "" ? "null" : rt[1]) ","
+      print "  \"to\": " (rt[nr] == "" ? "null" : rt[nr]) ","
+      print "  \"level\": " (crit ? "\"critical\"" : na ? "\"warning\"" : "\"ok\"") ","
+      printf "  \"runs\": ["
+      for (i = 1; i <= nr; i++) {
+        lv = rl[i] != "" ? rl[i] : rc[i] ? "\"critical\"" : rn[i] ? "\"warning\"" : "\"ok\""
+        printf "%s\n    {\"time\": %s, \"report\": %s, \"status\": %s, \"level\": %s, \"alerts\": %d, \"metrics\": {%s}}",
+          (i > 1 ? "," : ""), (rt[i] == "" ? "null" : rt[i]), (rr[i] == "" ? "null" : rr[i]), rs[i], lv, rn[i], rm[i]
+      }
+      print "\n  ],"
+      # critical alerts first, then the others, each in the order they first appeared
+      printf "  \"alerts\": ["; n = 0
+      for (i = 1; i <= na; i++) if (sev[order[i]] == "\"critical\"") printf "%s\n    %s", (n++ ? "," : ""), alertobj(order[i])
+      for (i = 1; i <= na; i++) if (sev[order[i]] != "\"critical\"") printf "%s\n    %s", (n++ ? "," : ""), alertobj(order[i])
+      print (n ? "\n  ]" : "]")
+      print "}"
+    }' $files >"$outf.new" 2>/dev/null
+  if [[ -s $outf.new ]]; then mv "$outf.new" "$outf"; chmod 600 "$outf"
+  else rm -f "$outf.new"; logger -t plesk-server-report "writing $outf failed" 2>/dev/null; fi
+  return 0
+}
 summary_records() {   # summary_records FILE… – one tab-separated record per finding
   awk '
     function t(s) { gsub(/\t/, " ", s); return s }
@@ -2859,6 +2953,7 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
 
 write_summary() {   # write_summary OUTFILE – from the local reports of the last SUMMARY_HOURS
   local outf=$1 recs files newest n
+  write_summary_json "${outf%.txt}.json"
   files=$(find "$OUT_DIR" -maxdepth 1 -name 'report-*.txt' -mmin -$(( SUMMARY_HOURS * 60 )) 2>/dev/null | sort)
   [[ -n $files ]] || return 0
   newest=$(tail -n 1 <<<"$files")
@@ -3077,6 +3172,11 @@ upload_report() {
       sm=$(upload_copy "$OUT_DIR/summary.txt")
       replace_remote "$sm" summary.txt 2>>"$err" ||
         { ok=0; logger -t plesk-server-report "upload of summary.txt to $REMOTE failed"; }
+    fi
+    if (( SUMMARY )) && json_on && [[ -s $OUT_DIR/summary.json ]]; then
+      sm=$(upload_copy "$OUT_DIR/summary.json")
+      replace_remote "$sm" summary.json 2>>"$err" ||
+        { ok=0; logger -t plesk-server-report "upload of summary.json to $REMOTE failed"; }
     fi
     # a failed upload is only in the system log, and the report that could say so was not
     # uploaded: remember it (time of the first failure, rclone's message), the next run raises
@@ -3317,7 +3417,7 @@ is always reported). Processes are not stored – they are checked live in every
 
 | File / folder | Content |
 |---|---|
-| `out/` | the reports and `summary.txt`, kept for `LOCAL_KEEP_DAYS`. `summary.txt` is built from these files. With `JSON_REPORT=1` also the JSON reports (`report-*.json`) and the newest one as `latest.json`. |
+| `out/` | the reports and `summary.txt`, kept for `LOCAL_KEEP_DAYS`. `summary.txt` is built from these files. With `JSON_REPORT=1` also the JSON reports (`report-*.json`), the newest one as `latest.json`, and `summary.json` (built from the JSON reports). |
 | `json_alerts_seen` | only with `JSON_REPORT=1`: `key last-seen` of every alert of the last 24 hours (key as in the JSON report). An alert whose key is not in it is `"new": true` in the JSON report. |
 | `geoip/` | the DB-IP Lite databases for country and network operator (`GEOIP_DIR`), refreshed monthly. |
 | `lock` | lock file, so that only one run at a time is active (it is never deleted). |
@@ -3747,7 +3847,8 @@ main() {
   fi
   if (( SUMMARY_ONLY )); then
     write_summary "$TMPD/summary.txt"
-    if [[ -s $TMPD/summary.txt ]]; then cat "$TMPD/summary.txt"; else echo "no reports of the last $SUMMARY_HOURS h in $OUT_DIR"; fi
+    if (( JSON_STDOUT )) && [[ -s $TMPD/summary.json ]]; then cat "$TMPD/summary.json"
+    elif [[ -s $TMPD/summary.txt ]]; then cat "$TMPD/summary.txt"; else echo "no reports of the last $SUMMARY_HOURS h in $OUT_DIR"; fi
     return 0
   fi
   if (( ONLY_MODE )); then

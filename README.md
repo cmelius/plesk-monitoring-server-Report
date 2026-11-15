@@ -452,7 +452,9 @@ The summary shows what a single report can't: the first signs at 09:05 (the firs
 
 ### JSON report (optional, `JSON_REPORT=1`)
 
-Besides the text report the script can write a machine-readable copy of every run: `report-YYYYMMDD-HHMM.json` next to the text report, the newest one also as `latest.json` (locally in `/var/lib/plesk-server-report/out` and in the upload). It was built for a later integration as a **Plesk extension** (a dashboard page in the panel – planned, no date yet), but it lets anyone build their own automated evaluation, graphs or alerting on top of the reports without parsing the text. It is **off by default**, and switching it on changes nothing in the text reports, `summary.txt` or the mails – the JSON is an extra file, built in the same run from the same alerts and lines (the tests check that the text is byte-identical with and without it). `--json` writes it for a single run; with `--only` or `--no-upload` the JSON is printed instead of the text, e.g. `plesk-server-report.sh --only system,mail --json`.
+Besides the text report the script can write a machine-readable copy of every run: `report-YYYYMMDD-HHMM.json` next to the text report, the newest one also as `latest.json`, and next to `summary.txt` a `summary.json` (locally in `/var/lib/plesk-server-report/out` and in the upload). Every alert in them has a **severity** – `critical` or `warning`, see below. It was built for a later integration as a **Plesk extension** (a dashboard page in the panel – planned, no date yet), but it lets anyone build their own automated evaluation, graphs or alerting on top of the reports without parsing the text. It is **off by default**, and switching it on changes nothing in the text reports, `summary.txt` or the mails – the JSON is an extra file, built in the same run from the same alerts and lines (the tests check that the text is byte-identical with and without it). `--json` writes it for a single run; with `--only`, `--no-upload` or `--summary` the JSON is printed instead of the text, e.g. `plesk-server-report.sh --only system,mail --json`.
+
+**While the Plesk extension is being developed, the format may still change.** If you build something on it, read the CHANGELOG before an update.
 
 <details>
 <summary><b>Example <code>report-YYYYMMDD-HHMM.json</code></b> and its fields (fictional data, shortened)</summary>
@@ -469,9 +471,11 @@ Besides the text report the script can write a machine-readable copy of every ru
   "report": "report-20261114-1005.txt",
   "pseudonymised": false,
   "status": "warning",
+  "level": "critical",
   "alerts": [
-    {"check": "mail", "daily": false, "key": "3f9c1a2b7d0e4c51", "new": true, "text": "Mail: 240 deferred deliveries"},
-    {"check": "certificates", "daily": true, "key": "a71d0e44c2b9f013", "new": false, "text": "TLS: shop.example expires in 9 days"}
+    {"check": "mail", "daily": false, "severity": "critical", "key": "5d02b6e1f3a49c87", "new": true, "text": "Mail: mailbox info@shop.example sent 23 mails with a foreign sender domain – spam?"},
+    {"check": "mail", "daily": false, "severity": "warning", "key": "3f9c1a2b7d0e4c51", "new": true, "text": "Mail: 240 deferred deliveries"},
+    {"check": "certificates", "daily": true, "severity": "warning", "key": "a71d0e44c2b9f013", "new": false, "text": "TLS: certificate of shop.example expires in 9 days"}
   ],
   "notes": [
     {"check": "panel", "text": "panel: /var/log/plesk/panel.log not found"}
@@ -492,7 +496,8 @@ Besides the text report the script can write a machine-readable copy of every ru
 |---|---|
 | `schema` | format version. It only changes when a field changes its meaning or goes away; new fields don't change it – ignore fields you don't know. |
 | `status` | `ok` or `warning`, as in the `STATUS:` line |
-| `alerts` | every alert of the text report, in the same order. `check` is the check that raised it (names as in `--list`; `script` for the script's own alerts, `daily` for daily checks cached before `JSON_REPORT` was switched on). `daily`: from the daily checks. `key`: the alert without its figures – stable from run to run, for "new / known / gone". `new`: the key was not in any report of the last 24 hours. |
+| `level` | `ok`, `warning`, or `critical` when at least one alert is critical |
+| `alerts` | every alert of the text report, in the same order. `severity`: `critical` or `warning` (see *Severity* below). `check` is the check that raised it (names as in `--list`; `script` for the script's own alerts, `daily` for daily checks cached before `JSON_REPORT` was switched on). `daily`: from the daily checks. `key`: the alert without its figures – stable from run to run, for "new / known / gone". `new`: the key was not in any report of the last 24 hours. |
 | `notes` | the ` i ` lines: missing or shortened data |
 | `metrics` | figures for graphs over time: `load1`, `load5`, `load15`, `cpu_cores`, `mem_total_mb`, `mem_avail_mb`, `mem_avail_pct`, `disk_max_pct`, `inodes_max_pct`, `mail_delivered`, `mail_deferred`, `mail_bounced`, `mail_queue`, `mail_blocklist_rejections`, `mail_failed_logins_smtp`, `mail_failed_logins_imap`, `web_requests`, `web_5xx`, `web_login_posts`. A figure is missing (not 0) when its check did not run. |
 | `sections` | the text of each check, line by line, exactly as in the text report. `title` is its `== … ==` heading, for a daily check its first line when that ends with a colon (e.g. `TLS certificates`); the title line is not repeated in `lines`. No title for checks that add to another section, like `webmail`. |
@@ -501,6 +506,56 @@ Besides the text report the script can write a machine-readable copy of every ru
 The text is cleaned like the text report (no control characters); bytes that are not UTF-8 are dropped.
 
 </details>
+
+<details>
+<summary><b>Example <code>summary.json</code></b> and its fields (fictional data, shortened)</summary>
+
+Built from the JSON reports of the last `SUMMARY_HOURS` (needs `SUMMARY=1`), like `summary.txt` from the text reports – the text summary doesn't change.
+
+```json
+{
+  "schema": 1,
+  "generator": "plesk-server-report",
+  "version": "1.14.0",
+  "host": "host.example.com",
+  "time": "2026-11-14T10:06:12Z",
+  "hours": 24,
+  "pseudonymised": false,
+  "reports": 12,
+  "from": "2026-11-13T12:05:00Z",
+  "to": "2026-11-14T10:05:00Z",
+  "level": "critical",
+  "runs": [
+    {"time": "2026-11-13T12:05:00Z", "report": "report-20261113-1205.txt", "status": "ok", "level": "ok", "alerts": 0, "metrics": {"load5": 0.4, "mail_delivered": 310, "web_5xx": 2}},
+    {"time": "2026-11-14T10:05:00Z", "report": "report-20261114-1005.txt", "status": "warning", "level": "critical", "alerts": 3, "metrics": {"load5": 1.42, "mail_delivered": 812, "web_5xx": 31}}
+  ],
+  "alerts": [
+    {"check": "mail", "daily": false, "severity": "critical", "key": "5d02b6e1f3a49c87", "count": 2, "first": "2026-11-14T09:05:00Z", "last": "2026-11-14T10:05:00Z", "text": "Mail: mailbox info@shop.example sent 23 mails with a foreign sender domain – spam?"},
+    {"check": "certificates", "daily": true, "severity": "warning", "key": "a71d0e44c2b9f013", "count": 12, "first": "2026-11-13T12:05:00Z", "last": "2026-11-14T10:05:00Z", "text": "TLS: certificate of shop.example expires in 9 days"}
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `reports`, `from`, `to` | number of JSON reports in the period, time of the first and the last |
+| `level` | the worst `level` of the period |
+| `runs` | every run, oldest first: time, its text report, `status`, `level`, number of alerts and all its `metrics` – for graphs and to spot gaps |
+| `alerts` | every alert once (by `key`), critical ones first, then in the order they first appeared: how often (`count`) and when (`first`, `last`) it was seen; `text` from the newest report |
+
+Reports written before 1.14.0 have no severity: their alerts count as `warning`.
+
+</details>
+
+#### Severity
+
+Only in the JSON files – the text report doesn't show it. **`critical`** means: signs of a compromise or an outage, act now. Everything else is a **`warning`**: check it.
+
+| Critical | Alerts (beginning of the text) |
+|---|---|
+| Outgoing spam, a hijacked account | `Mail: server IP … is listed on …`, `DNS: domain … is listed on …`, every alert ending in "password compromised?" or "password guessed?" (except a mailbox login from a new country – often a trip), `Mail: mailbox … with a foreign sender domain – spam?`, `Web: … brute force succeeded?` |
+| Malware, backdoors, exposed secrets | `Web: … new PHP file(s) in wp-content/uploads`, `Web: suspicious …`, `Web: … served the sensitive file …`, `Web: … exposes … publicly`, `Access: new SSH key …`, `Access: account … has UID 0`, `Access: /etc/ld.so.preload …`, `Cron: … suspicious …`, `Process: …` |
+| Outages | `Service(s) failed: …`, `fail2ban is not running`, `RAM: the kernel killed processes …`, `DNS: … does not resolve …`, `TLS: mail certificate on port … has expired` |
 
 ---
 
@@ -708,7 +763,7 @@ Every run uploads three kinds of files:
 |---|---|
 | `report-YYYYMMDD-HHMM.txt` | the full report of one run (time in the server's time zone, usually UTC) |
 | `latest.txt` | a copy of the newest report, including the daily checks and fail2ban |
-| `report-YYYYMMDD-HHMM.json`, `latest.json` | only with `JSON_REPORT=1`: the same run as JSON, see [JSON report](#json-report-optional-json_report1) |
+| `report-YYYYMMDD-HHMM.json`, `latest.json`, `summary.json` | only with `JSON_REPORT=1`: the same run and the same summary as JSON, see [JSON report](#json-report-optional-json_report1) |
 | `summary.txt` | all reports of the last 24 hours condensed into one file: every run with its status (gaps are easy to spot), every alert with how often and when it was seen, mail and web totals, deliveries per provider, peaks of load and RAM, the backup status of the newest report, and every line of the sections that are normally empty (successful logins, changes of SSH keys, accounts, cron jobs and ports, suspicious processes, IMAP/POP3 logins from other countries, new PHP files in uploads, login ≠ from, webmail, WordPress attacks, traffic peaks, files served with 200) |
 
 - **Yourself:** open `latest.txt`. The first lines tell you everything: `STATUS: OK` or `STATUS: WARNING (n)` followed by the list of alerts (` ! `) and, if any, notes about missing data (` i `, e.g. a log file that was not found – the figures of that section are then 0, not "all clear"). `summary.txt` shows what happened during the day.
@@ -800,7 +855,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 | `WARN_BACKUP_HOURS` | 26 | maximum age of the last Plesk backup |
 | `REMOTE` | `reports:server-reports/<host>` | rclone `remote:path` for the upload, `""` = keep reports locally only |
 | `RETENTION_DAYS` / `LOCAL_KEEP_DAYS` | 7 / 7 | delete reports older than this many days remotely / locally (0 = never). Remote deletion is permanent, not into the trash. `latest.txt` and `summary.txt` are replaced as new files on every run instead of being overwritten, so Google Drive keeps no older versions of them. Keep at least one day locally, `summary.txt` is built from the local reports |
-| `JSON_REPORT` | 0 | 1 = also write `report-YYYYMMDD-HHMM.json` (and upload it with `latest.json`), see [JSON report](#json-report-optional-json_report1). The text reports stay the same |
+| `JSON_REPORT` | 0 | 1 = also write `report-YYYYMMDD-HHMM.json` and `summary.json` (and upload them with `latest.json`), see [JSON report](#json-report-optional-json_report1). The text reports stay the same |
 | `SUMMARY` / `SUMMARY_HOURS` | 1 / 24 | write and upload `summary.txt`, built from the local reports of the last `SUMMARY_HOURS` (see [Reading the reports](#reading-the-reports)), 0 = off |
 | `MAX_RUNTIME` | 50 | minutes after which an unattended (cron) run is stopped, together with every command it started. Keep it below the cron interval. The next run reports the aborted one as an alert. 0 = no limit |
 | `CMD_TIMEOUT` | 120 | seconds per external command that can hang (`plesk db`, `fail2ban-client`, `postqueue`, `journalctl`, `systemctl`, `apt-get`, `rclone`). A timeout raises an alert `Script: command timed out …` |
