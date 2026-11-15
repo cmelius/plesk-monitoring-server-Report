@@ -169,3 +169,12 @@ lines() {
   [[ $output != *$'\n'"forged"* && $output != "forged"* ]]
   [ "$(grep -c . <<<"$output")" -eq 1 ]
 }
+
+@test "JSON report: the plugin hands its figure web_login_posts to the main script" {
+  JSON_REPORT=1; : >"$TMPD/json"
+  wp
+  grep -qx $'M\tweb_login_posts\t18' "$TMPD/json"
+  JSON_REPORT=0; : >"$TMPD/json"
+  wp
+  [ ! -s "$TMPD/json" ]
+}

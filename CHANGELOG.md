@@ -2,6 +2,22 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
+## [1.14.0] – not yet released (on `main`)
+
+### Added
+- **Severity** in the JSON report: every alert has `"severity": "critical"` (signs of a compromise or an outage: outgoing spam, a hijacked mailbox, malware or a backdoor, a failed service, …) or `"warning"`; the run has a `level` (`ok`, `warning`, `critical`). The list of critical alerts is in the README. The text report doesn't change.
+- **`--self-update --edge`**: the development version – the script of the newest commit on `main`, for those who want changes before the release. Only installed when GitHub's tests of that commit passed (otherwise it says whether they failed or are still running), and only within the installed major version. Downloaded from that commit, not from the moving branch; checked, the commits since your copy listed, asked, the previous copy kept for `--rollback` – as with a release. `--self-update` without `--edge` goes back to releases with the next one.
+- **`summary.json`** (with `JSON_REPORT=1` and `SUMMARY=1`): the JSON reports of the last `SUMMARY_HOURS` condensed – every run with status, level, number of alerts and its figures (for graphs), every alert once with severity, count, first and last time, critical ones first. Uploaded next to `summary.txt`, which doesn't change. `--summary --json` prints it.
+
+### Note
+- The JSON format may still change while the Plesk extension is being developed (README).
+
+## [1.13.0] – 2026-11-15
+
+### Added
+- **JSON report (optional, `JSON_REPORT=1`, off by default):** next to every text report a `report-YYYYMMDD-HHMM.json` with the same run in machine-readable form – status, every alert with the check that raised it, a stable key and whether it is new in the last 24 hours, the notes, a few figures for graphs (load, RAM, disk, mail, web) and the text of each check line by line. The newest one is also kept as `latest.json`, locally in `out/` and in the upload. Built for a later Plesk extension (a dashboard page in the panel, no date yet) – and for anyone who wants their own automated evaluation without parsing the text. **The text reports, `summary.txt` and the mails don't change** – with or without the setting; a test checks that the text report is byte-identical. `--json` writes it for one run and, with `--only` or `--no-upload`, prints it instead of the text. With `MASK_MAILBOXES=1` the uploaded JSON is pseudonymised like the text (`"pseudonymised": true`).
+- STATE-FILES: `daily_json.txt`, `json_alerts_seen` (only with `JSON_REPORT=1`).
+
 ## [1.12.1] – 2026-11-14
 
 ### Fixed

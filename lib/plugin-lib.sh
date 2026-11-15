@@ -11,6 +11,7 @@
 #   ALERT <text>   an alert
 #   ALERT-FOREIGN <ip> <ip> … :: <text>   an alert only if one of the IPs is outside
 #                  ALLOWED_COUNTRIES; {ips} in the text becomes these IPs
+#   METRIC <name> <number>   a figure for the JSON report (JSON_REPORT=1), e.g. for graphs
 #   STATE <line>   a line of its new state; the main script stores it (only in a normal run)
 #                  and gives it back next time as the file $PSR_STATE
 #
@@ -18,7 +19,7 @@
 # Context files from the main script: $PSR_DOMAINS ("domain<TAB>document root", if the
 # plugin lists domains in PLUGIN_INPUTS).
 #
-# out, note, alert and state below print these lines, so a check reads the same inside the main
+# out, note, alert, metric and state below print these lines, so a check reads the same inside the main
 # script and as a plugin. Everything else on stdout is dropped by the main script.
 #
 # A plugin only reads: it writes no files and makes no network connections.
@@ -35,6 +36,7 @@ out()   { _line "TEXT $*"; }
 note()  { _line "NOTE $*"; }
 alert() { _line "ALERT $*"; }
 state() { _line "STATE $*"; }
+metric() { _line "METRIC $1 $2"; }
 
 # geo_ref IP – stands for "IP (country, operator)": the main script, which has the GeoIP
 # database, replaces it. \037 never comes from a log line (log_clean removes it).

@@ -232,3 +232,17 @@ repack() {
   run bash -c "LC_ALL=C grep -c \$'\\x1b' <<<\"\$1\"" _ "$output"
   [ "$output" = 0 ]
 }
+
+@test "--edge: not available for the release archive yet" {
+  release; sign
+  SU_EDGE=1 SU_YES=1 run self_update
+  [ "$status" -eq 1 ]; [[ $output == *"--edge (the development version from main) is not available for the release archive yet"* ]]
+  untouched
+}
+
+@test "--edge only with --self-update, not with --rollback or --major" {
+  run bash "$BATS_TEST_DIRNAME/../plesk-server-report.sh" --edge
+  [ "$status" -eq 2 ]
+  run bash "$BATS_TEST_DIRNAME/../plesk-server-report.sh" --self-update --edge --rollback
+  [ "$status" -eq 2 ]
+}

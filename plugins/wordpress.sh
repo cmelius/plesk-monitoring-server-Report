@@ -69,6 +69,7 @@ plugin_check() {
     return 0
   fi
   LOGINS=$(wp_logins | sort -t$'\t' -k1,1nr)
+  metric web_login_posts "$(awk -F'\t' '{ n += $1 } END { print n + 0 }' <<<"$LOGINS")"
 
   out "login POSTs (wp-login.php + xmlrpc.php) | domain:"
   while IFS=$'\t' read -r lp dom _; do

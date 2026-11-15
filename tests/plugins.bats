@@ -260,3 +260,11 @@ PLUGIN_LOGS="$L_DIR/../$(id)"'
   ONLY_MODE=1
   check_enabled panel
 }
+
+@test "METRIC: a figure for the JSON report, only a plain name and number" {
+  JSON_REPORT=1; : >"$TMPD/json"
+  plugin t2 'metric good_one 7; metric bad-name 1; metric evil "1; rm -rf /"; metric neg -2.5'
+  run_plugin t2
+  [ "$(grep '^M' "$TMPD/json")" = $'M\tgood_one\t7\nM\tneg\t-2.5' ]
+  [[ $(notes) == *"plugin t2: 2 line(s) of its output dropped"* ]]
+}

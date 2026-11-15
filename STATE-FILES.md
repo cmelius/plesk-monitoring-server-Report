@@ -82,12 +82,14 @@ a normal run, not with `--only`. Delete a file and that plugin starts from scrat
 | `daily_date` | the day (YYYY-MM-DD), the script version, a checksum of the script and its configuration file, the time of the package database and the boot ID of the last daily checks – they run in the first run of a new day, and right after the script or the configuration file changed, packages were installed or the server was rebooted (so an installed update, and "reboot required" after the reboot, leave the report at once). Delete it to run them again in the next run. |
 | `daily.txt` | their output, repeated in every report of that day under DAILY CHECKS. |
 | `daily_alerts.txt` | their alerts, repeated in every report of that day. |
+| `daily_json.txt` | only with `JSON_REPORT=1`: the check of each daily alert and where each check's text is in `daily.txt`, for the JSON report. |
 
 ## Other
 
 | File / folder | Content |
 |---|---|
-| `out/` | the reports and `summary.txt`, kept for `LOCAL_KEEP_DAYS`. `summary.txt` is built from these files. |
+| `out/` | the reports and `summary.txt`, kept for `LOCAL_KEEP_DAYS`. `summary.txt` is built from these files. With `JSON_REPORT=1` also the JSON reports (`report-*.json`), the newest one as `latest.json`, and `summary.json` (built from the JSON reports). |
+| `json_alerts_seen` | only with `JSON_REPORT=1`: `key last-seen` of every alert of the last 24 hours (key as in the JSON report). An alert whose key is not in it is `"new": true` in the JSON report. |
 | `geoip/` | the DB-IP Lite databases for country and network operator (`GEOIP_DIR`), refreshed monthly. |
 | `lock` | lock file, so that only one run at a time is active (it is never deleted). |
 | `running` | exists only while a run is active: `PID start now step exit-code`. If it is still there at the next run, that run did not finish, and the report says so (alert "Script: …"). |
