@@ -454,6 +454,9 @@ The summary shows what a single report can't: the first signs at 09:05 (the firs
 
 Besides the text report the script can write a machine-readable copy of every run: `report-YYYYMMDD-HHMM.json` next to the text report, the newest one also as `latest.json` (locally in `/var/lib/plesk-server-report/out` and in the upload). It was built for a later integration as a **Plesk extension** (a dashboard page in the panel – planned, no date yet), but it lets anyone build their own automated evaluation, graphs or alerting on top of the reports without parsing the text. It is **off by default**, and switching it on changes nothing in the text reports, `summary.txt` or the mails – the JSON is an extra file, built in the same run from the same alerts and lines (the tests check that the text is byte-identical with and without it). `--json` writes it for a single run; with `--only` or `--no-upload` the JSON is printed instead of the text, e.g. `plesk-server-report.sh --only system,mail --json`.
 
+<details>
+<summary><b>Example <code>report-YYYYMMDD-HHMM.json</code></b> and its fields (fictional data, shortened)</summary>
+
 ```json
 {
   "schema": 1,
@@ -496,6 +499,8 @@ Besides the text report the script can write a machine-readable copy of every ru
 | `pseudonymised` | `true` in the uploaded copy when `MASK_MAILBOXES=1` |
 
 The text is cleaned like the text report (no control characters); bytes that are not UTF-8 are dropped.
+
+</details>
 
 ---
 
