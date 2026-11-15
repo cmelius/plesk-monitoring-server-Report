@@ -9,6 +9,8 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 - **`--self-update --edge`**: the development version – the script of the newest commit on `main`, for those who want changes before the release. Only installed when GitHub's tests of that commit passed (otherwise it says whether they failed or are still running), and only within the installed major version. Downloaded from that commit, not from the moving branch; checked, the commits since your copy listed, asked, the previous copy kept for `--rollback` – as with a release. `--self-update` without `--edge` goes back to releases with the next one.
 - **`summary.json`** (with `JSON_REPORT=1` and `SUMMARY=1`): the JSON reports of the last `SUMMARY_HOURS` condensed – every run with status, level, number of alerts and its figures (for graphs), every alert once with severity, count, first and last time, critical ones first. Uploaded next to `summary.txt`, which doesn't change. `--summary --json` prints it.
 
+- Repository: `SECURITY.md` (private reporting of vulnerabilities), `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` and a pull request template.
+
 ### Note
 - The JSON format may still change while the Plesk extension is being developed (README).
 

@@ -969,6 +969,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 
 ## Security
 
+- **Found a vulnerability?** Please report it privately, not in a public issue – see [SECURITY.md](SECURITY.md).
 - Before the first run, let an AI review the script – see [Check it before you run it as root](#check-it-before-you-run-it-as-root) for a prompt and what it will point out.
 - `/etc/plesk-server-report.conf` is loaded as code: keep it owned by root and writable only by root (`chmod 600`). If another user owns it or can write it, the script refuses to run and says why on stderr and in the system log (`journalctl -t plesk-server-report`). A warning in the report would come too late: by then the code in the file would already have run.
 - Runs as root because it needs to read all logs (and `/proc`, crontabs, `authorized_keys` for the persistence check). Apart from `--self-update` (below) it changes nothing on the server – no IP is blocked, no process stopped, no file removed; findings are reported, the action is yours. It writes only to `/var/lib/plesk-server-report` (mode 700), to the configured rclone remote and – with `REPORT_MAIL_TO` – hands mails to the local `sendmail`.
@@ -1040,6 +1041,8 @@ Everything except two checks works with any software: mail, blocklists, system, 
 - **PHP files in upload folders** (`wp-content/uploads`)
 
 Other applications popular on Plesk (Joomla, Drupal, TYPO3, PrestaShop, Shopware, Magento, Nextcloud, …) use different login URLs, status codes and upload folders. Guessing them would produce false alarms. Joomla answers a successful login with `303` instead of `302`, for example, and Nextcloud redirects on failed logins too.
+
+Contributions are welcome – the rules (read only, mawk and gawk, tests, no real data) are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 **If you run one of them, you can help:** open an issue with the template [*Support for another CMS / application*](../../issues/new?template=cms-support.yml). It asks for exactly what is needed:
 
