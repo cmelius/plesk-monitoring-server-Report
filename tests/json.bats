@@ -54,6 +54,8 @@ jq_py() { python3 -c "import json, sys; d = json.load(open(sys.argv[1])); print(
   [ "$output" = "[('mail', 'MAIL'), ('web', 'WEB')]" ] || [[ $output == "[('mail', 'MAIL'), ('web', 'WEB "* ]]
   run jq_py "$f" '[s["lines"] for s in d["sections"] if s["check"] == "dummy"]'
   [ "$output" = "[['Dummy daily: 2 things']]" ]
+  # the newest JSON report is also out/latest.json
+  cmp "$f" "$BATS_TEST_TMPDIR/b/out/latest.json"
   [ "$(jq_py "$f" 'd["metrics"]["mail_delivered"], d["metrics"]["web_requests"] > 0')" = "75 True" ]
   run jq_py "$f" 'all(a["new"] for a in d["alerts"])'
   [ "$output" = True ]
@@ -66,6 +68,20 @@ jq_py() { python3 -c "import json, sys; d = json.load(open(sys.argv[1])); print(
   [ "$output" = "[('dummy', True, False)]" ]
   run jq_py "$f" '[s["check"] for s in d["sections"] if s["daily"]]'
   [ "$output" = "['dummy']" ]
+}
+
+@test "a daily check whose first line ends with a colon: that line is its title" {
+  check_dummy() { echo "Dummy things:"; echo "  2 found"; }
+  JSON_REPORT=1; one_run "$BATS_TEST_TMPDIR/b"
+  run jq_py "$BATS_TEST_TMPDIR/b/out/report.json" '[(s["title"], s["lines"]) for s in d["sections"] if s["check"] == "dummy"]'
+  [ "$output" = "[('Dummy things', ['  2 found'])]" ]
+}
+
+@test "switched off again: out/latest.json is removed, the old JSON reports age out" {
+  JSON_REPORT=1; one_run "$BATS_TEST_TMPDIR/b"
+  [ -f "$BATS_TEST_TMPDIR/b/out/latest.json" ]
+  JSON_REPORT=0; one_run "$BATS_TEST_TMPDIR/b"
+  [ ! -e "$BATS_TEST_TMPDIR/b/out/latest.json" ]
 }
 
 @test "daily checks cached without JSON (switched on by --json): one section 'daily'" {

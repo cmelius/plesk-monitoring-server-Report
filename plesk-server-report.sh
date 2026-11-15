@@ -2601,7 +2601,8 @@ utf8_clean() {
 # report is not parsed. alerts[].new: the alert's key (alert_key, figures left out) was not in
 # any report of the last 24 hours ($STATE_DIR/json_alerts_seen).
 write_json() {
-  json_on || return 0
+  # switched off: no outdated out/latest.json for a dashboard to show
+  json_on || { (( ${ONLY_MODE:-0} )) || rm -f "${OUT_DIR:-/nonexistent}/latest.json"; return 0; }
   local f=${REPORT%.txt}.json sf="$STATE_DIR/json_alerts_seen" line typ chk d s e src i now asof="" geo=""
   local -a keys=()
   now=$(date +%s)
@@ -2640,7 +2641,9 @@ write_json() {
       $1 == "M" { if (!($2 in mv)) { nm++; mn[nm] = $2; mv[$2] = $3 } next }
       $1 == "S" { ns++; sc[ns] = $2; sd[ns] = $3; st[ns] = ""; sl[ns] = 0; next }
       $1 == "L" && ns { l = after($0, 1)
+        # title: the "== … ==" heading of a section, or for a daily check its first line when it ends with ":"
         if (sd[ns] == 0 && st[ns] == "" && sl[ns] == 0 && l ~ /^== .* ==$/) { st[ns] = substr(l, 4, length(l) - 6); next }
+        if (sd[ns] == 1 && st[ns] == "" && sl[ns] == 0 && l ~ /^[^ ].*:$/) { st[ns] = substr(l, 1, length(l) - 1); next }
         if (sl[ns] == 0 && l ~ /^ *$/) next
         sx[ns, ++sl[ns]] = l; next }
       END {
@@ -2682,6 +2685,8 @@ write_json() {
   if [[ -s $f.new ]]; then mv "$f.new" "$f"
   else rm -f "$f.new"; logger -t plesk-server-report "writing the JSON report $f failed" 2>/dev/null; return 0; fi
   chmod 600 "$f"
+  # the newest one also as out/latest.json, for tools on the server (not with --only: its report is not kept)
+  if [[ $f == "$OUT_DIR"/* ]]; then cp -p "$f" "$OUT_DIR/latest.json.new" && mv "$OUT_DIR/latest.json.new" "$OUT_DIR/latest.json"; fi
   # remember the keys of this report's alerts for "new" (last seen; entries older than 24 h go)
   if can_write_state; then
     { [[ -f $sf ]] && cat "$sf"; for i in "${!keys[@]}"; do printf '%s\t%s\n' "${keys[i]}" "$now"; done; } |
@@ -3312,7 +3317,7 @@ is always reported). Processes are not stored – they are checked live in every
 
 | File / folder | Content |
 |---|---|
-| `out/` | the reports and `summary.txt`, kept for `LOCAL_KEEP_DAYS`. `summary.txt` is built from these files. With `JSON_REPORT=1` also the JSON reports (`report-*.json`). |
+| `out/` | the reports and `summary.txt`, kept for `LOCAL_KEEP_DAYS`. `summary.txt` is built from these files. With `JSON_REPORT=1` also the JSON reports (`report-*.json`) and the newest one as `latest.json`. |
 | `json_alerts_seen` | only with `JSON_REPORT=1`: `key last-seen` of every alert of the last 24 hours (key as in the JSON report). An alert whose key is not in it is `"new": true` in the JSON report. |
 | `geoip/` | the DB-IP Lite databases for country and network operator (`GEOIP_DIR`), refreshed monthly. |
 | `lock` | lock file, so that only one run at a time is active (it is never deleted). |
