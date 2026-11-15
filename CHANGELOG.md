@@ -2,7 +2,7 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [Unreleased]
+## [1.13.0] – 2026-11-15
 
 ### Added
 - **JSON report (optional, `JSON_REPORT=1`, off by default):** next to every text report a `report-YYYYMMDD-HHMM.json` with the same run in machine-readable form – status, every alert with the check that raised it, a stable key and whether it is new in the last 24 hours, the notes, a few figures for graphs (load, RAM, disk, mail, web) and the text of each check line by line. The newest one is also kept as `latest.json`, locally in `out/` and in the upload. Built for a later Plesk extension (a dashboard page in the panel, no date yet) – and for anyone who wants their own automated evaluation without parsing the text. **The text reports, `summary.txt` and the mails don't change** – with or without the setting; a test checks that the text report is byte-identical. `--json` writes it for one run and, with `--only` or `--no-upload`, prints it instead of the text. With `MASK_MAILBOXES=1` the uploaded JSON is pseudonymised like the text (`"pseudonymised": true`).
