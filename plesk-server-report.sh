@@ -51,6 +51,12 @@
 #   --test-mail       mail the newest report to REPORT_MAIL_TO now and show from the mail
 #                     log whether it was delivered; changes nothing
 #   --version         print the version
+#   --config FILE     use this configuration file (default: plesk-server-report.conf next to
+#                     the script if there is one, else /etc/plesk-server-report.conf)
+#   --init-config     write a configuration file with every setting and its default, commented
+#                     out (next to the script, or /etc/plesk-server-report.conf when the script is
+#                     in /usr/local/sbin or a similar system folder); never overwrites one
+#   --print-config    print that template, e.g. to compare it with your configuration
 #   --self-update     install the latest 1.x release: download, test, show the changes, ask,
 #                     then replace this script (only by hand, as root). The previous version
 #                     is kept in the state directory. --yes: don't ask.
@@ -61,7 +67,10 @@
 #   --help            show this help
 #
 # Settings: edit the defaults below or – recommended, survives updates –
-# override them in /etc/plesk-server-report.conf (plain bash variable syntax).
+# override them in the configuration file (plain bash variable syntax):
+# plesk-server-report.conf next to the script if it exists, else /etc/plesk-server-report.conf.
+# With the file next to the script, the state is kept next to it too (./state), so one folder
+# holds everything. --init-config writes a configuration file with every setting.
 #
 # Layout: settings → helper functions → one function per check (check_<name>) →
 # report/upload → main(). The order of the report is defined in main().
@@ -84,7 +93,7 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # ---------------------------------------------------------------- defaults
 HOST=$(hostname -f 2>/dev/null || hostname)
-STATE_DIR=/var/lib/plesk-server-report   # a new or changed state file must be described in state_readme()
+STATE_DIR=/var/lib/plesk-server-report   # the script's memory between runs (README.txt there); with the configuration next to the script: ./state
 REMOTE="reports:server-reports/${HOST}"  # rclone remote:path – empty = local only
 RETENTION_DAYS=7                         # delete remote reports older than x days (0 = never)
 UPDATE_CHECK=1                           # daily: ask GitHub for the latest release of this script (one HTTPS request; 0 = off)
@@ -194,7 +203,13 @@ GEO_TRUSTED_ORGS=""           # regex of operators exempt from country alerts, e
 GEO_DATACENTER_RE='amazon|google|microsoft|oracle|digitalocean|ovh|hetzner|linode|akamai|vultr|contabo|alibaba|tencent|huawei|leaseweb|scaleway|m247|choopa|hostinger|hostwinds|colocrossing|datacamp|cloudflare|ionos|strato|netcup|hosting|server|cloud|data ?cent'
 # -----------------------------------------------------------------------------
 
-CONF=/etc/plesk-server-report.conf
+CONF_ETC=/etc/plesk-server-report.conf
+CONF_NAME=plesk-server-report.conf            # the configuration file next to the script
+CONF=$CONF_ETC                                # the one in use, set by find_conf
+CONF_CLI=""; CONF_LOCAL=0; CONF_FOUND=0; STATE_NOTE=""
+STATE_DIR_DEFAULT=/var/lib/plesk-server-report
+STATE_MARK=.plesk-server-report-state         # marks STATE_DIR as this script's own folder
+SYS_BIN_RE='^(/usr/local/sbin|/usr/local/bin|/usr/sbin|/usr/bin|/sbin|/bin)$'   # no files written next to the script there
 
 # Check names in report order. Hourly checks analyse the log lines since the previous run,
 # daily checks run once a day and are cached in $STATE_DIR/daily.txt.
@@ -3373,8 +3388,10 @@ state_readme() {
   cat <<'EOF'
 # State files of plesk-server-report
 
-This folder (default `/var/lib/plesk-server-report`, setting `STATE_DIR`) is the
-script's memory between runs. The script writes this description itself and
+This folder (default `/var/lib/plesk-server-report`, or `state` next to the script
+when its configuration file is there; setting `STATE_DIR`) is the script's memory
+between runs. The whole folder may be deleted: the script then starts as on its
+first run. The script writes this description itself and
 replaces it when an update changes it – edits to this file are lost.
 
 You never have to touch these files. Typical reasons to look anyway:
@@ -3461,6 +3478,8 @@ is always reported). Processes are not stored – they are checked live in every
 | `upload_failed` | time of the first failed upload, and rclone's last error message | while the upload to `REMOTE` fails, every report raises an alert (local report, mail). Deleted by the next successful upload. |
 | `tmp.*` | temporary files of the current run, removed at its end. |
 | `plesk-server-report.sh.old` | the previous version of the script, kept by `--self-update` (only after an update). `--self-update --rollback` swaps it with the installed one. Safe to delete. |
+| `first-report.txt` | the report of the first run, which lists everything as it was found (PHP files in upload folders, cron jobs, SSH keys, ports …). Kept for reference; it is not removed with the old reports in `out/`. Safe to delete. |
+| `.plesk-server-report-state` | marks this folder as the script's own. The script refuses a `STATE_DIR` with other files in it that has no such mark. |
 | `README.txt` | this description. |
 EOF
 }
@@ -3743,6 +3762,11 @@ parse_args() {
       --major) SU_MAJOR=1 ;;
       --edge) SU_EDGE=1 ;;
       --state-readme) state_readme; exit 0 ;;
+      --config) [[ -n ${2:-} ]] || { echo "--config needs a file" >&2; exit 2; }
+              [[ -e $2 ]] || { echo "--config: $2 doesn't exist" >&2; exit 2; }
+              CONF_CLI=$2; shift ;;
+      --init-config) INIT_CONFIG=1 ;;
+      --print-config) PRINT_CONFIG=1 ;;
       --test-mail) TEST_MAIL=1 ;;
       --show-state) SHOW_STATE=1 ;;
       --decode) shift; DECODE=1; DECODE_ARGS=("$@"); break ;;
@@ -3784,11 +3808,92 @@ only_list() {
 
 # on_exit – runs at every end of the script: a run that did not finish (error, timeout, kill)
 # leaves $RUNFILE with its last step and exit code, so the next run can report it
+# ---------------------------------------------------------------- configuration file and state folder
+self_dir() { dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")"; }
+# find_conf – which configuration file: --config FILE, else plesk-server-report.conf next to the
+# script, else /etc/plesk-server-report.conf. With the one next to the script, the state defaults
+# to ./state next to it – unless an installation keeps its state in /var/lib/plesk-server-report
+# and ./state doesn't exist yet (moving it silently would lose the log positions and known lists).
+find_conf() {
+  local d
+  (( CONF_FOUND )) && return 0
+  CONF_FOUND=1; d=$(self_dir)
+  if [[ -n $CONF_CLI ]]; then CONF=$CONF_CLI
+  elif [[ -e $d/$CONF_NAME ]]; then CONF=$d/$CONF_NAME; CONF_LOCAL=1
+  else CONF=$CONF_ETC; fi
+  if (( CONF_LOCAL )); then
+    if [[ -d $d/state || ! -d $STATE_DIR_DEFAULT ]]; then STATE_DIR=$d/state
+    else STATE_NOTE="config: the configuration is next to the script, the state stays in $STATE_DIR_DEFAULT (an existing installation) – set STATE_DIR in $CONF to move it"; fi
+  fi
+  return 0
+}
+# config_template [SCRIPT] – every setting of this version with its default, commented out
+config_template() {
+  local self=${1:-${BASH_SOURCE[0]}}   # this file, also when the tests source it
+  printf '%s\n' "# plesk-server-report $VERSION – configuration file" \
+    "#" \
+    "# Every setting with its default, commented out: the script's defaults apply until you remove" \
+    "# the # in front of a setting and change its value. Settings you leave commented out follow the" \
+    "# defaults of later versions too. New settings: CHANGELOG.md, or plesk-server-report.sh --print-config." \
+    "# This file is loaded as root code (bash syntax): keep it owned by root, chmod 600." \
+    "# STATE_DIR: with this file next to the script, the default is ./state next to it." ""
+  awk '/^# -+ defaults$/ { on = 1; next } on && /^# -+$/ { exit }
+       on { if ($0 ~ /^[A-Z_][A-Z0-9_]*=/) print "#" $0; else print }' "$self"
+}
+# init_config – --init-config: write the template where find_conf will find it; never overwrite
+init_config() {
+  local d t
+  d=$(self_dir); find_conf
+  if [[ -n $CONF_CLI ]]; then t=$CONF_CLI
+  elif [[ $d =~ $SYS_BIN_RE ]]; then t=$CONF_ETC
+  else t=$d/$CONF_NAME; fi
+  if [[ -e $t ]]; then echo "$t exists already – nothing written (plesk-server-report.sh --print-config shows the template)" >&2; return 1; fi
+  if [[ -z $CONF_CLI && -e $CONF ]]; then echo "the configuration $CONF is in use – nothing written (plesk-server-report.sh --print-config shows the template)" >&2; return 1; fi
+  if ! { config_template >"$t" && chmod 600 "$t"; }; then echo "could not write $t" >&2; return 1; fi
+  echo "written: $t (every setting with its default, commented out; chmod 600)"
+}
+root_only_dir() { [[ -d $1 && -z $(find "$1" -maxdepth 0 \( ! -user root -o -perm /022 \) 2>/dev/null) ]]; }
+# maybe_create_conf – the first run of a new installation outside the system folders writes the
+# configuration next to the script, so that one folder holds script, configuration and state
+maybe_create_conf() {
+  local d
+  d=$(self_dir)
+  [[ -z $CONF_CLI && ! -e $d/$CONF_NAME && ! -e $CONF_ETC && ! -d $STATE_DIR_DEFAULT ]] || return 0
+  [[ $d =~ $SYS_BIN_RE ]] && return 0
+  is_root || return 0
+  root_only_dir "$d" || return 0      # else someone else could swap the file
+  # exported: the run may start itself again under a time limit (init), and that run should say so
+  config_template >"$d/$CONF_NAME" 2>/dev/null && chmod 600 "$d/$CONF_NAME" && export PSR_CONF_CREATED=1
+  return 0
+}
+# keep_first_report – the first report lists everything as it was found (the baseline): kept as
+# first-report.txt, unlike the reports in out/, which are deleted after LOCAL_KEEP_DAYS
+keep_first_report() {
+  (( FIRST_RUN )) && [[ ! -e $STATE_DIR/first-report.txt && -s $REPORT ]] && cp "$REPORT" "$STATE_DIR/first-report.txt"
+  return 0
+}
+# check_state_dir – STATE_DIR must be this script's own folder: new, empty, or marked. A folder
+# with other files (STATE_DIR=/root, a typo) is refused – the state files would be spread among
+# them, and deleting the state folder would delete them too. A state folder of a version before
+# the mark is recognised by its files and marked.
+check_state_dir() {
+  [[ -e $STATE_DIR/$STATE_MARK ]] && return 0
+  if [[ -d $STATE_DIR && -n $(ls -A "$STATE_DIR" 2>/dev/null) ]] &&
+     ! [[ -e $STATE_DIR/last_run || -e $STATE_DIR/daily_date || -d $STATE_DIR/offsets || -e $STATE_DIR/README.txt ]]; then
+    local m="refusing to run – STATE_DIR=$STATE_DIR contains other files and is not a state folder of this script. Use a new or empty folder, e.g. STATE_DIR=$STATE_DIR/plesk-server-report (in $CONF)"
+    echo "plesk-server-report: $m" >&2
+    logger -t plesk-server-report "$m" 2>/dev/null
+    DONE=1; exit 1
+  fi
+  return 0
+}
+
 # load_conf – the configuration is bash code run as root: whoever can write it gets root. If it
 # belongs to another user or group/others may write it, the script refuses to run at all –
 # a warning in the report would come too late, after the code already ran. The message goes
 # to stderr (cron mails it to root) and to the system log.
 load_conf() {
+  find_conf
   [[ -e $CONF ]] || return 0
   if [[ -n $(find -L "$CONF" -maxdepth 0 \( ! -user root -o -perm /022 \) 2>/dev/null) ]]; then
     local m
@@ -3832,8 +3937,11 @@ init() {
   fi
   renice -n 10 -p $$ >/dev/null 2>&1; ionice -c 2 -n 7 -p $$ >/dev/null 2>&1   # low priority
   OUT_DIR=$STATE_DIR/out
+  check_state_dir
+  FIRST_RUN=0; [[ -e $STATE_DIR/last_run ]] || FIRST_RUN=1
   mkdir -p "$STATE_DIR/offsets" "$OUT_DIR"
   chmod 700 "$STATE_DIR"
+  [[ -e $STATE_DIR/$STATE_MARK ]] || echo "state folder of plesk-server-report – the whole folder may be deleted (README.txt)" >"$STATE_DIR/$STATE_MARK"
   NOW=$(date '+%Y-%m-%d %H:%M %Z')
   RUN_START=$(date +%s)
   ALERTS=(); ALERT_CHK=()
@@ -3897,11 +4005,19 @@ init() {
     rm -f "$STATE_DIR/mail_failed"
   fi
   command -v plesk >/dev/null || note "plesk command not found – domain list from VHOST_LOGS only, domain aliases unknown"
+  [[ -n $STATE_NOTE ]] && note "$STATE_NOTE"
+  (( ${PSR_CONF_CREATED:-0} )) && note "config: created $CONF – every setting with its default, commented out; the state is kept in $STATE_DIR"
+  if (( FIRST_RUN )) && [[ ! -e $CONF ]] && ! (( ONLY_MODE || SUMMARY_ONLY )); then
+    note "config: no configuration file – the defaults apply. plesk-server-report.sh --init-config writes one with every setting (commented out)"
+  fi
+  return 0
 }
 
 main() {
   ARGS=("$@")
   parse_args "$@"
+  if (( PRINT_CONFIG )); then config_template; return 0; fi
+  if (( INIT_CONFIG )); then init_config; return $?; fi
   if (( SELF_UPDATE )); then           # replaces this installation – only when root asks for it
     load_conf
     self_update_1x; return $?
@@ -3924,6 +4040,7 @@ main() {
     MASK_MAILBOXES=1 upload_copy "$PSEUDO_FILE" | xargs cat
     rm -rf "$TMPD"; return 0
   fi
+  (( ONLY_MODE || SUMMARY_ONLY )) || maybe_create_conf
   init
   if (( LOCKED_OUT )); then          # previous run stuck: report that instead of staying silent
     alert "$LOCK_ALERT"
@@ -3963,6 +4080,7 @@ main() {
   timeout_alerts
   step "report"
   write_report
+  keep_first_report
   (( SUMMARY )) && write_summary "$OUT_DIR/summary.txt"
   step "upload"
   upload_report
@@ -3976,6 +4094,7 @@ main() {
 # Sourced (by the tests in tests/): define the functions and settings, run nothing.
 [[ ${BASH_SOURCE[0]} != "$0" ]] && return 0
 
+INIT_CONFIG=0; PRINT_CONFIG=0; FIRST_RUN=0
 SELF_UPDATE=0; LOCKED_OUT=0; DONE=0; STEP=""; RUNFILE=""; SUMMARY_ONLY=0; ONLY_MODE=0; SHOW_STATE=0; TEST_MAIL=0; DECODE=0; DECODE_ARGS=(); PSEUDO_FILE=""; JSON_CLI=0; JSON_STDOUT=0
 main "$@"
 DONE=1

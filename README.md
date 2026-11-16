@@ -49,7 +49,7 @@ The tests (see [Tests](#tests)) are the checks fed with anonymized logs of a rea
 Expect it to point out a few things that are by design:
 
 - **It runs as root** – to read all logs, `/proc`, crontabs and `authorized_keys`. It changes nothing on the server: no IP is blocked, no process stopped, no file removed. The one exception: `--self-update`, started by hand, replaces the script itself.
-- **It loads `/etc/plesk-server-report.conf` as code** (`source`), like most shell-script configurations – an assistant will likely flag this as root code execution. That is by design, and guarded: before loading it, the script checks that the file belongs to root and that nobody else may write it. If not, it **refuses to run** – no check, no report – and says why on stderr (cron mails that to root) and in the system log, with the fix: `chown root:root /etc/plesk-server-report.conf; chmod 600 /etc/plesk-server-report.conf`. Your daily review notices the missing reports as well.
+- **It loads its configuration file as code** (`/etc/plesk-server-report.conf`, or `plesk-server-report.conf` next to the script – see [Installation](#installation); `source`), like most shell-script configurations – an assistant will likely flag this as root code execution. That is by design, and guarded: before loading it, the script checks that the file belongs to root and that nobody else may write it. If not, it **refuses to run** – no check, no report – and says why on stderr (cron mails that to root) and in the system log, with the fix: `chown root:root <file>; chmod 600 <file>`. Your daily review notices the missing reports as well.
 - **`/usr/local/sbin` and `/usr/local/bin` come first in its `PATH`**, as in root's usual `PATH`, because cron's minimal `PATH` lacks the Plesk tools. Whoever can write there could replace `curl` or `rclone` – but then every root process on the server is at risk, not only this script.
 - **Network connections:** DNS lookups, the upload with rclone, report mails through the local `sendmail`, HTTPS requests to your own domains (with `curl -k`, because the check is meant to find invalid certificates), one request a day to the GitHub API for the latest version, the monthly download of the DB-IP database – and, only with `--self-update` started by hand, the download of the new version from GitHub.
 - **It deletes files** only in its own folder `/var/lib/plesk-server-report` (temporary files, old reports) – mode 700, and with `umask 077` every file it creates is readable by root only –, and reads the Plesk database with `SELECT` only.
@@ -587,7 +587,7 @@ apt install mmdb-bin            # RHEL-based: dnf install libmaxminddb (EPEL)
 /usr/local/sbin/plesk-server-report.sh --no-upload
 ```
 
-Options: `--no-upload` (print instead of upload), `--only CHECK,…` (run single checks, see [First run](#first-run)), `--summary` (print the 24-hour summary from the stored reports), `--list` (check names), `--version`, `--self-update` (see [Updates](#updates)), `--help`.
+Options: `--no-upload` (print instead of upload), `--only CHECK,…` (run single checks, see [First run](#first-run)), `--summary` (print the 24-hour summary from the stored reports), `--list` (check names), `--version`, `--self-update` (see [Updates](#updates)), `--config FILE`, `--init-config`, `--print-config` (see [Everything in one folder](#everything-in-one-folder)), `--help`.
 
 **Releases or `main`?** The [releases](../../releases) are tested versions that have been running on the author's server for a while. `main` gets every change as soon as it is made. To follow `main`, use `https://raw.githubusercontent.com/cmelius/plesk-monitoring-server-Report/main/plesk-server-report.sh` instead. The first line of every report shows the version.
 
@@ -606,6 +606,28 @@ Then set up the storage (next section) and the cron job:
 echo '5 * * * * root /usr/local/sbin/plesk-server-report.sh' > /etc/cron.d/plesk-server-report
 chmod 644 /etc/cron.d/plesk-server-report
 ```
+
+### Everything in one folder
+
+The layout above is the usual one on Linux: the script in `/usr/local/sbin`, its configuration in `/etc`, its state in `/var/lib`. If you'd rather keep everything in one folder that you can remove at once, put the script into a folder of its own, e.g. `/opt/plesk-server-report/`:
+
+```bash
+mkdir -p /opt/plesk-server-report && chmod 700 /opt/plesk-server-report
+curl -fsSL -o /opt/plesk-server-report/plesk-server-report.sh \
+  https://github.com/cmelius/plesk-monitoring-server-Report/releases/latest/download/plesk-server-report.sh
+chmod 700 /opt/plesk-server-report/plesk-server-report.sh
+/opt/plesk-server-report/plesk-server-report.sh --no-upload
+# cron: 5 * * * * root /opt/plesk-server-report/plesk-server-report.sh
+```
+
+How the script finds its files:
+- **Configuration:** `plesk-server-report.conf` next to the script if it exists, else `/etc/plesk-server-report.conf`; `--config FILE` names another one. The same check applies to all of them: owned by root, writable only by root.
+- **First run:** if there is no configuration file at all and the script is *not* in a system folder (`/usr/local/sbin`, `/usr/local/bin`, `/usr/sbin`, …), the first run writes `plesk-server-report.conf` next to it (`chmod 600`, only in a folder that only root can change). It lists every setting with its default, commented out – the defaults apply until you change a line, and settings you leave commented out follow the defaults of later versions too. In a system folder nothing is written next to the script; `--init-config` writes the file on request (then to `/etc/plesk-server-report.conf`). `--init-config` never overwrites a configuration, and `--self-update` only replaces the script – your settings stay as they are. `--print-config` shows the template of the installed version, to compare it with your file.
+- **State:** with the configuration next to the script, the state goes to `state/` next to it – unless an existing installation keeps its state in `/var/lib/plesk-server-report` (then it stays there and the report says how to move it). `STATE_DIR` overrides both. The script marks its state folder and refuses a `STATE_DIR` that holds other files (`STATE_DIR=/root`, a typo), so its files never end up among others.
+
+### Uninstall
+
+Remove the cron entry (`/etc/cron.d/plesk-server-report`), the script, its configuration (`/etc/plesk-server-report.conf` or the one next to the script) and its state folder (`/var/lib/plesk-server-report`, or `state/` next to the script) – in a one-folder installation, the folder and the cron entry. rclone's own configuration (`rclone config file` shows where) and the reports already uploaded stay until you delete them; so does an SSH key you created for an SFTP upload.
 
 ---
 
@@ -779,13 +801,13 @@ Every run uploads three kinds of files:
 
 ## What the script remembers
 
-Between runs the script keeps its memory in `/var/lib/plesk-server-report`: where it stopped reading each log, known login IPs, countries per mailbox, the baseline of SSH keys, accounts, cron jobs and ports, the local reports. You never have to touch it – but if you wonder why an alert did not come, or want the script to forget a known IP, [STATE-FILES.md](STATE-FILES.md) describes every file (the same text is kept as `README.txt` in that folder), and `plesk-server-report.sh --show-state` prints what is stored in readable form.
+Between runs the script keeps its memory in `/var/lib/plesk-server-report` (or `state/` next to the script, see [Everything in one folder](#everything-in-one-folder)): where it stopped reading each log, known login IPs, countries per mailbox, the baseline of SSH keys, accounts, cron jobs and ports, the local reports, and the report of the first run (`first-report.txt`, kept for reference: it lists everything as it was found). You never have to touch it – but if you wonder why an alert did not come, or want the script to forget a known IP, [STATE-FILES.md](STATE-FILES.md) describes every file (the same text is kept as `README.txt` in that folder), and `plesk-server-report.sh --show-state` prints what is stored in readable form.
 
 ---
 
 ## Configuration
 
-**You don't need to change anything here** – the defaults fit a typical Plesk server with an hourly cron job. Override a default only when a report tells you to (e.g. a threshold that is too low for your server) in `/etc/plesk-server-report.conf` (bash syntax; it survives script updates):
+**You don't need to change anything here** – the defaults fit a typical Plesk server with an hourly cron job. Override a default only when a report tells you to (e.g. a threshold that is too low for your server) in `/etc/plesk-server-report.conf`, or `plesk-server-report.conf` next to the script (bash syntax; it survives script updates; `--init-config` writes one with every setting):
 
 ```bash
 REMOTE="reports:server-reports/myhost"   # "" = local only
@@ -996,8 +1018,8 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 
 - **Found a vulnerability?** Please report it privately, not in a public issue – see [SECURITY.md](SECURITY.md).
 - Before the first run, let an AI review the script – see [Check it before you run it as root](#check-it-before-you-run-it-as-root) for a prompt and what it will point out.
-- `/etc/plesk-server-report.conf` is loaded as code: keep it owned by root and writable only by root (`chmod 600`). If another user owns it or can write it, the script refuses to run and says why on stderr and in the system log (`journalctl -t plesk-server-report`). A warning in the report would come too late: by then the code in the file would already have run.
-- Runs as root because it needs to read all logs (and `/proc`, crontabs, `authorized_keys` for the persistence check). Apart from `--self-update` (below) it changes nothing on the server – no IP is blocked, no process stopped, no file removed; findings are reported, the action is yours. It writes only to `/var/lib/plesk-server-report` (mode 700), to the configured rclone remote and – with `REPORT_MAIL_TO` – hands mails to the local `sendmail`.
+- The configuration file (`/etc/plesk-server-report.conf`, or the one next to the script) is loaded as code: keep it owned by root and writable only by root (`chmod 600`). If another user owns it or can write it, the script refuses to run and says why on stderr and in the system log (`journalctl -t plesk-server-report`). A warning in the report would come too late: by then the code in the file would already have run.
+- Runs as root because it needs to read all logs (and `/proc`, crontabs, `authorized_keys` for the persistence check). Apart from `--self-update` (below) it changes nothing on the server – no IP is blocked, no process stopped, no file removed; findings are reported, the action is yours. It writes only to its state folder (`/var/lib/plesk-server-report` or `state/` next to the script, mode 700) – and once, on the first run of a one-folder installation, its configuration file next to it –, to the configured rclone remote and – with `REPORT_MAIL_TO` – hands mails to the local `sendmail`.
 - Log lines are partly written by attackers – login names, mail addresses, URLs, user agents. The script only reads them as text: tabs and control characters are removed before a check sees a line (no terminal escape sequences in the report, no shifted fields), numbers from state files are checked before the shell computes with them, and nothing from a log is ever run. A test with hostile log lines (`tests/hostile.bats`) checks this on every push.
 - External connections: DNS lookups (blocklists, SPF/DKIM, domain DNS), the rclone upload, the report mails (only if `REPORT_MAIL_TO` is at another provider), the daily HTTPS check of your own domains (to this server's IP), the monthly download of the DB-IP Lite database (only with geolocation), and once a day two requests to the GitHub API for the latest releases of the script (`UPDATE_CHECK=0` switches them off). Nothing about your server is sent.
 - The script never updates itself on its own. `--self-update` replaces it only when root starts it by hand in a terminal – it refuses to run from cron and in a git checkout. It downloads the script of the newest 1.x release by HTTPS from GitHub (the release tag), checks it without running it (valid bash, the expected version in its `VERSION` line), shows the changes and asks – nothing of the new version runs before you say yes. The previous version is kept in the state directory for `--self-update --rollback`. There is no signature for 1.x releases: you trust GitHub and its HTTPS, as with the `curl` command of the installation. Version 2 will be signed; the key to check it is built into 1.12.0 already.
