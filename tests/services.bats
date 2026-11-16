@@ -27,32 +27,34 @@ setup() {
   [ "$output" = "Service(s) failed: postfix.service" ]
 }
 
-@test "rc-local.service gets a hint and stays critical" {
-  FAILED_UNITS="rc-local.service"
-  check_services || true
-  run alerts
-  [[ $output == "Service(s) failed: rc-local.service – rc-local.service: /etc/rc.local (deprecated) failed at boot"*"IGNORE_FAILED_UNITS" ]]
-  [ "$(alert_severity "$output")" = critical ]
-}
-
-@test "IGNORE_FAILED_UNITS: still listed, no alert; names without .service and patterns" {
-  FAILED_UNITS="rc-local.service backup-nightly.service postfix.service"
-  IGNORE_FAILED_UNITS="rc-local backup-*"
+@test "a failed rc-local.service: a line, no alert (the daily check rclocal judges rc.local)" {
+  FAILED_UNITS="rc-local.service postfix.service"
   check_services || true
   run report
   [[ $output == *"Failed units: postfix.service"* ]]
-  [[ $output == *"Failed units without an alert (IGNORE_FAILED_UNITS): rc-local.service backup-nightly.service"* ]]
+  [[ $output == *"rc-local.service failed at boot – /etc/rc.local is deprecated (see the daily check rc.local)"*"systemctl status rc-local"* ]]
+  run alerts
+  [ "$output" = "Service(s) failed: postfix.service" ]
+}
+
+@test "IGNORE_FAILED_UNITS: still listed, no alert; names without .service and patterns" {
+  FAILED_UNITS="sync-old.service backup-nightly.service postfix.service"
+  IGNORE_FAILED_UNITS="sync-old backup-*"
+  check_services || true
+  run report
+  [[ $output == *"Failed units: postfix.service"* ]]
+  [[ $output == *"Failed units without an alert (IGNORE_FAILED_UNITS): sync-old.service backup-nightly.service"* ]]
   run alerts
   [ "$output" = "Service(s) failed: postfix.service" ]
 }
 
 @test "all failed units ignored: none, no alert" {
-  FAILED_UNITS="rc-local.service"
-  IGNORE_FAILED_UNITS="rc-local.service"
+  FAILED_UNITS="backup-nightly.service"
+  IGNORE_FAILED_UNITS="backup-nightly.service"
   check_services || true
   run report
   [[ $output == *"Failed units: none"* ]]
-  [[ $output == *"(IGNORE_FAILED_UNITS): rc-local.service"* ]]
+  [[ $output == *"(IGNORE_FAILED_UNITS): backup-nightly.service"* ]]
   run alerts
   [ -z "$output" ]
 }

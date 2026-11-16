@@ -1864,9 +1864,11 @@ check_services() {   # failed systemd units, OOM killer
   local FAILED OOM
   section "SERVICES"
   if command -v systemctl >/dev/null; then
-    local u p ign shown=() ignored=() hint=""
+    local u p ign shown=() ignored=() rcl=0
     FAILED=$(T "$CMD_TIMEOUT" systemctl --failed --no-legend --plain 2>/dev/null | awk '{print $1}' | xargs)
     for u in $FAILED; do
+      # the deprecated rc.local: a line here, the daily check rclocal judges it (no alert of its own)
+      [[ $u == rc-local.service ]] && { rcl=1; continue; }
       ign=0
       for p in ${IGNORE_FAILED_UNITS:-}; do
         # shellcheck disable=SC2053  # $p is a pattern on purpose
@@ -1876,10 +1878,8 @@ check_services() {   # failed systemd units, OOM killer
     done
     out "Failed units: ${shown[*]:-none}"
     (( ${#ignored[@]} )) && out "Failed units without an alert (IGNORE_FAILED_UNITS): ${ignored[*]}"
-    if (( ${#shown[@]} )); then
-      [[ " ${shown[*]} " == *" rc-local.service "* ]] && hint=" – rc-local.service: /etc/rc.local (deprecated) failed at boot – a command in it returned an error, or it could not be run at all (shebang, line endings); systemctl status rc-local shows why. Fix it, or remove it or make it non-executable if it isn't needed, or set IGNORE_FAILED_UNITS"
-      alert "Service(s) failed: ${shown[*]}$hint"
-    fi
+    (( rcl )) && out "rc-local.service failed at boot – /etc/rc.local is deprecated (see the daily check rc.local); a command in it returned an error, or it could not be run at all (shebang, line endings): systemctl status rc-local shows why"
+    (( ${#shown[@]} )) && alert "Service(s) failed: ${shown[*]}"
   fi
   if command -v journalctl >/dev/null; then
     OOM=$(T "$CMD_TIMEOUT" journalctl -k --since "@$SINCE" 2>/dev/null | grep -iE 'out of memory|oom-kill|killed process' | grep -oE 'Killed process [0-9]+ \([^)]+\)' | sort | uniq -c | xargs)
@@ -2432,18 +2432,20 @@ maildir_used() {   # maildir_used FILE – bytes used according to a maildirsize
 RC_LOCAL=/etc/rc.local
 # rc.local is deprecated: systemd runs it (rc-local.service) only when it exists and is executable,
 # which no current distribution ships (Debian/Ubuntu: no file, RHEL family: not executable)
+rc_local_failed() { command -v systemctl >/dev/null && T "$CMD_TIMEOUT" systemctl is-failed --quiet rc-local.service 2>/dev/null; }
 check_rclocal() {
-  local n
+  local n f=""
   echo ""
-  if [[ ! -e $RC_LOCAL ]]; then echo "rc.local: not used ($RC_LOCAL doesn't exist)"; return 0; fi
-  if [[ ! -x $RC_LOCAL ]]; then echo "rc.local: not used ($RC_LOCAL is not executable, so systemd doesn't run it)"; return 0; fi
+  rc_local_failed && f=" rc-local.service failed at boot (systemctl status rc-local shows why)."
+  if [[ ! -e $RC_LOCAL ]]; then echo "rc.local: not used ($RC_LOCAL doesn't exist)${f:+ –$f}"; return 0; fi
+  if [[ ! -x $RC_LOCAL ]]; then echo "rc.local: not used ($RC_LOCAL is not executable, so systemd doesn't run it)${f:+ –$f}"; return 0; fi
   n=$(grep -cvE '^[[:space:]]*(#.*)?$|^[[:space:]]*exit[[:space:]]+0[[:space:]]*;?[[:space:]]*$' "$RC_LOCAL" 2>/dev/null || true)
   if (( ${n:-0} == 0 )); then
-    echo "rc.local: $RC_LOCAL is executable but has no commands – systemd runs it at boot for nothing (recommendation: chmod -x $RC_LOCAL)"
+    echo "rc.local: $RC_LOCAL is executable but has no commands – systemd runs it at boot for nothing (recommendation: chmod -x $RC_LOCAL).$f"
     return 0
   fi
-  echo "rc.local: in use ($n command line(s) in $RC_LOCAL) – deprecated, not the default on any current distribution; better a systemd unit (README: Notes)"
-  (( WARN_RC_LOCAL )) && dalert "rc.local: $RC_LOCAL runs $n command line(s) at boot – deprecated, and not the default on any current distribution: find out what added it (an old installer, an online guide?) and move the commands to a systemd unit (README: Notes); WARN_RC_LOCAL=0 keeps only the report line"
+  echo "rc.local: in use ($n command line(s) in $RC_LOCAL) – deprecated, not the default on any current distribution; better a systemd unit (README: Notes).$f"
+  (( WARN_RC_LOCAL )) && dalert "rc.local: $RC_LOCAL runs $n command line(s) at boot${f:+ (and failed)} – deprecated, and not the default on any current distribution: find out what added it (an old installer, an online guide?) and move the commands to a systemd unit (README: Notes); WARN_RC_LOCAL=0 keeps only the report line"
   return 0
 }
 check_mailboxes() {

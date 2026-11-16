@@ -7,6 +7,8 @@ setup() {
   load_script
   RC_LOCAL="$BATS_TEST_TMPDIR/rc.local"
   WARN_RC_LOCAL=1
+  RCL_FAILED=0
+  systemctl() { [[ $* == "is-failed --quiet rc-local.service" ]] && (( RCL_FAILED )); }
 }
 
 @test "missing: not used, no alert" {
@@ -44,5 +46,24 @@ setup() {
   WARN_RC_LOCAL=0
   run check_rclocal
   [[ $output == *"rc.local: in use (1 command line(s)"* ]]
+  [ -z "$(cat "$DALERTS")" ]
+}
+
+@test "failed rc-local.service with commands: said in the line and the warning" {
+  printf '#!/bin/sh\n/opt/old/start.sh &\n' >"$RC_LOCAL"; chmod 755 "$RC_LOCAL"
+  RCL_FAILED=1
+  check_rclocal >"$BODY"
+  run report
+  [[ $output == *"rc.local: in use (1 command line(s)"*"rc-local.service failed at boot (systemctl status rc-local shows why)."* ]]
+  run cat "$DALERTS"
+  [[ $output == "rc.local: "*"runs 1 command line(s) at boot (and failed) – deprecated"* ]]
+  [ "$(alert_severity "$output")" = warning ]
+}
+
+@test "failed rc-local.service without commands: recommendation, no alert" {
+  printf '#!/bin/bash\nexit 0\n' >"$RC_LOCAL"; chmod 755 "$RC_LOCAL"
+  RCL_FAILED=1
+  run check_rclocal
+  [[ $output == *"has no commands"*"chmod -x"*"rc-local.service failed at boot"* ]]
   [ -z "$(cat "$DALERTS")" ]
 }
