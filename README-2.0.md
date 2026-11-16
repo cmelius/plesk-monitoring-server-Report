@@ -1,5 +1,7 @@
 # README changes for 2.0 (branch README)
 
+> **Postponed until further notice.** Work on the plugin system is paused: version 2.0 as described here is not planned at the moment, and nothing of this branch is merged into `main`. The branch stays as a record of the work; it may be deleted later. Updates and fixes continue in the 1.x releases on `main`.
+
 **This file belongs to the branch `feature/plugin-system`.** It collects everything in [README.md](README.md) that has to change for version 2.0, so nothing is forgotten – and nothing else: the 1.x texts stay in `README.md`, which this branch does not edit, so merging `main` into the branch causes no conflict there. When 2.0 is released, each part below goes into `README.md` at the place it names and this file is removed. What changed in the code is listed in [CHANGELOG-2.0.md](CHANGELOG-2.0.md), the design in [docs/plugin-concept.md](docs/plugin-concept.md).
 
 Parts marked **(planned)** describe something the branch has not built yet; check them against the code before the release.
