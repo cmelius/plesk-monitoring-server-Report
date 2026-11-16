@@ -179,6 +179,7 @@ PERSISTENCE_IGNORE=""         # regex on the text of findings to ignore (e.g. a 
 
 DNSBL_LISTS="zen.spamhaus.org bl.spamcop.net psbl.surriel.com"   # Barracuda: see README (answers registered resolvers only)
 WEB_IGNORE_DOMAINS=""         # space-separated domains without web alerts (still listed)
+IGNORE_FAILED_UNITS=""        # space-separated systemd units (patterns allowed, e.g. "rc-local.service backup-*") without an alert when failed (still listed)
 # Known legitimate PHP files inside wp-content/uploads (regex on the full path)
 UPLOADS_PHP_IGNORE='/uploads/mailchimp-for-wp/debug-log\.php$'
 
@@ -1862,9 +1863,22 @@ check_services() {   # failed systemd units, OOM killer
   local FAILED OOM
   section "SERVICES"
   if command -v systemctl >/dev/null; then
+    local u p ign shown=() ignored=() hint=""
     FAILED=$(T "$CMD_TIMEOUT" systemctl --failed --no-legend --plain 2>/dev/null | awk '{print $1}' | xargs)
-    out "Failed units: ${FAILED:-none}"
-    [[ -n $FAILED ]] && alert "Service(s) failed: $FAILED"
+    for u in $FAILED; do
+      ign=0
+      for p in ${IGNORE_FAILED_UNITS:-}; do
+        # shellcheck disable=SC2053  # $p is a pattern on purpose
+        [[ $u == $p || $u == "$p.service" ]] && { ign=1; break; }
+      done
+      if (( ign )); then ignored+=("$u"); else shown+=("$u"); fi
+    done
+    out "Failed units: ${shown[*]:-none}"
+    (( ${#ignored[@]} )) && out "Failed units without an alert (IGNORE_FAILED_UNITS): ${ignored[*]}"
+    if (( ${#shown[@]} )); then
+      [[ " ${shown[*]} " == *" rc-local.service "* ]] && hint=" – rc-local.service: /etc/rc.local failed at boot – a command in it returned an error, or it could not be run at all (shebang, line endings); systemctl status rc-local shows why. Fix it, or remove it or make it non-executable if it isn't needed, or set IGNORE_FAILED_UNITS"
+      alert "Service(s) failed: ${shown[*]}$hint"
+    fi
   fi
   if command -v journalctl >/dev/null; then
     OOM=$(T "$CMD_TIMEOUT" journalctl -k --since "@$SINCE" 2>/dev/null | grep -iE 'out of memory|oom-kill|killed process' | grep -oE 'Killed process [0-9]+ \([^)]+\)' | sort | uniq -c | xargs)
