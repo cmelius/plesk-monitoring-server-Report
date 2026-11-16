@@ -423,7 +423,7 @@ detect_pubip() {   # public IPv4 used for outgoing connections → PUBIP
   PUBIP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<NF;i++) if ($i=="src") print $(i+1)}')
 }
 is_public_ipv4() {
-  [[ $1 =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && ! $1 =~ ^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|127\.) ]]
+  [[ $1 =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && ! $1 =~ ^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|127\.|169\.254\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.) ]]
 }
 # IPv6 – only relevant if the server has a global IPv6 and Postfix uses it → PUBIP6 (or empty)
 detect_pubip6() {
@@ -1205,7 +1205,16 @@ check_fail2ban() {
         MW[$ip]+="$who, "; (( t > ${ML[$ip]:-0} )) && ML[$ip]=$t
       done <"$KM"
     fi
-    JAILS=$(T "$CMD_TIMEOUT" fail2ban-client status 2>/dev/null | sed -n 's/.*Jail list:[[:space:]]*//p' | tr -d ' ' | tr ',' ' ')
+    local st nto
+    nto=$(timeouts_seen)
+    st=$(T "$CMD_TIMEOUT" fail2ban-client status 2>/dev/null)
+    if [[ $st != *"Jail list:"* ]]; then
+      out "fail2ban is installed, but its server doesn't answer (fail2ban-client status)"
+      # a time limit hit is reported as such (timeout_alerts) – no second alert for it
+      [[ $(timeouts_seen) == "$nto" ]] && alert "fail2ban is not running – nothing bans password guessing right now. Start it: systemctl start fail2ban (why it stopped: journalctl -u fail2ban)"
+      return 0
+    fi
+    JAILS=$(sed -n 's/.*Jail list:[[:space:]]*//p' <<<"$st" | tr -d ' ' | tr ',' ' ')
     for j in $JAILS; do
       s=$(T "$CMD_TIMEOUT" fail2ban-client status "$j" 2>/dev/null)
       cb=$(sed -n 's/.*Currently banned:[[:space:]]*//p' <<<"$s")
@@ -1231,7 +1240,8 @@ check_fail2ban() {
       printf '%s' "$ban" >>"$BODY"
     fi
   else
-    out "fail2ban not installed"; alert "fail2ban is not running"
+    out "fail2ban not installed"
+    alert "fail2ban is not installed – nothing bans password guessing on mail, SSH and the panel (Plesk: Tools & Settings → IP Address Banning, or install fail2ban)"
   fi
 }
 
@@ -1668,8 +1678,8 @@ persist_addrs() {   # global IP addresses of the server: "address TAB interface"
   T "$CMD_TIMEOUT" ip -o addr show scope global 2>/dev/null |
     awk '$3 == "inet" || $3 == "inet6" { a = $4; sub(/\/.*/, "", a); print a "\t" $2 }'
 }
-persist_ports() {   # TCP ports listening on a non-loopback address: "port TAB process"
-  T "$CMD_TIMEOUT" ss -ltnp 2>/dev/null | awk '$1 == "LISTEN" {
+persist_ports() {   # output of "ss -ltnp" on stdin → TCP ports listening on a non-loopback address: "port TAB process"
+  awk '$1 == "LISTEN" {
     a = $4; p = a; sub(/.*:/, "", p); h = a; sub(/:[^:]*$/, "", h)
     if (h ~ /^(127\.|\[?::1\]?$|\[?::ffff:127\.)/ || h ~ /%lo$/) next
     n = "?"; if (match($0, /users:\(\("[^"]+"/)) n = substr($0, RSTART + 9, RLENGTH - 10)
@@ -1833,8 +1843,10 @@ check_persistence() {   # SSH keys, accounts, sudo, cron/autostart, suspicious p
     out "Listening ports: not checked (no ss command, package iproute2)"
   else
     nto=$(timeouts_seen)
-    persist_ports >"$TMP.o"
-    if [[ $(timeouts_seen) != "$nto" || ! -s $TMP.o ]]; then out "Listening ports: could not be read (ss gave no answer) – compared again in the next run"
+    # no output at all means ss failed; a list without ports after the loopback filter is "none"
+    T "$CMD_TIMEOUT" ss -ltnp >"$TMP.ss" 2>/dev/null
+    persist_ports <"$TMP.ss" >"$TMP.o"
+    if [[ $(timeouts_seen) != "$nto" || ! -s $TMP.ss ]]; then out "Listening ports: could not be read (ss gave no answer) – compared again in the next run"
     else
       # compared by port number only – the process name of a port is not stable (see persist_ports)
       local -A oldp=()
@@ -2112,7 +2124,7 @@ check_https() {   # HSTS header and http→https redirect on domains with a vali
   done
   [[ -n $noans ]] && echo "  no answer on https (timeout or error):$noans"
   if [[ -z $nohsts && -z $noredir ]]; then
-    echo "  $n domain(s) checked, all send HSTS and redirect http to https"
+    if (( n )); then echo "  $n domain(s) checked, all send HSTS and redirect http to https"; else echo "  0 domain(s) checked"; fi
   else
     [[ -n $nohsts ]] && echo "  no HSTS:$nohsts"
     [[ -n $noredir ]] && echo "  no redirect from http to https:$noredir"
@@ -2131,7 +2143,10 @@ check_serverdns() {   # PTR of the server IP, HELO name, IPv6 reverse DNS
   helo=$(postconf -h smtp_helo_name 2>/dev/null)
   # shellcheck disable=SC2016  # the literal Postfix default "$myhostname", not a shell variable
   [[ -z $helo || $helo == '$myhostname' ]] && helo=$(postconf -h myhostname 2>/dev/null)
-  if [[ -z $ptr ]]; then
+  if ! is_public_ipv4 "$PUBIP"; then
+    # behind NAT: the public address is elsewhere (router, provider's NAT) – its PTR can't be checked from here
+    echo "  ${PUBIP:-no IPv4 address}: private address (behind NAT?) – reverse DNS not checked"
+  elif [[ -z $ptr ]]; then
     echo "  $PUBIP: NO PTR record"
     dalert "Mail: server IP $PUBIP has no reverse DNS (PTR) – many receivers (Gmail, Microsoft, T-Online) reject such mail; set it at your hosting provider"
   else
@@ -2141,7 +2156,9 @@ check_serverdns() {   # PTR of the server IP, HELO name, IPv6 reverse DNS
     fi
     echo "  $PUBIP → $ptr: $fwd"
   fi
-  if [[ -n $helo ]]; then
+  if [[ -n $helo ]] && ! is_public_ipv4 "$PUBIP"; then
+    echo "  Postfix HELO name: $helo (not compared – the server's address is private)"
+  elif [[ -n $helo ]]; then
     if host_has_ip "$helo" "$PUBIP"; then echo "  Postfix HELO name: $helo (resolves to this server$([[ $helo == "$ptr" ]] && echo ", matches PTR"))"
     else echo "  Postfix HELO name: $helo – does NOT resolve to $PUBIP"
       dalert "Mail: Postfix HELO name $helo does not resolve to $PUBIP – set myhostname/smtp_helo_name to the PTR name ${ptr:-?}"
@@ -2657,7 +2674,7 @@ alert_severity() {
     "Web: "*" served the sensitive file "*|"Web: "*" exposes "*" publicly"*|\
     "Access: new SSH key "*|"Access: account "*" has UID 0"*|"Access: /etc/ld.so.preload "*|\
     "Cron: "*"suspicious"*|"Process: "*|\
-    "Service(s) failed: "*|"fail2ban is not running"|"RAM: the kernel killed processes"*|\
+    "Service(s) failed: "*|"fail2ban is not running"*|"RAM: the kernel killed processes"*|\
     "DNS: "*" does not resolve"*|"TLS: mail certificate on port "*" has expired"*) echo critical ;;
     *) echo warning ;;
   esac

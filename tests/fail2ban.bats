@@ -28,3 +28,27 @@ setup() {
   run alerts
   [[ $output == *"bans 198.18.0.30"*"mail logins of info@d1.example"*"Unban: fail2ban-client set "*" unbanip 198.18.0.30"* ]]
 }
+
+@test "fail2ban installed, but its server doesn't answer: critical alert 'not running'" {
+  fail2ban-client() { echo "ERROR   Failed to access socket path: /var/run/fail2ban/fail2ban.sock. Is fail2ban running?"; return 255; }
+  check_fail2ban || true
+  run report
+  [[ $output == *"fail2ban is installed, but its server doesn't answer"* ]]
+  run alerts
+  [[ $output == *"fail2ban is not running – "*"systemctl start fail2ban"* ]]
+  [ "$(alert_severity "${ALERTS[0]}")" = critical ]
+}
+
+@test "fail2ban not installed: warning 'not installed', not 'not running'" {
+  # a PATH without fail2ban-client, and no stub
+  unset -f fail2ban-client
+  mkdir -p "$BATS_TEST_TMPDIR/empty"; PATH="$BATS_TEST_TMPDIR/empty"
+  check_fail2ban || true
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  run report
+  [[ $output == *"fail2ban not installed"* ]]
+  run alerts
+  [[ $output == *"fail2ban is not installed – nothing bans password guessing"* ]]
+  [[ $output != *"not running"* ]]
+  [ "$(alert_severity "${ALERTS[0]}")" = warning ]
+}

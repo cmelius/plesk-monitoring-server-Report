@@ -15,6 +15,13 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 - A failed **`rc-local.service`** no longer raises an alert (it was even rated critical): it is a line in *Services* – deprecated, how to see why –, and the daily check `rclocal` judges `rc.local` itself (a warning only if it contains commands, then also saying that the service failed). Other failed units raise an alert as before.
 - `--self-update --edge` with nothing to install says "your copy is the same as the version on main (newest commit …)" – "the newest version on main (commit …)" read as if the copy came from that commit.
 
+### Fixed
+Found by running the script on a desktop with Ubuntu 26.04 – without Plesk, behind a router:
+- **Reverse DNS of a private address.** A server whose outgoing address is private (behind NAT: a router, or a cloud provider's 1:1 NAT) got the alert "server IP … has no reverse DNS" – a private address never has one; the public address is elsewhere. The daily check now says so and checks neither PTR nor HELO name; link-local and carrier-grade NAT addresses (`169.254.0.0/16`, `100.64.0.0/10`) count as private too.
+- **"fail2ban is not running" when it isn't installed** – and no alert at all when it is installed but stopped. Now: not installed → a warning that nothing bans password guessing (with where to switch it on in Plesk); installed but its server doesn't answer → "fail2ban is not running" (critical, as before), with how to start it and see why it stopped.
+- **"Listening ports: could not be read"** on a system that listens only on localhost: an empty list after leaving out loopback was taken for a failed `ss`. Now only no output at all counts as a failure; otherwise the list says `none`.
+- *HTTPS* with no domain to check said "0 domain(s) checked, all send HSTS …"; now "0 domain(s) checked".
+
 ## [1.14.0] – 2026-11-16
 
 ### Added
