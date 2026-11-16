@@ -124,6 +124,7 @@ WATCH_RECIPIENT_DOMAINS=""    # space-separated recipient domains whose deliveri
 WARN_BLOCKLIST=1              # remote rejections mentioning a blocklist, reputation, spam or rate limiting
 WARN_QUEUE=200                # messages in the Postfix queue
 WARN_AUTH_FAIL=300            # failed mail logins (SMTP + IMAP/POP3)
+WARN_RC_LOCAL=1               # daily: warning when /etc/rc.local runs commands at boot (deprecated); 0 = only the line in the report
 WARN_MAILBOX_PCT=95           # daily: mailbox filled to x % of its size limit; 0 = off (full mailboxes rejecting mail are always reported)
 WARN_MAILBOX_UNLIMITED_GB=5   # daily: mailbox without size limit larger than x GB (disk, backups); 0 = off
 WARN_DSN=1                    # delivery confirmations (DSN "delivered") sent to other servers – spammers request them to verify addresses; 0 = off
@@ -198,7 +199,7 @@ CONF=/etc/plesk-server-report.conf
 # Check names in report order. Hourly checks analyse the log lines since the previous run,
 # daily checks run once a day and are cached in $STATE_DIR/daily.txt.
 HOURLY_CHECKS="mail webmail system fail2ban web uploads logins panel persistence services backups"
-DAILY_CHECKS="updates certificates https serverdns mailtls domaindns exposed webshell mailauth mailboxes"
+DAILY_CHECKS="updates certificates https serverdns mailtls domaindns exposed webshell mailauth mailboxes rclocal"
 
 # =============================================================================
 # Helper functions
@@ -1876,7 +1877,7 @@ check_services() {   # failed systemd units, OOM killer
     out "Failed units: ${shown[*]:-none}"
     (( ${#ignored[@]} )) && out "Failed units without an alert (IGNORE_FAILED_UNITS): ${ignored[*]}"
     if (( ${#shown[@]} )); then
-      [[ " ${shown[*]} " == *" rc-local.service "* ]] && hint=" – rc-local.service: /etc/rc.local failed at boot – a command in it returned an error, or it could not be run at all (shebang, line endings); systemctl status rc-local shows why. Fix it, or remove it or make it non-executable if it isn't needed, or set IGNORE_FAILED_UNITS"
+      [[ " ${shown[*]} " == *" rc-local.service "* ]] && hint=" – rc-local.service: /etc/rc.local (deprecated) failed at boot – a command in it returned an error, or it could not be run at all (shebang, line endings); systemctl status rc-local shows why. Fix it, or remove it or make it non-executable if it isn't needed, or set IGNORE_FAILED_UNITS"
       alert "Service(s) failed: ${shown[*]}$hint"
     fi
   fi
@@ -2427,6 +2428,23 @@ fmt_bytes() {   # fmt_bytes N – 1.07 GB / 512 MB, in units of 1024 like Plesk 
 }
 maildir_used() {   # maildir_used FILE – bytes used according to a maildirsize file
   awk 'NR > 1 { s += $1 } END { printf "%.0f\n", s + 0 }' "$1" 2>/dev/null
+}
+RC_LOCAL=/etc/rc.local
+# rc.local is deprecated: systemd runs it (rc-local.service) only when it exists and is executable,
+# which no current distribution ships (Debian/Ubuntu: no file, RHEL family: not executable)
+check_rclocal() {
+  local n
+  echo ""
+  if [[ ! -e $RC_LOCAL ]]; then echo "rc.local: not used ($RC_LOCAL doesn't exist)"; return 0; fi
+  if [[ ! -x $RC_LOCAL ]]; then echo "rc.local: not used ($RC_LOCAL is not executable, so systemd doesn't run it)"; return 0; fi
+  n=$(grep -cvE '^[[:space:]]*(#.*)?$|^[[:space:]]*exit[[:space:]]+0[[:space:]]*;?[[:space:]]*$' "$RC_LOCAL" 2>/dev/null || true)
+  if (( ${n:-0} == 0 )); then
+    echo "rc.local: $RC_LOCAL is executable but has no commands – systemd runs it at boot for nothing (recommendation: chmod -x $RC_LOCAL)"
+    return 0
+  fi
+  echo "rc.local: in use ($n command line(s) in $RC_LOCAL) – deprecated, not the default on any current distribution; better a systemd unit (README: Notes)"
+  (( WARN_RC_LOCAL )) && dalert "rc.local: $RC_LOCAL runs $n command line(s) at boot – deprecated, and not the default on any current distribution: find out what added it (an old installer, an online guide?) and move the commands to a systemd unit (README: Notes); WARN_RC_LOCAL=0 keeps only the report line"
+  return 0
 }
 check_mailboxes() {
   local who lim sub f used pct n=0 nolim=0 nofile=0 d mb h where kb utot=0 umax=0 uwho="" big

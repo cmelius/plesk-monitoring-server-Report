@@ -5,10 +5,11 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 ## [1.14.1] – not yet released (on `main`)
 
 ### Added
+- **Daily check `rclocal`**: whether the deprecated `/etc/rc.local` is in use. systemd runs it only when it exists and is executable, which no current distribution ships – so commands in it raise a warning (an old installer, an online guide? Better a systemd unit; `WARN_RC_LOCAL=0` keeps only the report line); an executable file without commands gets a recommendation (`chmod -x`). README: how to move the commands to a systemd unit. ([#2](https://github.com/cmelius/plesk-monitoring-server-Report/issues/2))
 - **`IGNORE_FAILED_UNITS`**: systemd units that raise no alert when they have failed (names or patterns, e.g. `"rc-local.service"`). They are still listed in the report, in a line of their own. ([#2](https://github.com/cmelius/plesk-monitoring-server-Report/issues/2))
 
 ### Changed
-- A failed **`rc-local.service`** – `/etc/rc.local` failed at boot: a command in it returned an error, or it could not be run at all (shebang, line endings); often a leftover on Ubuntu – gets a hint in the alert: how to see why, how to fix or switch it off, or ignore it with `IGNORE_FAILED_UNITS`. It still raises an alert by default: `rc.local` is also a place where malware starts itself.
+- A failed **`rc-local.service`** – `/etc/rc.local` failed at boot: a command in it returned an error, or it could not be run at all (shebang, line endings); often a leftover on Ubuntu – gets a hint in the alert (deprecated; how to see why, how to fix or switch it off, or ignore it with `IGNORE_FAILED_UNITS`). It still raises an alert by default: `rc.local` is also a place where malware starts itself.
 - `--self-update --edge` with nothing to install says "your copy is the same as the version on main (newest commit …)" – "the newest version on main (commit …)" read as if the copy came from that commit.
 
 ## [1.14.0] – 2026-11-16

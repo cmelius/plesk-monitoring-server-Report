@@ -104,7 +104,7 @@ Just as useful: the reports confirmed what is *fine*. Reverse DNS, HELO name and
 | **Access & persistence** | what an attacker leaves behind: **SSH keys** in every account's `authorized_keys`, accounts with a login shell or UID 0, members of `sudo`/`wheel`/`admin`, sudoers files, `/etc/ld.so.preload`, **cron jobs** (customer crontabs, root, `/etc/cron.*`) and autostart files (`rc.local`, systemd units in `/etc`), **processes** running from `/tmp`, `/dev/shm` or a web folder, from a deleted file or from memory only, or posing as a kernel thread, **listening TCP ports**, the server's **IP addresses** | a key, account, sudo right or port is new or changed, the server has a new public IP address (e.g. IPv6 switched on by the hosting provider), a cron job or autostart file contains a download piped into a shell, base64 decoding, a reverse shell or a program in `/tmp`, root or the system gets a new cron entry, or a suspicious process runs. Compared with the previous run, read only |
 | **Geolocation** (optional) | country and network operator of every IP with a successful login (mailboxes, SSH, Plesk panel, WordPress) and of the top failed-login IPs, datacenter networks marked, from a **local** database, so no IP leaves the server; mail logins from datacenters inside the allowed countries are listed for information | a mailbox sends mail, is read via IMAP/POP3, or someone logs in, from a country outside `ALLOWED_COUNTRIES` |
 | **Certificates** | failed automatic renewals in Plesk's own log (`panel.log`): domain and the reason Let's Encrypt gives (DNS pointing elsewhere, domain gone, challenge URL blocked) – weeks before the certificate expires | a renewal failed |
-| **System** | load, CPU per system user (= subscription), RAM, disks (space and inodes), failed systemd units, OOM killer | thresholds are exceeded, a systemd unit has failed (unless in `IGNORE_FAILED_UNITS`) |
+| **System** | load, CPU per system user (= subscription), RAM, disks (space and inodes), failed systemd units, OOM killer; once a day whether the deprecated `/etc/rc.local` is still in use | thresholds are exceeded, a systemd unit has failed (unless in `IGNORE_FAILED_UNITS`), `/etc/rc.local` runs commands at boot (warning, `WARN_RC_LOCAL`) |
 | **Backups** | time, age and status of the latest **Plesk backup** (errors from its `backup.log`), Acronis agent (if installed) | the latest backup is older than `WARN_BACKUP_HOURS` or finished with errors, or the Acronis agent is not running |
 | **Web** | requests, 5xx errors, WordPress login POSTs and busiest IP per domain, login-attack details (distinct IPs, wp-login vs. xmlrpc, successful logins, whether xmlrpc.php is blocked), PHP fatal errors with the first message (errors caused by scanners calling WordPress files directly are counted separately), **attack patterns** per domain (SQL injection, path traversal, code execution, XSS) and how many were answered with 200, **probes for sensitive files** (`.env`, `.git`, dumps, backups, config copies), **traffic peaks** (busiest minute) and URLs requested by unusually many IPs, **ModSecurity** hits and top rules | a domain throws many 5xx/fatal errors, a sensitive file was served with 200 *and* exists on disk, a traffic peak exceeds `WARN_REQ_PER_MIN`, or one URL is hit by a botnet-sized number of IPs |
 
@@ -354,6 +354,8 @@ Mailboxes (fill level of the size limit; warning from WARN_MAILBOX_PCT=95 %, wit
    77 %  orders@shop.example  (779 MB of 1000 MB)
    64 %  info@shop.example  (1.07 GB of 1.56 GB)
   89 mailbox(es) checked; 19 unlimited (no size limit set in Plesk; largest: info@bakery.example 3.21 GB, all together 12.48 GB), 5 without maildirsize (not counted)
+
+rc.local: not used (/etc/rc.local doesn't exist)
 
 IP geolocation: DB-IP.com Lite databases (CC BY 4.0)
 ```
@@ -823,6 +825,7 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 | `WARN_LOGIN_POSTS` | 300 | POSTs to `wp-login.php`/`xmlrpc.php` per domain |
 | `WEB_IGNORE_DOMAINS` | empty | space-separated domains without web alerts (still listed in the report) |
 | `IGNORE_FAILED_UNITS` | empty | space-separated systemd units that raise no alert when they have failed, e.g. `"rc-local.service"`; patterns like `backup-*` work, `.service` may be left out. They are still listed in the report (*Failed units without an alert*). Fix a failed unit if you can – only ignore one you know is harmless |
+| `WARN_RC_LOCAL` | 1 | daily: a warning when `/etc/rc.local` runs commands at boot – deprecated, and not the default on any current distribution (see [Notes](#notes-and-limitations)). `0` = only the line in the report |
 | `UPLOADS_PHP_IGNORE` | Mailchimp for WP's debug log | regex of legitimate PHP files inside `wp-content/uploads` |
 | `WARN_LOGIN_DETAIL` | 20 | show login-attack details for domains with at least this many login POSTs |
 | `WARN_LOGIN_BRUTE_FAILS` | 5 | alert when an IP logs in to WordPress successfully after at least this many failures |
@@ -897,6 +900,27 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 
 ## Notes and limitations
 
+- **`/etc/rc.local` is deprecated.** systemd still runs it at boot (`rc-local.service`), but only when the file exists and is executable – no current distribution ships it that way (Debian/Ubuntu have no `rc.local`, the RHEL family ships it not executable). So an `rc.local` that runs commands was set up by someone: an admin, an online guide (some still advise enabling `rc-local.service` – there is no need), or the installer of old software. It is also a classic place where malware starts itself. The daily check says whether it is in use; with commands in it, it raises a warning (`WARN_RC_LOCAL=0` keeps only the line), an executable file without commands gets a recommendation (`chmod -x /etc/rc.local`). A failed `rc-local.service` is reported by *Services* (`IGNORE_FAILED_UNITS` if you know it is harmless). To move the commands to a systemd unit – put them into a script, e.g. `/usr/local/sbin/local-startup.sh` (`chmod 700`), then:
+  ```ini
+  # /etc/systemd/system/local-startup.service
+  [Unit]
+  Description=Local startup commands (formerly /etc/rc.local)
+  After=network-online.target
+  Wants=network-online.target
+
+  [Service]
+  Type=oneshot
+  ExecStart=/usr/local/sbin/local-startup.sh
+  RemainAfterExit=yes
+
+  [Install]
+  WantedBy=multi-user.target
+  ```
+  ```bash
+  systemctl daemon-reload && systemctl enable local-startup.service
+  chmod -x /etc/rc.local       # rc-local.service no longer runs it
+  ```
+  The new unit shows up once as a new autostart file in *Access & persistence* – expected. Commands that need more (a service that keeps running, ordering after a database) are better as a unit of their own with `Type=simple` and the right `After=`.
 - **Postfix logs `sasl_username` on failed logins too** (recent versions). The script handles this. If you adapt the parsing, keep in mind that a username appearing in the log does not mean the login succeeded.
 - **Webmail is analysed from Roundcube's own logs** (`/var/log/plesk-roundcube/sendmail` and `errors`), because Roundcube talks to Postfix and the IMAP server (Dovecot or Courier) from `localhost`: in the mail log those mails carry neither the user's IP nor (on Plesk) the mailbox name. Without this section, a hijacked mailbox sending spam through webmail would be invisible. Roundcube does not log successful logins by default (`log_logins = false`). The script doesn't need them, since every sent mail is logged with mailbox and IP. Leave that Plesk-managed config alone.
 - **"Top senders" includes incoming mail** (e.g. newsletters from Amazon SES). The alert for that list only counts mail sent from this server, after a mailbox login or by a local script. The *authenticated mailboxes*, *login ≠ from* and *scripts* sections are the ones that show what your server sends on behalf of your users.

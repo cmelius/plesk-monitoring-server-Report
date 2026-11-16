@@ -31,7 +31,7 @@ setup() {
   FAILED_UNITS="rc-local.service"
   check_services || true
   run alerts
-  [[ $output == "Service(s) failed: rc-local.service – rc-local.service: /etc/rc.local failed at boot"*"IGNORE_FAILED_UNITS" ]]
+  [[ $output == "Service(s) failed: rc-local.service – rc-local.service: /etc/rc.local (deprecated) failed at boot"*"IGNORE_FAILED_UNITS" ]]
   [ "$(alert_severity "$output")" = critical ]
 }
 
