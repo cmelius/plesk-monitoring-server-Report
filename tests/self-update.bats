@@ -297,12 +297,12 @@ edge_setup() {
   cmp -s "$SU_SELF" "$ORIG"
 }
 
-@test "--edge: already the newest version on main" {
+@test "--edge: already the same as the version on main" {
   edge_setup
   cp "$SU_SELF" "$NEW"
   run self_update_1x
   [ "$status" -eq 0 ]
-  [[ $output == *"your copy is the newest version on main"* ]]
+  [[ $output == *"your copy is the same as the version on main (newest commit"* ]]
   [ "$(leftovers)" -eq 0 ]
 }
 

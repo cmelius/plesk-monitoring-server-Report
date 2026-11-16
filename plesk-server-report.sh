@@ -74,7 +74,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.14.0
+VERSION=1.14.1
 
 set -uo pipefail
 export LC_ALL=C
@@ -3576,7 +3576,7 @@ su_edge() {
     su_fail "main is at version $v – --edge stays within version ${VERSION%%.*} (see README: Updating from 1.x)"; return 1
   fi
   if cmp -s "$SU_WORK" "$self"; then
-    rm -f "$SU_WORK"; echo "your copy is the newest version on main (commit ${sha:0:7}, version $v)"; return 0
+    rm -f "$SU_WORK"; echo "your copy is the same as the version on main (newest commit ${sha:0:7}, version $v)"; return 0
   fi
   echo "development version on main: commit ${sha:0:7}, version $v (installed: $VERSION) – tests passed"
   echo "NOT A RELEASE: it may change again before the release. --self-update without --edge goes back to"
