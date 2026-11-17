@@ -83,7 +83,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.14.1
+VERSION=1.15.0
 
 set -uo pipefail
 export LC_ALL=C

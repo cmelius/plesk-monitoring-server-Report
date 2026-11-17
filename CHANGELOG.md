@@ -2,7 +2,7 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [1.14.1] – not yet released (on `main`)
+## [1.15.0] – 2026-11-17
 
 ### Added
 - **Everything in one folder** ([#3](https://github.com/cmelius/plesk-monitoring-server-Report/issues/3)): the script uses `plesk-server-report.conf` next to itself if it exists, else `/etc/plesk-server-report.conf` as before (`--config FILE` names another one; the same root-only check applies). With the configuration next to the script, the state goes to `state/` next to it – unless an existing installation keeps its state in `/var/lib/plesk-server-report`; `STATE_DIR` overrides both. The first run of a new installation outside the system folders (`/usr/local/sbin` etc.) writes the configuration next to the script: every setting with its default, commented out, `chmod 600`. `--init-config` writes it on request (in a system folder to `/etc`) and never overwrites one; `--print-config` prints the template. README: *Everything in one folder*, *Uninstall*. Existing installations don't change.
