@@ -81,3 +81,36 @@ mail_on() { MAIL_LOG="$FIX/mail/$1"; check_mail || true; }
   [[ $output != *Greylisted* ]]
   [[ $output == *"zen.spamhaus.org"* ]]
 }
+
+@test "rejections: who rejected and how to get the IP removed" {
+  PUBIP=203.0.113.10
+  mail_on rejections.log
+  run report
+  [[ $output == *"Rejections mentioning blocklist/reputation/spam/rate limit: 12"* ]]
+  [[ $output == *"What to do, by who rejected (the IP is 203.0.113.10):"* ]]
+  [[ $output == *"Trend Micro ERS (1×): look the IP up at https://servicecentral.trendmicro.com/en-us/ers/ip-lookup/"*"Dial-up User List"* ]]
+  [[ $output == *"Spamhaus (1×): look the IP up at https://check.spamhaus.org"* ]]
+  [[ $output == *"Outlook.com/Hotmail (1×): request removal at https://sender.office.com"* ]]
+  [[ $output == *"Microsoft 365 (1×): request removal at https://sender.office.com"* ]]
+  [[ $output == *"GMX/WEB.DE/IONOS (1×)"* ]]
+  [[ $output == *"T-Online (1×): write to the address named in the rejection"* ]]
+  [[ $output == *"Cloudmark (Proofpoint) (1×): request a reset at https://csi.cloudmark.com/en/reset/"* ]]
+  [[ $output == *"Barracuda (1×)"*"removal-request"* ]]
+  [[ $output == *"Gmail (1×): no removal form"* ]]
+  [[ $output == *"Apple iCloud (1×)"* ]]
+  [[ $output == *"SpamCop (1×): SpamCop takes no removal requests"* ]]
+  # a rejection without a known name counts, but gets no hint line
+  [ "$(grep -c '^    .*(1×): ' <<<"$output")" -eq 11 ]
+  run alerts
+  [[ $output == *"Mail: 12 rejections by remote servers"*"(rejected by: "*"Trend Micro ERS"*"what to do: see the report)"* ]]
+}
+
+@test "rejections without a known sender: the alert text stays as before" {
+  printf '%s\n' 'Nov 17 10:01:00 host postfix/smtp[1]: AA00000001: to=<x@d37.example>, relay=mx.d37.example[198.18.1.1]:25, delay=1, delays=0/0/0.5/0.1, dsn=5.7.1, status=bounced (host mx.d37.example[198.18.1.1] said: 550 5.7.1 blocked by local policy (in reply to RCPT TO command))' >"$BATS_TEST_TMPDIR/r.log"
+  WARN_BLOCKLIST=1
+  MAIL_LOG="$BATS_TEST_TMPDIR/r.log"; check_mail || true
+  run report
+  [[ $output != *"What to do"* ]]
+  run alerts
+  [[ $output == *"– check the server IP and the examples" ]]
+}

@@ -548,6 +548,45 @@ dig_status() {   # dig_status NAME TYPE → NOERROR | NXDOMAIN | SERVFAIL | … 
 # Hourly checks (only log lines written since the previous run)
 # =============================================================================
 
+# rej_hint KEY [name] – who rejected outgoing mail and how to get the server's IP removed, for the
+# keys found in the replies (check_mail). Lists and services first; for the big providers whose
+# replies carry no removal link, where their sender pages are. Removal is always free.
+rej_hint() {
+  local n h
+  case $1 in
+    trendmicro) n="Trend Micro ERS"
+      h="look the IP up at https://servicecentral.trendmicro.com/en-us/ers/ip-lookup/ – a listing (often the Dial-up User List, DUL, for addresses that look dynamic) is removed there with \"Remove\" (state: static IP, own mail server, PTR); up to 48 h until every receiver sees it" ;;
+    spamhaus) n="Spamhaus"
+      h="look the IP up at https://check.spamhaus.org – it names the list (SBL, XBL, PBL, CSS) and the way to remove it; find the cause first (an infected site, a hijacked mailbox)" ;;
+    cloudmark) n="Cloudmark (Proofpoint)"
+      h="request a reset at https://csi.cloudmark.com/en/reset/ (IP, domain, the exact rejection)" ;;
+    proofpoint) n="Proofpoint"
+      h="check and request removal at https://ipcheck.proofpoint.com (IP, recipient, the exact rejection); follow-up: delist-request@proofpoint.com" ;;
+    barracuda) n="Barracuda"
+      h="check at https://www.barracudacentral.org/lookups, request removal at https://www.barracudacentral.org/rbl/removal-request (usually done within 12 h)" ;;
+    spamcop) n="SpamCop"
+      h="SpamCop takes no removal requests – the listing expires about 24 h after the spam reports stop; find out what sent spam" ;;
+    ms511) n="Microsoft 365 (5.7.511)"
+      h="the delist portal can't help with 5.7.511: forward the whole rejection to delist@microsoft.com (answer within about 48 h)" ;;
+    ms365) n="Microsoft 365"
+      h="request removal at https://sender.office.com (the IP and one of your addresses, then confirm the mail Microsoft sends)" ;;
+    outlook) n="Outlook.com/Hotmail"
+      h="request removal at https://sender.office.com; if the block stays, use the form at https://olcsupport.office.com" ;;
+    gmx) n="GMX/WEB.DE/IONOS"
+      h="the rejection carries a postmaster.gmx.net or postmaster.web.de link with the reason; ask for removal through the postmaster contact form there (needs a static IP, a fitting PTR, no open relay)" ;;
+    tonline) n="T-Online"
+      h="write to the address named in the rejection (tosa@, tobr@ or toda@rx.t-online.de) with the rejection; T-Online also wants a website with an imprint under the PTR name (https://postmaster.t-online.de)" ;;
+    gmail) n="Gmail"
+      h="no removal form – Gmail's reputation recovers once the cause stops; check SPF, DKIM and DMARC of the sending domain; Google Postmaster Tools (https://postmaster.google.com) shows the reputation" ;;
+    yahoo) n="Yahoo/AOL"
+      h="usually temporary (volume or complaints); sender information and support form at https://senders.yahooinc.com" ;;
+    apple) n="Apple iCloud"
+      h="local policy of Apple, no removal list – check SPF, DKIM and DMARC; postmaster information at https://support.apple.com/en-us/HT204137" ;;
+    *) n=$1; h="" ;;
+  esac
+  if [[ ${2:-} == name ]]; then echo "$n"; else echo "$h"; fi
+}
+
 check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed logins, DNS blocklists
   local MAILLOG f last MAILSTATS SENT DEF BOU BL SF DF QUEUE REV BLRES bl r t SAIP n nip who line k c ip ex uid user home
   section "MAIL"
@@ -671,6 +710,24 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
           e=substr($0, 1, 15); sub(/.* to=<[^@>]*@?/, "", d); sub(/>.*/, "", d); r=$0; sub(/.* status=(deferred|bounced) \(/, "", r)
           bex[++blx]=e " " d ": " substr(r, 1, 220) }
         bl++
+        # who rejected: the list or service named in the reply first (its link decides), then the
+        # receiving provider – each gets a hint how to get the IP removed (rej_hint in bash)
+        if      (l ~ /trendmicro|mail-abuse\.com/)                         rk = "trendmicro"
+        else if (l ~ /spamhaus/)                                            rk = "spamhaus"
+        else if (l ~ /cloudmark/)                                           rk = "cloudmark"
+        else if (l ~ /proofpoint|pphosted/)                                 rk = "proofpoint"
+        else if (l ~ /barracuda/)                                           rk = "barracuda"
+        else if (l ~ /spamcop/)                                             rk = "spamcop"
+        else if (l ~ /5\.7\.511/)                                            rk = "ms511"
+        else if (l ~ /sender\.office\.com|banned sending ip|5\.7\.6[0-4][0-9]/) rk = "ms365"
+        else if (l ~ /s3150|s3140|olcsupport|outlook\.com|hotmail/)          rk = "outlook"
+        else if (l ~ /nemesis|postmaster\.(gmx|web\.de|1und1|ionos)/)        rk = "gmx"
+        else if (l ~ /rx\.t-online\.de|t-online/)                            rk = "tonline"
+        else if (l ~ /gsmtp|google\.com|4\.7\.28|5\.7\.28/)                  rk = "gmail"
+        else if (l ~ /\[ts+[0-9]+\]|yahoo/)                                  rk = "yahoo"
+        else if (l ~ /\[cs0[0-9]\]|\[hm0[0-9]\]|\[hme[0-9]\]|icloud|ht204137/)  rk = "apple"
+        else rk = ""
+        if (rk != "") rkn[rk]++
       }
     }
     # SpamAssassin skipped a message because it is larger than the scan limit (Plesk: SA_MAX_MAIL_SIZE)
@@ -762,6 +819,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       for (u in nu)   printf "NOUSR\t%d\t%s\n", nu[u], u
       for (u in mm)   printf "MISM\t%d\t%s\t%s\n", mm[u], u, mml[u]
       for (i=1; i<=blx; i++) printf "BLEX\t%s\n", bex[i]
+      for (k in rkn) printf "REJBY\t%d\t%s\n", rkn[k], k
       if (ownn) printf "OWNF\t%d\t%s\n", ownn, ownx
       else if (bnc) printf "OWNF\t%d\t%s\n", bnc, "a mail to the sender address " self " arrived – probably a later bounce from the receiving server"
     }' "$TMP")
@@ -773,12 +831,22 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   metric mail_delivered "$SENT"; metric mail_deferred "$DEF"; metric mail_bounced "$BOU"
   metric mail_queue "$QUEUE"; metric mail_blocklist_rejections "$BL"
   (( DEF > WARN_DEFERRED )) && alert "Mail: $DEF deferred deliveries"
-  (( BL >= WARN_BLOCKLIST )) && alert "Mail: $BL rejections by remote servers mentioning a blocklist, reputation, spam or rate limit – check the server IP and the examples"
+  local rejby="" rk rn
+  while IFS=$'\t' read -r _ rn rk; do
+    [[ -n $rk ]] && rejby+="${rejby:+, }$(rej_hint "$rk" name)"
+  done < <(grep '^REJBY' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr)
+  (( BL >= WARN_BLOCKLIST )) && alert "Mail: $BL rejections by remote servers mentioning a blocklist, reputation, spam or rate limit – check the server IP and the examples${rejby:+ (rejected by: $rejby – what to do: see the report)}"
   (( QUEUE > WARN_QUEUE )) && alert "Mail: $QUEUE messages in the queue"
   while IFS=$'\t' read -r _ n ex; do
     [[ -n $n ]] && alert "Mail: the report mail (REPORT_MAIL_TO) could not be delivered ($n×) – check the address: $ex"
   done < <(grep '^OWNF' <<<"$MAILSTATS")
   grep '^BLEX' <<<"$MAILSTATS" | cut -f2- | sed 's/^/  example: /' >>"$BODY"
+  if grep -q '^REJBY' <<<"$MAILSTATS"; then
+    out "  What to do, by who rejected (the IP is ${PUBIP:-unknown}):"
+    while IFS=$'\t' read -r _ rn rk; do
+      out "    $(rej_hint "$rk" name) (${rn}×): $(rej_hint "$rk")"
+    done < <(grep '^REJBY' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr)
+  fi
   # outgoing deliveries per receiving mail server: shows trouble with a big provider whatever its
   # reply says. Grouped by the MX host, not the recipient's domain: a forged sender's domain shows
   # up under the name of its (often unreachable) mail server.
