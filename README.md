@@ -58,7 +58,13 @@ Anything beyond that is worth a question – [open an issue](../../issues).
 
 **Young project, frequent updates:** new checks and fixes come out every few days at the moment. They come from the daily review of the reports of a real server: almost every week shows a blind spot, a false alarm or a new kind of attack (see [What it found so far](#what-it-found-so-far)). That is why updating is one command since 1.12.0: `plesk-server-report.sh --self-update` shows what changed, asks, and keeps the previous version for `--rollback`. The daily report tells you when a newer release is available; *Watch → Custom → Releases* on GitHub notifies you as well. See [Updates](#updates).
 
-**Contents:** [What it found so far](#what-it-found-so-far) · [What the report covers](#what-the-report-covers) · [Requirements](#requirements) · [Installation](#installation) · [Uninstall](#uninstall) · [Storage for the reports](#storage-for-the-reports) · [Reports by mail](#reports-by-mail) · [Reading the reports](#reading-the-reports) · [What the script remembers](#what-the-script-remembers) · [Configuration](#configuration) · [First run](#first-run) · [Notes and limitations](#notes-and-limitations) · [Security](#security) · [Privacy](#privacy-gdpr) · [Tests](#tests) · [Other mail providers?](#rejections-by-other-mail-providers-help-wanted) · [Using another CMS?](#using-another-cms-help-wanted) · [Updates](#updates) · [License](#license)
+**Contents**
+- **What it does:** [What it found so far](#what-it-found-so-far) · [What the report covers](#what-the-report-covers)
+- **Setup:** [Requirements](#requirements) · [Installation](#installation) · [Storage for the reports](#storage-for-the-reports) · [Reports by mail](#reports-by-mail) · [Configuration](#configuration) · [First run](#first-run)
+- **Running it:** [Reading the reports](#reading-the-reports) · [What the script remembers](#what-the-script-remembers) · [Updates](#updates) · [Uninstall](#uninstall)
+- **Background:** [Notes and limitations](#notes-and-limitations) · [Security](#security) · [Privacy](#privacy-gdpr) · [Tests](#tests)
+- **Help wanted:** [Other mail providers?](#rejections-by-other-mail-providers-help-wanted) · [Using another CMS?](#using-another-cms-help-wanted)
+- [License](#license)
 
 ---
 
@@ -630,33 +636,6 @@ How the script finds its files:
 - **First run:** if there is no configuration file at all and the script is *not* in a system folder (`/usr/local/sbin`, `/usr/local/bin`, `/usr/sbin`, …), the first run writes `plesk-server-report.conf` next to it (`chmod 600`, only in a folder that only root can change). It lists every setting with its default, commented out – the defaults apply until you change a line, and settings you leave commented out follow the defaults of later versions too. In a system folder nothing is written next to the script; `--init-config` writes the file on request (then to `/etc/plesk-server-report.conf`). `--init-config` never overwrites a configuration, and `--self-update` only replaces the script – your settings stay as they are. `--print-config` shows the template of the installed version, to compare it with your file.
 - **State:** with the configuration next to the script, the state goes to `state/` next to it – unless an existing installation keeps its state in `/var/lib/plesk-server-report` (then it stays there and the report says how to move it). `STATE_DIR` overrides both. The script marks its state folder and refuses a `STATE_DIR` that holds other files (`STATE_DIR=/root`, a typo), so its files never end up among others.
 
-### Uninstall
-
-First find out where the state is kept: `plesk-server-report.sh --show-state | head -1`.
-
-**Usual layout:**
-```bash
-rm -f /etc/cron.d/plesk-server-report
-rm -f /usr/local/sbin/plesk-server-report.sh /etc/plesk-server-report.conf
-rm -rf /var/lib/plesk-server-report
-```
-
-**Everything in one folder:**
-```bash
-rm -f /etc/cron.d/plesk-server-report
-rm -rf /opt/plesk-server-report
-```
-If the report said the state stays in `/var/lib/plesk-server-report` (an older installation), remove that folder too.
-
-**Also check:**
-- a cron line in root's crontab (`crontab -l`) instead of `/etc/cron.d`
-- a `STATE_DIR` or `--config FILE` of your own: remove those as well
-- the upload: `rclone config delete reports` removes the remote; the reports already uploaded stay until you delete them
-- SFTP upload: `/root/.ssh/report_upload*`, and the key's line in `authorized_keys` on the target server
-- packages installed only for the script (`rclone`, `mmdb-bin` / `libmaxminddb`), if nothing else uses them
-
-The script leaves nothing else behind: no service, no package, no change to system files.
-
 ---
 
 ## Storage for the reports
@@ -807,32 +786,6 @@ With a mailbox that doesn't exist on this server it says `NOT delivered – Ples
 
 ---
 
-## Reading the reports
-
-Every run uploads three kinds of files:
-
-| File | Content |
-|---|---|
-| `report-YYYYMMDD-HHMM.txt` | the full report of one run (time in the server's time zone, usually UTC) |
-| `latest.txt` | a copy of the newest report, including the daily checks and fail2ban |
-| `report-YYYYMMDD-HHMM.json`, `latest.json`, `summary.json` | only with `JSON_REPORT=1`: the same run and the same summary as JSON, see [JSON report](#json-report-optional-json_report1) |
-| `summary.txt` | all reports of the last 24 hours condensed into one file: every run with its status (gaps are easy to spot), every alert with how often and when it was seen, mail and web totals, deliveries per provider, peaks of load and RAM, the backup status of the newest report, and every line of the sections that are normally empty (successful logins, changes of SSH keys, accounts, cron jobs and ports, suspicious processes, IMAP/POP3 logins from other countries, new PHP files in uploads, login ≠ from, webmail, WordPress attacks, traffic peaks, files served with 200) |
-
-- **Yourself:** open `latest.txt`. The first lines tell you everything: `STATUS: OK` or `STATUS: WARNING (n)` followed by the list of alerts (` ! `) and, if any, notes about missing data (` i `, e.g. a log file that was not found – the figures of that section are then 0, not "all clear"). `summary.txt` shows what happened during the day.
-- **With an AI assistant (this is how the author uses it, with Claude):** connect an assistant that supports your storage (e.g. a Google Drive or OneDrive connector) **to the dedicated account** and let it review the day every morning as a scheduled task. Reading `summary.txt` and `latest.txt` instead of every single report keeps the review fast and cheap (two files instead of 24), without losing anything: the summary is built from the reports and keeps every alert. Tell the assistant what is normal on your server (known broken sites, mail-only domains, …) so it only reports real changes. Example prompt:
-
-  > In the folder `server-reports/<hostname>`, search for the files `summary.txt` and `latest.txt` by name – don't list the whole folder. Read both. `summary.txt` condenses all reports of the last 24 hours (runs with status, every alert with count and first/last time, totals, every successful login); `latest.txt` is the newest full report with the daily checks and fail2ban. If `summary.txt` is missing or its newest run is more than 2 hours old, report that as an issue. Check the run list for gaps (more than 2 hours between runs). (Both limits assume the hourly cron job – if it runs every N hours, use N + 1 hours.) Alerts starting with "Script:" and the section SCRIPT NOTES mean the report itself is incomplete (a run aborted or still hanging, a command timed out, a log file not found) – report them too. Only if an alert needs more detail, read the single report of that time (`report-YYYYMMDD-HHMM.txt`). Summarise: outgoing spam signals, blocklist listings and rejections by the big mail providers, deliveries to watched recipient domains, mailbox logins from new countries (a login that read no mail is less likely an attack than one that downloaded the mailbox), customers banned by fail2ban (alert starting with "fail2ban:" – include the unban command) and customer devices with an outdated password before the ban ("failed logins of … – a device with an outdated password?"), new PHP files in uploads, logins from unknown IPs, new SSH keys, accounts, cron jobs, processes or ports (alerts starting with "Access:", "Cron:", "Process:", "Ports:"), failed services, 5xx/PHP errors, pending security updates, a newer script version (mention once), expiring certificates and failed automatic renewals, refused blocklist lookups of the spam filter, delivery confirmations sent to other servers, a new IP address of the server, full mailboxes, mail authentication, exposed files, backup status. Lines marked as a recommendation (e.g. missing HSTS) are not an issue – mention them once at the end. Start with "All OK" or "Action required: …", max. 10 bullet points with a concrete next step. Read only, change nothing.
-
-- A daily review **does not replace real-time alerting**. For "server down" use an uptime monitor (e.g. Plesk 360 Monitoring, Uptime Kuma), and set **outgoing mail limits** in Plesk (*Tools & Settings → Outgoing Mail Control*) so a hijacked mailbox is throttled immediately.
-
----
-
-## What the script remembers
-
-Between runs the script keeps its memory in `/var/lib/plesk-server-report` (or `state/` next to the script, see [Everything in one folder](#everything-in-one-folder)): where it stopped reading each log, known login IPs, countries per mailbox, the baseline of SSH keys, accounts, cron jobs and ports, the local reports, and the report of the first run (`first-report.txt`, kept for reference: it lists everything as it was found). You never have to touch it – but if you wonder why an alert did not come, or want the script to forget a known IP, [STATE-FILES.md](STATE-FILES.md) describes every file (the same text is kept as `README.txt` in that folder), and `plesk-server-report.sh --show-state` prints what is stored in readable form.
-
----
-
 ## Configuration
 
 **You don't need to change anything here** – the defaults fit a typical Plesk server with an hourly cron job. Override a default only when a report tells you to (e.g. a threshold that is too low for your server) in `/etc/plesk-server-report.conf`, or `plesk-server-report.conf` next to the script (bash syntax; it survives script updates; `--init-config` writes one with every setting):
@@ -945,6 +898,112 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 - **To repeat the daily checks today:** `rm /var/lib/plesk-server-report/daily_date`. They also run again by themselves in the next run after the script or the configuration file changed, after packages were installed, or after a reboot – so a security update you installed with `apt upgrade`, and "reboot required" once you have rebooted, disappear from the report with the next run, not only the next day.
 - **To run single checks right now**, e.g. after fixing a DNS record: `plesk-server-report.sh --only mailauth` (several: `--only mailauth,domaindns`; groups: `hourly`, `daily`, `all`; names: `--list`). The result is printed and nothing else happens: no upload, and log offsets, scan stamps and known login IPs stay as they are, so the next hourly run still sees everything. The on/off switches from the configuration (`MAILAUTH_CHECK` etc.) don't apply to checks named explicitly.
 - **For a complete reset:** `rm -rf /var/lib/plesk-server-report`
+
+---
+
+## Reading the reports
+
+Every run uploads three kinds of files:
+
+| File | Content |
+|---|---|
+| `report-YYYYMMDD-HHMM.txt` | the full report of one run (time in the server's time zone, usually UTC) |
+| `latest.txt` | a copy of the newest report, including the daily checks and fail2ban |
+| `report-YYYYMMDD-HHMM.json`, `latest.json`, `summary.json` | only with `JSON_REPORT=1`: the same run and the same summary as JSON, see [JSON report](#json-report-optional-json_report1) |
+| `summary.txt` | all reports of the last 24 hours condensed into one file: every run with its status (gaps are easy to spot), every alert with how often and when it was seen, mail and web totals, deliveries per provider, peaks of load and RAM, the backup status of the newest report, and every line of the sections that are normally empty (successful logins, changes of SSH keys, accounts, cron jobs and ports, suspicious processes, IMAP/POP3 logins from other countries, new PHP files in uploads, login ≠ from, webmail, WordPress attacks, traffic peaks, files served with 200) |
+
+- **Yourself:** open `latest.txt`. The first lines tell you everything: `STATUS: OK` or `STATUS: WARNING (n)` followed by the list of alerts (` ! `) and, if any, notes about missing data (` i `, e.g. a log file that was not found – the figures of that section are then 0, not "all clear"). `summary.txt` shows what happened during the day.
+- **With an AI assistant (this is how the author uses it, with Claude):** connect an assistant that supports your storage (e.g. a Google Drive or OneDrive connector) **to the dedicated account** and let it review the day every morning as a scheduled task. Reading `summary.txt` and `latest.txt` instead of every single report keeps the review fast and cheap (two files instead of 24), without losing anything: the summary is built from the reports and keeps every alert. Tell the assistant what is normal on your server (known broken sites, mail-only domains, …) so it only reports real changes. Example prompt:
+
+  > In the folder `server-reports/<hostname>`, search for the files `summary.txt` and `latest.txt` by name – don't list the whole folder. Read both. `summary.txt` condenses all reports of the last 24 hours (runs with status, every alert with count and first/last time, totals, every successful login); `latest.txt` is the newest full report with the daily checks and fail2ban. If `summary.txt` is missing or its newest run is more than 2 hours old, report that as an issue. Check the run list for gaps (more than 2 hours between runs). (Both limits assume the hourly cron job – if it runs every N hours, use N + 1 hours.) Alerts starting with "Script:" and the section SCRIPT NOTES mean the report itself is incomplete (a run aborted or still hanging, a command timed out, a log file not found) – report them too. Only if an alert needs more detail, read the single report of that time (`report-YYYYMMDD-HHMM.txt`). Summarise: outgoing spam signals, blocklist listings and rejections by the big mail providers, deliveries to watched recipient domains, mailbox logins from new countries (a login that read no mail is less likely an attack than one that downloaded the mailbox), customers banned by fail2ban (alert starting with "fail2ban:" – include the unban command) and customer devices with an outdated password before the ban ("failed logins of … – a device with an outdated password?"), new PHP files in uploads, logins from unknown IPs, new SSH keys, accounts, cron jobs, processes or ports (alerts starting with "Access:", "Cron:", "Process:", "Ports:"), failed services, 5xx/PHP errors, pending security updates, a newer script version (mention once), expiring certificates and failed automatic renewals, refused blocklist lookups of the spam filter, delivery confirmations sent to other servers, a new IP address of the server, full mailboxes, mail authentication, exposed files, backup status. Lines marked as a recommendation (e.g. missing HSTS) are not an issue – mention them once at the end. Start with "All OK" or "Action required: …", max. 10 bullet points with a concrete next step. Read only, change nothing.
+
+- A daily review **does not replace real-time alerting**. For "server down" use an uptime monitor (e.g. Plesk 360 Monitoring, Uptime Kuma), and set **outgoing mail limits** in Plesk (*Tools & Settings → Outgoing Mail Control*) so a hijacked mailbox is throttled immediately.
+
+---
+
+## What the script remembers
+
+Between runs the script keeps its memory in `/var/lib/plesk-server-report` (or `state/` next to the script, see [Everything in one folder](#everything-in-one-folder)): where it stopped reading each log, known login IPs, countries per mailbox, the baseline of SSH keys, accounts, cron jobs and ports, the local reports, and the report of the first run (`first-report.txt`, kept for reference: it lists everything as it was found). You never have to touch it – but if you wonder why an alert did not come, or want the script to forget a known IP, [STATE-FILES.md](STATE-FILES.md) describes every file (the same text is kept as `README.txt` in that folder), and `plesk-server-report.sh --show-state` prints what is stored in readable form.
+
+---
+
+## Updates
+
+The script runs on a production Plesk server with about 40 domains and is **actively maintained**. Every morning the reports are reviewed (see [Reading the reports](#reading-the-reports)). When a review shows a blind spot, a false alarm or a recommendation the script could have handled itself, the script is updated. New findings about attacks, log formats or Plesk behaviour go in as well. Real-world examples so far:
+
+- a distributed WordPress brute-force attack led to the *WordPress login attacks* section (distinct IPs, wp-login vs. xmlrpc, detection of successful logins after failures),
+- a daily check that silently missed data under cron led to the fixed `PATH`,
+- a review of the whole script with fresh eyes found two blind spots: kernel security updates were not counted (they need a new package, which the simulated `apt-get upgrade` leaves out), and a PHP file with its date set back was invisible to the scans for new and suspicious files – both fixed in 1.9.0,
+- Postfix logging `sasl_username` on failed logins initially caused false "compromised mailbox" alarms, which has been fixed.
+
+**From version 1.12.0 on**, the script updates itself – started by hand, as root, in a terminal:
+
+```bash
+/usr/local/sbin/plesk-server-report.sh --self-update      # newest 1.x release: shows the changes, asks
+/usr/local/sbin/plesk-server-report.sh --only services    # quick test run with your configuration
+```
+
+It looks for the newest **1.x** release, downloads its script from GitHub, checks it without running it (valid bash, the expected version), shows the CHANGELOG sections since your version and asks before it replaces anything. With the same version number it compares the files: a copy taken from `main` before the release can differ from the release, and is then offered to be replaced by it. It also finds the commit your copy came from – by git's checksum of the file, computed without git, among the last 20 commits that changed the script (one GitHub API request each; 60 an hour are allowed without login) – and lists the commits the release adds; if it can't find it, it shows the release's CHANGELOG section. It waits for a running report to finish. The previous version is kept as `/var/lib/plesk-server-report/plesk-server-report.sh.old`; `--self-update --rollback` brings it back (and swaps again if called twice). `--yes` skips the question – it still has to be started from a terminal, never from cron. A git checkout is refused: update it with `git pull`. Your settings in `/etc/plesk-server-report.conf` and the state are kept.
+
+**On the edge: the development version.** To get changes before they are released (from version 1.14.0 on):
+
+```bash
+/usr/local/sbin/plesk-server-report.sh --self-update --edge
+```
+
+It installs the script of the newest commit on `main` – **not a release**: it may still change before the release, and it is what the author runs on his own server first. It is only installed when GitHub's tests of that commit (syntax, shellcheck, the bats tests with mawk and gawk) passed, and only within your major version (1.x stays 1.x). Everything else works as above: the file is downloaded from that commit (not from the moving branch), checked, the commits since your copy are listed, you are asked, and your previous copy is kept for `--self-update --rollback`. To go back to releases, simply use `--self-update` without `--edge`: the next release replaces the development version.
+
+**Up to version 1.11.x**, or if you prefer it, download the script again – your settings and the state are kept as well:
+
+```bash
+curl -fsSL -o /usr/local/sbin/plesk-server-report.sh \
+  https://github.com/cmelius/plesk-monitoring-server-Report/releases/latest/download/plesk-server-report.sh
+/usr/local/sbin/plesk-server-report.sh --version
+/usr/local/sbin/plesk-server-report.sh --only services    # quick test run with your configuration
+```
+
+The test run matters: if something keeps the script from running – since 1.9.0 for example a configuration file that another user may write – you see it right away, not only when the reports stop coming. `--version` doesn't load the configuration and won't tell you.
+
+(or the `main` URL from [Installation](#installation) to get changes before they are released – from 1.14.0 on `--self-update --edge` does that with the checks above)
+
+### Updating from 1.x
+
+There is no version 2 yet – 1.x is the maintained version. `--self-update` (also with `--edge`) always stays within the installed major version; should a version 2 ever come, `--self-update` would only tell you about it, and switching would be a deliberate `--self-update --major`, described here.
+
+Watch the repository (*Watch → Custom → Releases* or *All activity*) to get notified about changes. Issues and pull requests with your own findings are welcome.
+
+### Changelog
+
+What changed in each version: see [CHANGELOG.md](CHANGELOG.md).
+
+---
+
+## Uninstall
+
+First find out where the state is kept: `plesk-server-report.sh --show-state | head -1`.
+
+**Usual layout:**
+```bash
+rm -f /etc/cron.d/plesk-server-report
+rm -f /usr/local/sbin/plesk-server-report.sh /etc/plesk-server-report.conf
+rm -rf /var/lib/plesk-server-report
+```
+
+**Everything in one folder:**
+```bash
+rm -f /etc/cron.d/plesk-server-report
+rm -rf /opt/plesk-server-report
+```
+If the report said the state stays in `/var/lib/plesk-server-report` (an older installation), remove that folder too.
+
+**Also check:**
+- a cron line in root's crontab (`crontab -l`) instead of `/etc/cron.d`
+- a `STATE_DIR` or `--config FILE` of your own: remove those as well
+- the upload: `rclone config delete reports` removes the remote; the reports already uploaded stay until you delete them
+- SFTP upload: `/root/.ssh/report_upload*`, and the key's line in `authorized_keys` on the target server
+- packages installed only for the script (`rclone`, `mmdb-bin` / `libmaxminddb`), if nothing else uses them
+
+The script leaves nothing else behind: no service, no package, no change to system files.
 
 ---
 
@@ -1138,57 +1197,6 @@ Contributions are welcome – the rules (read only, mawk and gawk, tests, no rea
 - the upload folders and any legitimate PHP files inside them
 
 The template includes a one-line command that anonymizes the log lines (IPs → `203.0.113.x`, domain → `example.com`). **Please never post real IPs, domains or user names. Issues are public.**
-
----
-
-## Updates
-
-The script runs on a production Plesk server with about 40 domains and is **actively maintained**. Every morning the reports are reviewed (see [Reading the reports](#reading-the-reports)). When a review shows a blind spot, a false alarm or a recommendation the script could have handled itself, the script is updated. New findings about attacks, log formats or Plesk behaviour go in as well. Real-world examples so far:
-
-- a distributed WordPress brute-force attack led to the *WordPress login attacks* section (distinct IPs, wp-login vs. xmlrpc, detection of successful logins after failures),
-- a daily check that silently missed data under cron led to the fixed `PATH`,
-- a review of the whole script with fresh eyes found two blind spots: kernel security updates were not counted (they need a new package, which the simulated `apt-get upgrade` leaves out), and a PHP file with its date set back was invisible to the scans for new and suspicious files – both fixed in 1.9.0,
-- Postfix logging `sasl_username` on failed logins initially caused false "compromised mailbox" alarms, which has been fixed.
-
-**From version 1.12.0 on**, the script updates itself – started by hand, as root, in a terminal:
-
-```bash
-/usr/local/sbin/plesk-server-report.sh --self-update      # newest 1.x release: shows the changes, asks
-/usr/local/sbin/plesk-server-report.sh --only services    # quick test run with your configuration
-```
-
-It looks for the newest **1.x** release, downloads its script from GitHub, checks it without running it (valid bash, the expected version), shows the CHANGELOG sections since your version and asks before it replaces anything. With the same version number it compares the files: a copy taken from `main` before the release can differ from the release, and is then offered to be replaced by it. It also finds the commit your copy came from – by git's checksum of the file, computed without git, among the last 20 commits that changed the script (one GitHub API request each; 60 an hour are allowed without login) – and lists the commits the release adds; if it can't find it, it shows the release's CHANGELOG section. It waits for a running report to finish. The previous version is kept as `/var/lib/plesk-server-report/plesk-server-report.sh.old`; `--self-update --rollback` brings it back (and swaps again if called twice). `--yes` skips the question – it still has to be started from a terminal, never from cron. A git checkout is refused: update it with `git pull`. Your settings in `/etc/plesk-server-report.conf` and the state are kept.
-
-**On the edge: the development version.** To get changes before they are released (from version 1.14.0 on):
-
-```bash
-/usr/local/sbin/plesk-server-report.sh --self-update --edge
-```
-
-It installs the script of the newest commit on `main` – **not a release**: it may still change before the release, and it is what the author runs on his own server first. It is only installed when GitHub's tests of that commit (syntax, shellcheck, the bats tests with mawk and gawk) passed, and only within your major version (1.x stays 1.x). Everything else works as above: the file is downloaded from that commit (not from the moving branch), checked, the commits since your copy are listed, you are asked, and your previous copy is kept for `--self-update --rollback`. To go back to releases, simply use `--self-update` without `--edge`: the next release replaces the development version.
-
-**Up to version 1.11.x**, or if you prefer it, download the script again – your settings and the state are kept as well:
-
-```bash
-curl -fsSL -o /usr/local/sbin/plesk-server-report.sh \
-  https://github.com/cmelius/plesk-monitoring-server-Report/releases/latest/download/plesk-server-report.sh
-/usr/local/sbin/plesk-server-report.sh --version
-/usr/local/sbin/plesk-server-report.sh --only services    # quick test run with your configuration
-```
-
-The test run matters: if something keeps the script from running – since 1.9.0 for example a configuration file that another user may write – you see it right away, not only when the reports stop coming. `--version` doesn't load the configuration and won't tell you.
-
-(or the `main` URL from [Installation](#installation) to get changes before they are released – from 1.14.0 on `--self-update --edge` does that with the checks above)
-
-### Updating from 1.x
-
-There is no version 2 yet – 1.x is the maintained version. `--self-update` (also with `--edge`) always stays within the installed major version; should a version 2 ever come, `--self-update` would only tell you about it, and switching would be a deliberate `--self-update --major`, described here.
-
-Watch the repository (*Watch → Custom → Releases* or *All activity*) to get notified about changes. Issues and pull requests with your own findings are welcome.
-
-### Changelog
-
-What changed in each version: see [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
