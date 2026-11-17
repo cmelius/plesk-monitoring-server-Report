@@ -3951,7 +3951,7 @@ find_conf() {
   else CONF=$CONF_ETC; fi
   if (( CONF_LOCAL )); then
     if [[ -d $d/state || ! -d $STATE_DIR_DEFAULT ]]; then STATE_DIR=$d/state
-    else STATE_NOTE="config: the configuration is next to the script, the state stays in $STATE_DIR_DEFAULT (an existing installation) – set STATE_DIR in $CONF to move it"; fi
+    else STATE_NOTE="config: the configuration is next to the script, the state stays in $STATE_DIR_DEFAULT (an existing installation) – to keep everything in one folder, move it between two runs: mv $STATE_DIR_DEFAULT $d/state"; fi
   fi
   return 0
 }
@@ -4137,7 +4137,7 @@ init() {
     rm -f "$STATE_DIR/mail_failed"
   fi
   command -v plesk >/dev/null || note "plesk command not found – domain list from VHOST_LOGS only, domain aliases unknown"
-  [[ -n $STATE_NOTE ]] && note "$STATE_NOTE"
+  [[ -n $STATE_NOTE && $STATE_DIR == "$STATE_DIR_DEFAULT" ]] && note "$STATE_NOTE"   # not with STATE_DIR set in the configuration
   (( ${PSR_CONF_CREATED:-0} )) && note "config: created $CONF – every setting with its default, commented out; the state is kept in $STATE_DIR"
   if (( FIRST_RUN )) && [[ ! -e $CONF ]] && ! (( ONLY_MODE || SUMMARY_ONLY )); then
     note "config: no configuration file – the defaults apply. plesk-server-report.sh --init-config writes one with every setting (commented out)"

@@ -9,6 +9,8 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 
 - **README: uninstall step by step** – commands for the usual layout and for everything in one folder, plus what else may be left (a cron line in root's crontab, an own `STATE_DIR`, the rclone remote, the SFTP key on the target server, packages).
 
+- **README: switching to the one-folder installation** – the commands to move script, configuration and state. If only the script and its configuration were moved, the report now says how to move the state as well (`mv … state`) instead of suggesting `STATE_DIR`, and no longer shows that note once `STATE_DIR` is set.
+
 ### Fixed
 - **A new state folder was refused after `--self-update`** ([#3](https://github.com/cmelius/plesk-monitoring-server-Report/issues/3)). The update put its lock file and the kept copy (`plesk-server-report.sh.old`) into the state folder without marking it as the script's own – if that was the first thing written there, the next run took the folder for a foreign one and refused to start. Now the update checks and marks the folder before it writes (and writes nothing into a folder with other files), and folders left this way by 1.15.0 are accepted. The kept copy is no longer executable (mode 600); `--rollback` gives the script it brings back the owner and mode of the installed one.
 

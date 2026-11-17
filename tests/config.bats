@@ -49,6 +49,7 @@ setup() {
   find_conf
   [ "$STATE_DIR" = "$STATE_DIR_DEFAULT" ]
   [[ $STATE_NOTE == *"the state stays in $STATE_DIR_DEFAULT"* ]]
+  [[ $STATE_NOTE == *"mv $STATE_DIR_DEFAULT $D/state"* ]]
 }
 
 @test "--config FILE wins, the state stays in /var/lib" {

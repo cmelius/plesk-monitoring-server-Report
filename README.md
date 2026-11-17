@@ -637,7 +637,19 @@ chmod 700 /opt/plesk-server-report/plesk-server-report.sh
 How the script finds its files:
 - **Configuration:** `plesk-server-report.conf` next to the script if it exists, else `/etc/plesk-server-report.conf`; `--config FILE` names another one. The same check applies to all of them: owned by root, writable only by root.
 - **First run:** if there is no configuration file at all and the script is *not* in a system folder (`/usr/local/sbin`, `/usr/local/bin`, `/usr/sbin`, …), the first run writes `plesk-server-report.conf` next to it (`chmod 600`, only in a folder that only root can change). It lists every setting with its default, commented out – the defaults apply until you change a line, and settings you leave commented out follow the defaults of later versions too. In a system folder nothing is written next to the script; `--init-config` writes the file on request (then to `/etc/plesk-server-report.conf`). `--init-config` never overwrites a configuration, and `--self-update` only replaces the script – your settings stay as they are. `--print-config` shows the template of the installed version, to compare it with your file.
-- **State:** with the configuration next to the script, the state goes to `state/` next to it – unless an existing installation keeps its state in `/var/lib/plesk-server-report` (then it stays there and the report says how to move it). `STATE_DIR` overrides both. The script marks its state folder and refuses a `STATE_DIR` that holds other files (`STATE_DIR=/root`, a typo), so its files never end up among others.
+- **State:** with the configuration next to the script, the state goes to `state/` next to it – unless an existing installation keeps its state in `/var/lib/plesk-server-report` (then it stays there and the report says how to move it, see below). `STATE_DIR` overrides both. The script marks its state folder and refuses a `STATE_DIR` that holds other files (`STATE_DIR=/root`, a typo), so its files never end up among others.
+
+**Switching from the usual layout:** move the script, its configuration (if you have one) and its state – without the state, the next run reads the logs again like a first run and reports what it knew as new.
+
+```bash
+rm /etc/cron.d/plesk-server-report                     # no run during the move
+mkdir -m 700 /opt/plesk-server-report
+mv /usr/local/sbin/plesk-server-report.sh /opt/plesk-server-report/
+mv /etc/plesk-server-report.conf /opt/plesk-server-report/      # if it exists
+mv /var/lib/plesk-server-report /opt/plesk-server-report/state
+/opt/plesk-server-report/plesk-server-report.sh --show-state | head -1   # State directory: /opt/plesk-server-report/state
+echo '5 * * * * root /opt/plesk-server-report/plesk-server-report.sh' > /etc/cron.d/plesk-server-report
+```
 
 ---
 
