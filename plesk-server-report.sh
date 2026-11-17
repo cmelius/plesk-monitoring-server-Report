@@ -549,19 +549,20 @@ dig_status() {   # dig_status NAME TYPE → NOERROR | NXDOMAIN | SERVFAIL | … 
 # =============================================================================
 
 # rej_hint KEY [name] – who rejected outgoing mail and how to get the server's IP removed, for the
-# keys found in the replies (check_mail). Lists and services first; for the big providers whose
+# keys found in the replies (check_mail). Where the lookup page takes the IP in its address, the
+# link carries the server's address (PUBIP), so one click shows the result. Lists and services first; for the big providers whose
 # replies carry no removal link, where their sender pages are. Removal is always free.
 rej_hint() {
-  local n h
+  local n h ip=${PUBIP:-}
   case $1 in
     trendmicro) n="Trend Micro ERS"
-      h="look the IP up at https://servicecentral.trendmicro.com/en-us/ers/ip-lookup/ – a listing (often the Dial-up User List, DUL, for addresses that look dynamic) is removed there with \"Remove\" (state: static IP, own mail server, PTR); up to 48 h until every receiver sees it" ;;
+      h="look the IP up at https://servicecentral.trendmicro.com/en-us/ers/ip-lookup/${ip:+?ip=$ip} – a listing (often the Dial-up User List, DUL, for addresses that look dynamic) is removed there with \"Remove\" (state: static IP, own mail server, PTR); up to 48 h until every receiver sees it" ;;
     spamhaus) n="Spamhaus"
-      h="look the IP up at https://check.spamhaus.org – it names the list (SBL, XBL, PBL, CSS) and the way to remove it; find the cause first (an infected site, a hijacked mailbox)" ;;
+      h="look the IP up at https://check.spamhaus.org/${ip:+results?query=$ip} – it names the list (SBL, XBL, PBL, CSS) and the way to remove it; find the cause first (an infected site, a hijacked mailbox)" ;;
     cloudmark) n="Cloudmark (Proofpoint)"
-      h="request a reset at https://csi.cloudmark.com/en/reset/ (IP, domain, the exact rejection)" ;;
+      h="request a reset at https://csi.cloudmark.com/en/reset${ip:+?ip=$ip} (IP, domain, the exact rejection)" ;;
     proofpoint) n="Proofpoint"
-      h="check and request removal at https://ipcheck.proofpoint.com (IP, recipient, the exact rejection); follow-up: delist-request@proofpoint.com" ;;
+      h="check and request removal at https://www.proofpoint.com/us/ipcheck${ip:+?ip=$ip} (IP, recipient, the exact rejection); follow-up: delist-request@proofpoint.com" ;;
     barracuda) n="Barracuda"
       h="check at https://www.barracudacentral.org/lookups, request removal at https://www.barracudacentral.org/rbl/removal-request (usually done within 12 h)" ;;
     spamcop) n="SpamCop"

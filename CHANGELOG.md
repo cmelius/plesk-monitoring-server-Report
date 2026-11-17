@@ -5,7 +5,7 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 ## [1.15.1] – not yet released (on `main`)
 
 ### Added
-- **Who rejected the mail, and what to do.** Below the examples of rejections the report now names the list or provider recognised in the replies – Trend Micro ERS, Spamhaus, Cloudmark, Proofpoint, Barracuda, SpamCop, Microsoft 365 (including 5.7.511), Outlook.com/Hotmail, GMX/WEB.DE/IONOS, T-Online, Gmail, Yahoo/AOL, Apple iCloud – with where to check the server's IP and how to get it removed; the alert names them too. Found with a rejection by Trend Micro (the IP was on its Dial-up User List) that no public blocklist showed – removed the same day after a short request.
+- **Who rejected the mail, and what to do.** Below the examples of rejections the report now names the list or provider recognised in the replies – Trend Micro ERS, Spamhaus, Cloudmark, Proofpoint, Barracuda, SpamCop, Microsoft 365 (including 5.7.511), Outlook.com/Hotmail, GMX/WEB.DE/IONOS, T-Online, Gmail, Yahoo/AOL, Apple iCloud – with where to check the server's IP and how to get it removed – for Trend Micro, Spamhaus, Proofpoint and Cloudmark the link already carries the IP, one click shows the result; the alert names them too. README and CONTRIBUTING: how to send rejections of providers the report doesn't know yet. Found with a rejection by Trend Micro (the IP was on its Dial-up User List) that no public blocklist showed – removed the same day after a short request.
 
 ### Fixed
 Found by running the script on Rocky Linux 9 (without Plesk):

@@ -88,13 +88,13 @@ mail_on() { MAIL_LOG="$FIX/mail/$1"; check_mail || true; }
   run report
   [[ $output == *"Rejections mentioning blocklist/reputation/spam/rate limit: 12"* ]]
   [[ $output == *"What to do, by who rejected (the IP is 203.0.113.10):"* ]]
-  [[ $output == *"Trend Micro ERS (1×): look the IP up at https://servicecentral.trendmicro.com/en-us/ers/ip-lookup/"*"Dial-up User List"* ]]
-  [[ $output == *"Spamhaus (1×): look the IP up at https://check.spamhaus.org"* ]]
+  [[ $output == *"Trend Micro ERS (1×): look the IP up at https://servicecentral.trendmicro.com/en-us/ers/ip-lookup/?ip=203.0.113.10 "*"Dial-up User List"* ]]
+  [[ $output == *"Spamhaus (1×): look the IP up at https://check.spamhaus.org/results?query=203.0.113.10 "* ]]
   [[ $output == *"Outlook.com/Hotmail (1×): request removal at https://sender.office.com"* ]]
   [[ $output == *"Microsoft 365 (1×): request removal at https://sender.office.com"* ]]
   [[ $output == *"GMX/WEB.DE/IONOS (1×)"* ]]
   [[ $output == *"T-Online (1×): write to the address named in the rejection"* ]]
-  [[ $output == *"Cloudmark (Proofpoint) (1×): request a reset at https://csi.cloudmark.com/en/reset/"* ]]
+  [[ $output == *"Cloudmark (Proofpoint) (1×): request a reset at https://csi.cloudmark.com/en/reset?ip=203.0.113.10 "* ]]
   [[ $output == *"Barracuda (1×)"*"removal-request"* ]]
   [[ $output == *"Gmail (1×): no removal form"* ]]
   [[ $output == *"Apple iCloud (1×)"* ]]
@@ -113,4 +113,12 @@ mail_on() { MAIL_LOG="$FIX/mail/$1"; check_mail || true; }
   [[ $output != *"What to do"* ]]
   run alerts
   [[ $output == *"– check the server IP and the examples" ]]
+}
+
+@test "rejection hints without a known server address: links without the IP" {
+  PUBIP=""
+  run rej_hint spamhaus
+  [[ $output == "look the IP up at https://check.spamhaus.org/ – it names"* ]]
+  run rej_hint proofpoint
+  [[ $output == *"https://www.proofpoint.com/us/ipcheck (IP,"* ]]
 }

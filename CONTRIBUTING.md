@@ -5,6 +5,7 @@ Thanks for helping! This script runs as root on production Plesk servers, so a f
 ## Ways to help
 
 - **Another CMS or application** (Joomla, TYPO3, Nextcloud, …): open an issue with the template [*Support for another CMS / application*](https://github.com/cmelius/plesk-monitoring-server-Report/issues/new?template=cms-support.yml). Anonymized log lines of real logins and attacks are what's needed most.
+- **A mail rejection the report doesn't name yet** (no line under *What to do, by who rejected*): open an issue with the rejection line from the mail log, anonymized – see [Rejections by other mail providers?](README.md#rejections-by-other-mail-providers-help-wanted) for a command.
 - **A false alarm or a blind spot**: open an issue with the alert text and, anonymized, the log lines behind it.
 - **A security problem**: not as an issue – see [SECURITY.md](SECURITY.md).
 - **Code**: a pull request against `main`. For anything bigger than a fix, please open an issue first, so we can agree on the approach.
