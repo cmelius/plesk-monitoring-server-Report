@@ -115,7 +115,10 @@ mail_on() { MAIL_LOG="$FIX/mail/$1"; check_mail || true; }
   [[ $output == *"– check the server IP and the examples" ]]
 }
 
-@test "rejection hints without a known server address: links without the IP" {
+@test "rejection hints without a known or with a private server address: links without the IP" {
+  PUBIP=10.0.0.5
+  run rej_hint trendmicro
+  [[ $output == *"/ers/ip-lookup/ – a listing"* ]]
   PUBIP=""
   run rej_hint spamhaus
   [[ $output == "look the IP up at https://check.spamhaus.org/ – it names"* ]]

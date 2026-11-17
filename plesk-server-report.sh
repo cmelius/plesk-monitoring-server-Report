@@ -553,7 +553,9 @@ dig_status() {   # dig_status NAME TYPE → NOERROR | NXDOMAIN | SERVFAIL | … 
 # link carries the server's address (PUBIP), so one click shows the result. Lists and services first; for the big providers whose
 # replies carry no removal link, where their sender pages are. Removal is always free.
 rej_hint() {
-  local n h ip=${PUBIP:-}
+  local n h ip=""
+  # only a public address: behind NAT the private one is not what the lists see
+  is_public_ipv4 "${PUBIP:-}" && ip=$PUBIP
   case $1 in
     trendmicro) n="Trend Micro ERS"
       h="look the IP up at https://servicecentral.trendmicro.com/en-us/ers/ip-lookup/${ip:+?ip=$ip} – a listing (often the Dial-up User List, DUL, for addresses that look dynamic) is removed there with \"Remove\" (state: static IP, own mail server, PTR); up to 48 h until every receiver sees it" ;;
