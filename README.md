@@ -8,6 +8,15 @@ It is built around the most common way a shared Plesk server gets into trouble: 
 
 The script only **reads** logs and system state. It never changes the server configuration, mail queue or websites.
 
+**Contents**
+- **Start:** [Quick start](#quick-start--no-configuration-needed) · [Check it before you run it as root](#check-it-before-you-run-it-as-root)
+- **What it does:** [What it found so far](#what-it-found-so-far) · [What the report covers](#what-the-report-covers) · **[Example report](#example-report-fictional-data)**
+- **Setup:** [Requirements](#requirements) · [Installation](#installation) · [Storage for the reports](#storage-for-the-reports) · [Reports by mail](#reports-by-mail) · [Configuration](#configuration) · [First run](#first-run)
+- **Running it:** [Reading the reports](#reading-the-reports) · [What the script remembers](#what-the-script-remembers) · [Updates](#updates) · [Uninstall](#uninstall)
+- **Background:** [Notes and limitations](#notes-and-limitations) · [Security](#security) · [Privacy](#privacy-gdpr) · [Tests](#tests)
+- **Help wanted:** [Other mail providers?](#rejections-by-other-mail-providers-help-wanted) · [Using another CMS?](#using-another-cms-help-wanted)
+- [License](#license)
+
 > **Built with Claude.** This script was written together with [Claude](https://claude.ai) (Anthropic) and tested against a production Plesk server. On that server, Claude also reads the uploaded reports every morning as a scheduled task, through a Google Drive connector linked to a dedicated account, and sends a push notification when something needs attention. See [Reading the reports](#reading-the-reports). Findings from these daily reviews flow back into the script, see [Updates](#updates).
 
 ## Quick start – no configuration needed
@@ -57,14 +66,6 @@ Expect it to point out a few things that are by design:
 Anything beyond that is worth a question – [open an issue](../../issues).
 
 **Young project, frequent updates:** new checks and fixes come out every few days at the moment. They come from the daily review of the reports of a real server: almost every week shows a blind spot, a false alarm or a new kind of attack (see [What it found so far](#what-it-found-so-far)). That is why updating is one command since 1.12.0: `plesk-server-report.sh --self-update` shows what changed, asks, and keeps the previous version for `--rollback`. The daily report tells you when a newer release is available; *Watch → Custom → Releases* on GitHub notifies you as well. See [Updates](#updates).
-
-**Contents**
-- **What it does:** [What it found so far](#what-it-found-so-far) · [What the report covers](#what-the-report-covers) · **[Example report](#example-report-fictional-data)**
-- **Setup:** [Requirements](#requirements) · [Installation](#installation) · [Storage for the reports](#storage-for-the-reports) · [Reports by mail](#reports-by-mail) · [Configuration](#configuration) · [First run](#first-run)
-- **Running it:** [Reading the reports](#reading-the-reports) · [What the script remembers](#what-the-script-remembers) · [Updates](#updates) · [Uninstall](#uninstall)
-- **Background:** [Notes and limitations](#notes-and-limitations) · [Security](#security) · [Privacy](#privacy-gdpr) · [Tests](#tests)
-- **Help wanted:** [Other mail providers?](#rejections-by-other-mail-providers-help-wanted) · [Using another CMS?](#using-another-cms-help-wanted)
-- [License](#license)
 
 ---
 
