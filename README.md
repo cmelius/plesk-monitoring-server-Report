@@ -59,7 +59,7 @@ Anything beyond that is worth a question – [open an issue](../../issues).
 **Young project, frequent updates:** new checks and fixes come out every few days at the moment. They come from the daily review of the reports of a real server: almost every week shows a blind spot, a false alarm or a new kind of attack (see [What it found so far](#what-it-found-so-far)). That is why updating is one command since 1.12.0: `plesk-server-report.sh --self-update` shows what changed, asks, and keeps the previous version for `--rollback`. The daily report tells you when a newer release is available; *Watch → Custom → Releases* on GitHub notifies you as well. See [Updates](#updates).
 
 **Contents**
-- **What it does:** [What it found so far](#what-it-found-so-far) · [What the report covers](#what-the-report-covers)
+- **What it does:** [What it found so far](#what-it-found-so-far) · [What the report covers](#what-the-report-covers) · **[Example report](#example-report-fictional-data)**
 - **Setup:** [Requirements](#requirements) · [Installation](#installation) · [Storage for the reports](#storage-for-the-reports) · [Reports by mail](#reports-by-mail) · [Configuration](#configuration) · [First run](#first-run)
 - **Running it:** [Reading the reports](#reading-the-reports) · [What the script remembers](#what-the-script-remembers) · [Updates](#updates) · [Uninstall](#uninstall)
 - **Background:** [Notes and limitations](#notes-and-limitations) · [Security](#security) · [Privacy](#privacy-gdpr) · [Tests](#tests)
