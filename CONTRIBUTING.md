@@ -8,7 +8,6 @@ Thanks for helping! This script runs as root on production Plesk servers, so a f
 - **A false alarm or a blind spot**: open an issue with the alert text and, anonymized, the log lines behind it.
 - **A security problem**: not as an issue – see [SECURITY.md](SECURITY.md).
 - **Code**: a pull request against `main`. For anything bigger than a fix, please open an issue first, so we can agree on the approach.
-- **Plugins** (version 2.0): work in progress on the branch `feature/plugin-system` – feedback in an issue is welcome; please don't base pull requests on it yet.
 
 ## Rules for code
 

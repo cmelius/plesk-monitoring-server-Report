@@ -17,7 +17,6 @@ This is a one-person project maintained alongside regular work. You can expect a
 | newest 1.x release | yes |
 | older 1.x releases | no – update with `--self-update` |
 | development version from `main` (`--self-update --edge`) | yes, fixed on `main` |
-| branch `feature/plugin-system` (2.0) | development state, not for production servers |
 
 ## What counts as a security problem
 

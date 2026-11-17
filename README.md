@@ -1100,8 +1100,6 @@ Contributions are welcome – the rules (read only, mawk and gawk, tests, no rea
 
 The template includes a one-line command that anonymizes the log lines (IPs → `203.0.113.x`, domain → `example.com`). **Please never post real IPs, domains or user names. Issues are public.**
 
-**Plugins – work in progress.** Checks for specific software (other CMS, other mail servers, setups without Plesk) are to become plugins – small files with a fixed contract, run in a sandbox where they can only read. The work has started on the branch [`feature/plugin-system`](https://github.com/cmelius/plesk-monitoring-server-Report/tree/feature/plugin-system); it is a development state, not meant for production servers, and there is no release date yet. Feedback is welcome in an issue – especially if you would write or use a plugin. Until it is released, the issue template above is the way to get support for your software added.
-
 ---
 
 ## Updates
@@ -1145,7 +1143,7 @@ The test run matters: if something keeps the script from running – since 1.9.0
 
 ### Updating from 1.x
 
-Version 2 is in development (plugins, see [Using another CMS?](#using-another-cms-help-wanted)) and not released yet. It will come as a signed release archive – the script with `lib/` and `plugins/` – so `--self-update` of version 1 won't install it: version 1 stays on 1.x and still gets fixes when version 2 is out; the daily check and `--self-update` only tell you that version 2 is available. The switch will be `--self-update --major`; in 1.12.0 it only says that it isn't available yet. How to switch will be described here when version 2 is released.
+There is no version 2 yet – 1.x is the maintained version. `--self-update` (also with `--edge`) always stays within the installed major version; should a version 2 ever come, `--self-update` would only tell you about it, and switching would be a deliberate `--self-update --major`, described here.
 
 Watch the repository (*Watch → Custom → Releases* or *All activity*) to get notified about changes. Issues and pull requests with your own findings are welcome.
 
