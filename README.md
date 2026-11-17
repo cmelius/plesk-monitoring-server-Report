@@ -650,6 +650,7 @@ mv /var/lib/plesk-server-report /opt/plesk-server-report/state
 /opt/plesk-server-report/plesk-server-report.sh --show-state | head -1   # State directory: /opt/plesk-server-report/state
 echo '5 * * * * root /opt/plesk-server-report/plesk-server-report.sh' > /etc/cron.d/plesk-server-report
 ```
+If your cron line is in root's crontab instead, change the path there (`crontab -e`) and skip the two `/etc/cron.d` lines.
 
 ---
 
