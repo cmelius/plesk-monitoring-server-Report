@@ -633,7 +633,30 @@ How the script finds its files:
 
 ### Uninstall
 
-Remove the cron entry (`/etc/cron.d/plesk-server-report`), the script, its configuration (`/etc/plesk-server-report.conf` or the one next to the script) and its state folder (`/var/lib/plesk-server-report`, or `state/` next to the script) – in a one-folder installation, the folder and the cron entry. rclone's own configuration (`rclone config file` shows where) and the reports already uploaded stay until you delete them; so does an SSH key you created for an SFTP upload.
+First find out where the state is kept: `plesk-server-report.sh --show-state | head -1`.
+
+**Usual layout:**
+```bash
+rm -f /etc/cron.d/plesk-server-report
+rm -f /usr/local/sbin/plesk-server-report.sh /etc/plesk-server-report.conf
+rm -rf /var/lib/plesk-server-report
+```
+
+**Everything in one folder:**
+```bash
+rm -f /etc/cron.d/plesk-server-report
+rm -rf /opt/plesk-server-report
+```
+If the report said the state stays in `/var/lib/plesk-server-report` (an older installation), remove that folder too.
+
+**Also check:**
+- a cron line in root's crontab (`crontab -l`) instead of `/etc/cron.d`
+- a `STATE_DIR` or `--config FILE` of your own: remove those as well
+- the upload: `rclone config delete reports` removes the remote; the reports already uploaded stay until you delete them
+- SFTP upload: `/root/.ssh/report_upload*`, and the key's line in `authorized_keys` on the target server
+- packages installed only for the script (`rclone`, `mmdb-bin` / `libmaxminddb`), if nothing else uses them
+
+The script leaves nothing else behind: no service, no package, no change to system files.
 
 ---
 
