@@ -52,3 +52,25 @@ setup() {
   [[ $output != *"not running"* ]]
   [ "$(alert_severity "${ALERTS[0]}")" = warning ]
 }
+
+@test "jails active, none with bans or failures: they are named, no alert" {
+  fail2ban-client() {
+    if [[ -z ${2:-} ]]; then printf 'Status\n|- Number of jail:\t2\n`- Jail list:\tproftpd-iptables, ssh-iptables\n'
+    else printf 'Status for the jail: %s\n|- Filter\n|  |- Currently failed:\t0\n`- Actions\n   |- Currently banned:\t0\n   |- Total banned:\t0\n   `- Banned IP list:\t\n' "$2"; fi
+  }
+  check_fail2ban || true
+  run report
+  [[ $output == *"2 jail(s) active, none with bans or failed logins right now: proftpd-iptables ssh-iptables"* ]]
+  run alerts
+  [ -z "$(printf '%s' "$output" | tr -d '\n')" ]
+}
+
+@test "fail2ban runs without a jail: warning" {
+  fail2ban-client() { printf 'Status\n|- Number of jail:\t0\n`- Jail list:\t\n'; }
+  check_fail2ban || true
+  run report
+  [[ $output == *"fail2ban runs, but no jail is active"* ]]
+  run alerts
+  [[ $output == *"fail2ban runs without any active jail – nothing is banned"* ]]
+  [ "$(alert_severity "${ALERTS[0]}")" = warning ]
+}

@@ -83,7 +83,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.15.0
+VERSION=1.15.1
 
 set -uo pipefail
 export LC_ALL=C
@@ -1143,7 +1143,7 @@ check_system() {   # load, CPU per system user, top processes, RAM, filesystems
   out ""; out "Filesystems (space used, inodes used):"
   local -A INO=()
   local dmax=0 imax=0
-  while read -r pct mnt; do INO[$mnt]=${pct%\%}; done < <(df -P -i -x tmpfs -x devtmpfs -x overlay -x squashfs 2>/dev/null | awk 'NR>1{print $5, $6}')
+  while read -r pct mnt; do INO[$mnt]=${pct%\%}; done < <(df -P -i -x tmpfs -x devtmpfs -x overlay -x squashfs -x efivarfs 2>/dev/null | awk 'NR>1{print $5, $6}')
   while read -r pct mnt; do
     p=${pct%\%}; ip=${INO[$mnt]:-}
     [[ $ip =~ ^[0-9]+$ ]] || ip=""                    # "-" on filesystems without a fixed number of inodes
@@ -1152,7 +1152,7 @@ check_system() {   # load, CPU per system user, top processes, RAM, filesystems
     [[ -n $ip ]] && (( ip > imax )) && imax=$ip
     (( p > WARN_DISK_PCT )) && alert "Disk: $mnt is $pct full"
     [[ -n $ip ]] && (( ip > WARN_DISK_PCT )) && alert "Disk: $mnt has used $ip% of its inodes (too many small files) – no new files can be created when they run out"
-  done < <(df -P -x tmpfs -x devtmpfs -x overlay -x squashfs 2>/dev/null | awk 'NR>1{print $5, $6}')
+  done < <(df -P -x tmpfs -x devtmpfs -x overlay -x squashfs -x efivarfs 2>/dev/null | awk 'NR>1{print $5, $6}')
   metric disk_max_pct "$dmax"; metric inodes_max_pct "$imax"
 }
 
@@ -1215,12 +1215,17 @@ check_fail2ban() {
       return 0
     fi
     JAILS=$(sed -n 's/.*Jail list:[[:space:]]*//p' <<<"$st" | tr -d ' ' | tr ',' ' ')
+    local nj=0 shown=0
     for j in $JAILS; do
+      nj=$(( nj + 1 ))
       s=$(T "$CMD_TIMEOUT" fail2ban-client status "$j" 2>/dev/null)
       cb=$(sed -n 's/.*Currently banned:[[:space:]]*//p' <<<"$s")
       tb=$(sed -n 's/.*Total banned:[[:space:]]*//p' <<<"$s")
       cf=$(sed -n 's/.*Currently failed:[[:space:]]*//p' <<<"$s")
-      [[ ${cb:-0} -gt 0 || ${cf:-0} -gt 0 ]] && printf '  %-28s banned: %3s (total %s), currently failed: %s\n' "$j" "$cb" "$tb" "$cf" >>"$BODY"
+      if [[ ${cb:-0} -gt 0 || ${cf:-0} -gt 0 ]]; then
+        printf '  %-28s banned: %3s (total %s), currently failed: %s\n' "$j" "$cb" "$tb" "$cf" >>"$BODY"
+        shown=$(( shown + 1 ))
+      fi
       # banned IPs that logged in successfully before – a device with an outdated password?
       local -a banned=()
       read -ra banned <<<"$(sed -n 's/.*Banned IP list:[[:space:]]*//p' <<<"$s")"
@@ -1234,7 +1239,14 @@ check_fail2ban() {
         alert "fail2ban: jail $j bans $ip${GEO_LABEL:+ ($GEO_LABEL)}, which had successful logins before ($k) – a device with an outdated password? Unban: fail2ban-client set $j unbanip $ip"
       done
     done
-    out "  (jails without bans/failures hidden)"
+    if (( nj == 0 )); then
+      out "  fail2ban runs, but no jail is active"
+      alert "fail2ban runs without any active jail – nothing is banned (Plesk: Tools & Settings → IP Address Banning → Jails)"
+    elif (( shown == 0 )); then
+      out "  $nj jail(s) active, none with bans or failed logins right now: $JAILS"
+    else
+      out "  (jails without bans/failures hidden)"
+    fi
     if [[ -n $ban ]]; then
       out "  Banned IPs with earlier successful logins (customer or own device with an outdated password?):"
       printf '%s' "$ban" >>"$BODY"
@@ -1992,7 +2004,10 @@ check_updates() {   # pending (security) updates, reboot required
     else kernel_reboot_check; fi
   elif command -v dnf >/dev/null; then
     sec=$(T "$CMD_TIMEOUT" dnf -q updateinfo list --security 2>/dev/null | grep -c . || true)
-    echo "Security updates available: $sec"
+    # check-update: one line "name.arch version repo" per update (exit code 100 when there are any);
+    # "Obsoleting packages" and its lines below are not counted
+    upg=$(T "$CMD_TIMEOUT" dnf -q check-update 2>/dev/null | awk '/^Obsoleting/ { exit } NF == 3 && $1 ~ /\./' | grep -c . || true)
+    echo "Updates available: $upg, security updates: $sec"
     (( sec > 0 )) && dalert "Updates: $sec security update(s) pending"
     if command -v needs-restarting >/dev/null; then
       if ! needs-restarting -r >/dev/null 2>&1; then

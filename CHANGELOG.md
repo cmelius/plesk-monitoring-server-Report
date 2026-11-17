@@ -2,6 +2,14 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
+## [1.15.1] – not yet released (on `main`)
+
+### Fixed
+Found by running the script on Rocky Linux 9 (without Plesk):
+- **EFI variables counted as a filesystem.** `/sys/firmware/efi/efivars` appeared under *Filesystems* – the firmware's variable store, often nearly full, which could raise "Disk … is full". It is left out now, like `tmpfs` and `squashfs`.
+- **RHEL family: the number of all pending updates was missing** – only security updates were counted. Now, as on Debian/Ubuntu: "Updates available: N, security updates: M" (`dnf check-update`).
+- **fail2ban with jails but no bans or failures** showed only "(jails without bans/failures hidden)" – it looked like nothing was there. Now the active jails are named; fail2ban running without any jail raises a warning (nothing is banned).
+
 ## [1.15.0] – 2026-11-17
 
 ### Added
