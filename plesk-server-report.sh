@@ -1974,6 +1974,27 @@ check_backups() {   # latest Plesk backup (time, age, errors), Acronis agent –
 # is missing: /var/run/reboot-required only exists where a package writes it (Debian/Ubuntu:
 # unattended-upgrades, update-notifier-common), needs-restarting needs dnf-utils (RHEL family).
 # Only if the running kernel is one from /boot – a container or a provider kernel can't be compared.
+# dnf_reboot_check – needs-restarting -r: exit 1 = reboot required (updated kernel, glibc, systemd …).
+# As a dnf plugin ("dnf needs-restarting", dnf-plugins-core, usually installed) or the older
+# command (yum-utils/dnf-utils). Its answer only counts when the (English) text says one of the two
+# results – a missing plugin also exits with 1. Otherwise: compare the kernels.
+dnf_reboot_check() {
+  local o rc=0
+  if command -v needs-restarting >/dev/null; then
+    o=$(LC_ALL=C T "$CMD_TIMEOUT" needs-restarting -r 2>&1) || rc=$?
+  else
+    o=$(LC_ALL=C T "$CMD_TIMEOUT" dnf needs-restarting -r 2>&1) || rc=$?
+  fi
+  if [[ $o == *"Reboot is required"* ]] && (( rc == 1 )); then
+    echo "Reboot required (needs-restarting: core libraries or services were updated since boot)"
+    dalert "System: reboot required after updates"
+  elif [[ $o == *"Reboot should not be necessary"* ]]; then
+    :
+  else
+    kernel_reboot_check
+  fi
+  return 0
+}
 kernel_reboot_check() {
   local run new k
   run=$(uname -r)
@@ -2009,11 +2030,7 @@ check_updates() {   # pending (security) updates, reboot required
     upg=$(T "$CMD_TIMEOUT" dnf -q check-update 2>/dev/null | awk '/^Obsoleting/ { exit } NF == 3 && $1 ~ /\./' | grep -c . || true)
     echo "Updates available: $upg, security updates: $sec"
     (( sec > 0 )) && dalert "Updates: $sec security update(s) pending"
-    if command -v needs-restarting >/dev/null; then
-      if ! needs-restarting -r >/dev/null 2>&1; then
-        echo "Reboot required"; dalert "System: reboot required after updates"
-      fi
-    else kernel_reboot_check; fi                       # needs-restarting (dnf-utils) is not installed
+    dnf_reboot_check
   fi
   (( UPDATE_CHECK )) && script_update_check
   return 0

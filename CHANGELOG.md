@@ -8,6 +8,7 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 Found by running the script on Rocky Linux 9 (without Plesk):
 - **EFI variables counted as a filesystem.** `/sys/firmware/efi/efivars` appeared under *Filesystems* – the firmware's variable store, often nearly full, which could raise "Disk … is full". It is left out now, like `tmpfs` and `squashfs`.
 - **RHEL family: the number of all pending updates was missing** – only security updates were counted. Now, as on Debian/Ubuntu: "Updates available: N, security updates: M" (`dnf check-update`).
+- **RHEL family: "reboot required" after library updates.** The check used only the `needs-restarting` command (yum-utils/dnf-utils), which often isn't installed – then only a newer kernel was noticed. Now `dnf needs-restarting -r` (dnf-plugins-core, usually installed) is asked too, so updated core libraries and services (glibc, openssl, systemd) count as well; without an answer the kernels are compared as before.
 - **fail2ban with jails but no bans or failures** showed only "(jails without bans/failures hidden)" – it looked like nothing was there. Now the active jails are named; fail2ban running without any jail raises a warning (nothing is banned).
 
 ## [1.15.0] – 2026-11-17
