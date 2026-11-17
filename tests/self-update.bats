@@ -113,7 +113,34 @@ leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
   [ "$(installed)" = "plesk-server-report 1.12.1" ]
   [ "$(stat -c %a "$SU_SELF")" = 700 ]
   [ "$(bash "$STATE_DIR/plesk-server-report.sh.old" --version)" = "plesk-server-report 1.12.0" ]
+  [ "$(stat -c %a "$STATE_DIR/plesk-server-report.sh.old")" = 600 ]
   [ "$(leftovers)" -eq 0 ]
+}
+
+@test "update into a new state folder: marked, so the next run accepts it (issue #3)" {
+  STATE_DIR="$BATS_TEST_TMPDIR/new-state"
+  self_update_1x >/dev/null
+  [ -e "$STATE_DIR/$STATE_MARK" ]
+  [ -e "$STATE_DIR/lock" ]
+  [ "$(stat -c %a "$STATE_DIR")" = 700 ]
+  run check_state_dir
+  [ "$status" -eq 0 ]
+}
+
+@test "a state folder left by an update of 1.15.0 (only lock and the kept copy, no mark) is accepted" {
+  STATE_DIR="$BATS_TEST_TMPDIR/old-state"; mkdir -p "$STATE_DIR"
+  touch "$STATE_DIR/lock" "$STATE_DIR/plesk-server-report.sh.old"
+  run check_state_dir
+  [ "$status" -eq 0 ]
+}
+
+@test "no update into a state folder with other files" {
+  STATE_DIR="$BATS_TEST_TMPDIR/home"; mkdir -p "$STATE_DIR"; touch "$STATE_DIR/.bashrc"
+  run self_update_1x
+  [ "$status" -eq 1 ]
+  [[ $output == *"refusing to run"* ]]
+  [ ! -e "$STATE_DIR/plesk-server-report.sh.old" ]
+  [ "$(installed)" = "plesk-server-report 1.12.0" ]
 }
 
 @test "answer no: nothing changes" {
@@ -134,6 +161,8 @@ leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
   [[ $output == *"back to 1.12.0"* ]]
   [ "$(installed)" = "plesk-server-report 1.12.0" ]
   [ "$(bash "$STATE_DIR/plesk-server-report.sh.old" --version)" = "plesk-server-report 1.12.1" ]
+  [ "$(stat -c %a "$SU_SELF")" = 700 ]
+  [ "$(stat -c %a "$STATE_DIR/plesk-server-report.sh.old")" = 600 ]
 }
 
 @test "--rollback without a kept version" {

@@ -89,7 +89,7 @@ is always reported). Processes are not stored – they are checked live in every
 | `running` | exists only while a run is active: `PID start now step exit-code`. If it is still there at the next run, that run did not finish, and the report says so (alert "Script: …"). |
 | `upload_failed` | time of the first failed upload, and rclone's last error message | while the upload to `REMOTE` fails, every report raises an alert (local report, mail). Deleted by the next successful upload. |
 | `tmp.*` | temporary files of the current run, removed at its end. |
-| `plesk-server-report.sh.old` | the previous version of the script, kept by `--self-update` (only after an update). `--self-update --rollback` swaps it with the installed one. Safe to delete. |
+| `plesk-server-report.sh.old` | the previous version of the script, kept by `--self-update` (only after an update; not executable, mode 600). `--self-update --rollback` swaps it with the installed one. Safe to delete. |
 | `first-report.txt` | the report of the first run, which lists everything as it was found (PHP files in upload folders, cron jobs, SSH keys, ports …). Kept for reference; it is not removed with the old reports in `out/`. Safe to delete. |
 | `.plesk-server-report-state` | marks this folder as the script's own. The script refuses a `STATE_DIR` with other files in it that has no such mark. |
 | `README.txt` | this description. |

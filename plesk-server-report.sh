@@ -3597,7 +3597,7 @@ is always reported). Processes are not stored – they are checked live in every
 | `running` | exists only while a run is active: `PID start now step exit-code`. If it is still there at the next run, that run did not finish, and the report says so (alert "Script: …"). |
 | `upload_failed` | time of the first failed upload, and rclone's last error message | while the upload to `REMOTE` fails, every report raises an alert (local report, mail). Deleted by the next successful upload. |
 | `tmp.*` | temporary files of the current run, removed at its end. |
-| `plesk-server-report.sh.old` | the previous version of the script, kept by `--self-update` (only after an update). `--self-update --rollback` swaps it with the installed one. Safe to delete. |
+| `plesk-server-report.sh.old` | the previous version of the script, kept by `--self-update` (only after an update; not executable, mode 600). `--self-update --rollback` swaps it with the installed one. Safe to delete. |
 | `first-report.txt` | the report of the first run, which lists everything as it was found (PHP files in upload folders, cron jobs, SSH keys, ports …). Kept for reference; it is not removed with the old reports in `out/`. Safe to delete. |
 | `.plesk-server-report-state` | marks this folder as the script's own. The script refuses a `STATE_DIR` with other files in it that has no such mark. |
 | `README.txt` | this description. |
@@ -3676,7 +3676,11 @@ su_ask() {   # su_ask QUESTION – yes only for an answer starting with y (or j)
   [[ $a == [yYjJ]* ]]
 }
 su_lock() {   # wait for a running report (at most 15 min), so nothing is replaced under it
-  if ! { mkdir -p "$STATE_DIR" && exec 9>"$STATE_DIR/lock" && flock -w 900 9; }; then
+  # the state folder: refused if it holds other files, marked as the script's own before the lock
+  # and the kept copy go into it – else the next run would take a new folder for a foreign one
+  check_state_dir
+  mkdir -p "$STATE_DIR" && chmod 700 "$STATE_DIR" && mark_state_dir
+  if ! { exec 9>"$STATE_DIR/lock" && flock -w 900 9; }; then
     su_fail "a report run holds the lock – try again later"; return 1
   fi
 }
@@ -3759,7 +3763,8 @@ su_edge() {
   rm -f "$SU_WORK.changes"
   su_ask "Install the development version $v (commit ${sha:0:7}) now?" || { rm -f "$SU_WORK"; echo "nothing changed"; return 0; }
   su_lock || return 1
-  if ! { cp -p "$self" "$old" && chown --reference="$self" "$SU_WORK" && chmod --reference="$self" "$SU_WORK" &&
+  # the kept copy is not executable (chmod 600) – it is only there for --rollback
+  if ! { cp -p "$self" "$old" && chmod 600 "$old" && chown --reference="$self" "$SU_WORK" && chmod --reference="$self" "$SU_WORK" &&
          mv -f "$SU_WORK" "$self"; }; then
     su_fail "could not replace $self – it is unchanged"; return 1
   fi
@@ -3790,7 +3795,9 @@ self_update_1x() {
     su_ask "Go back from $VERSION to ${v:-the kept version}?" || { echo "nothing changed"; return 0; }
     su_lock || return 1
     SU_WORK=$(mktemp "$dir/.plesk-server-report.XXXXXX") || { su_fail "no temporary file in $dir"; return 1; }
-    if ! { cp -p "$old" "$SU_WORK" && cp -p "$self" "$old" && mv -f "$SU_WORK" "$self"; }; then
+    # the copy brought back gets the owner and mode of the installed script; the one kept is not executable
+    if ! { cp -p "$old" "$SU_WORK" && chown --reference="$self" "$SU_WORK" && chmod --reference="$self" "$SU_WORK" &&
+           cp -p "$self" "$old" && chmod 600 "$old" && mv -f "$SU_WORK" "$self"; }; then
       su_fail "could not swap the versions – check $self and $old"; return 1
     fi
     exec 9>&-                          # release the lock
@@ -3846,7 +3853,8 @@ self_update_1x() {
   local q="Install version $latest now?"; (( same )) && q="Replace your copy with the release $latest?"
   su_ask "$q" || { rm -f "$SU_WORK"; echo "nothing changed"; return 0; }
   su_lock || return 1
-  if ! { cp -p "$self" "$old" && chown --reference="$self" "$SU_WORK" && chmod --reference="$self" "$SU_WORK" &&
+  # the kept copy is not executable (chmod 600) – it is only there for --rollback
+  if ! { cp -p "$self" "$old" && chmod 600 "$old" && chown --reference="$self" "$SU_WORK" && chmod --reference="$self" "$SU_WORK" &&
          mv -f "$SU_WORK" "$self"; }; then
     su_fail "could not replace $self – it is unchanged"; return 1
   fi
@@ -3996,10 +4004,14 @@ keep_first_report() {
 # with other files (STATE_DIR=/root, a typo) is refused – the state files would be spread among
 # them, and deleting the state folder would delete them too. A state folder of a version before
 # the mark is recognised by its files and marked.
+mark_state_dir() {
+  [[ -e $STATE_DIR/$STATE_MARK ]] || echo "state folder of plesk-server-report – the whole folder may be deleted (README.txt)" >"$STATE_DIR/$STATE_MARK"
+}
 check_state_dir() {
   [[ -e $STATE_DIR/$STATE_MARK ]] && return 0
   if [[ -d $STATE_DIR && -n $(ls -A "$STATE_DIR" 2>/dev/null) ]] &&
-     ! [[ -e $STATE_DIR/last_run || -e $STATE_DIR/daily_date || -d $STATE_DIR/offsets || -e $STATE_DIR/README.txt ]]; then
+     ! [[ -e $STATE_DIR/last_run || -e $STATE_DIR/daily_date || -d $STATE_DIR/offsets || -e $STATE_DIR/README.txt ||
+          -e $STATE_DIR/lock || -e $STATE_DIR/plesk-server-report.sh.old ]]; then
     local m="refusing to run – STATE_DIR=$STATE_DIR contains other files and is not a state folder of this script. Use a new or empty folder, e.g. STATE_DIR=$STATE_DIR/plesk-server-report (in $CONF)"
     echo "plesk-server-report: $m" >&2
     logger -t plesk-server-report "$m" 2>/dev/null
@@ -4061,7 +4073,7 @@ init() {
   FIRST_RUN=0; [[ -e $STATE_DIR/last_run ]] || FIRST_RUN=1
   mkdir -p "$STATE_DIR/offsets" "$OUT_DIR"
   chmod 700 "$STATE_DIR"
-  [[ -e $STATE_DIR/$STATE_MARK ]] || echo "state folder of plesk-server-report – the whole folder may be deleted (README.txt)" >"$STATE_DIR/$STATE_MARK"
+  mark_state_dir
   NOW=$(date '+%Y-%m-%d %H:%M %Z')
   RUN_START=$(date +%s)
   ALERTS=(); ALERT_CHK=()
