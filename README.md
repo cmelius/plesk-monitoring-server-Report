@@ -32,6 +32,8 @@ chmod 700 /usr/local/sbin/plesk-server-report.sh
 echo '5 * * * * root /usr/local/sbin/plesk-server-report.sh' > /etc/cron.d/plesk-server-report
 ```
 
+**Prefer everything in one folder** – script, configuration and state, removed in one go? See [Everything in one folder](#everything-in-one-folder). The commands below that use `/etc/plesk-server-report.conf` then go to `plesk-server-report.conf` in that folder.
+
 The `curl` command is for the first installation. From version 1.12.0 on, the script updates itself when you ask it to: `plesk-server-report.sh --self-update` (see [Updates](#updates)).
 
 That's it: from now on a report is written every hour to `/var/lib/plesk-server-report/out/`. Four optional extras are worth the few minutes:
