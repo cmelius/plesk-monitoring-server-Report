@@ -90,6 +90,6 @@ is always reported). Processes are not stored – they are checked live in every
 | `upload_failed` | time of the first failed upload, and rclone's last error message | while the upload to `REMOTE` fails, every report raises an alert (local report, mail). Deleted by the next successful upload. |
 | `tmp.*` | temporary files of the current run, removed at its end. |
 | `plesk-server-report.sh.old` | only after an update by version 1.15 or older: the previous version of the script. The next `--self-update` moves it to the backup folder next to the script, where the previous versions are kept from 1.16.0 on – this folder may be deleted without losing them. |
-| `first-report.txt` | the report of the first run, which lists everything as it was found (PHP files in upload folders, cron jobs, SSH keys, ports …). Kept for reference; it is not removed with the old reports in `out/`. Safe to delete. |
+| `first-report.txt` | only from version 1.15: the report of the first run. From 1.16.0 on it is kept outside this folder, so that deleting it doesn't lose it – next to the script (one-folder installation) or in `plesk-server-report-backup/` next to it; the next run moves it there. |
 | `.plesk-server-report-state` | marks this folder as the script's own. The script refuses a `STATE_DIR` with other files in it that has no such mark. |
 | `README.txt` | this description. |

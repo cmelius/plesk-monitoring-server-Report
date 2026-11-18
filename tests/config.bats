@@ -112,13 +112,56 @@ setup() {
   [[ $output == *"refusing to run – STATE_DIR=$BATS_TEST_TMPDIR/home contains other files"* ]]
 }
 
-@test "first-report.txt: written in the first run only, never replaced" {
-  mkdir -p "$STATE_DIR"
+first_report_setup() {
+  root_only_dir() { [[ -d $1 ]]; }
+  script_self() { echo "$BATS_TEST_TMPDIR/base/plesk-server-report.sh"; }
+  mkdir -p "$STATE_DIR" "$BATS_TEST_TMPDIR/base"; CONF_LOCAL=1
+  FR="$BATS_TEST_TMPDIR/base/first-report.txt"
   REPORT="$BATS_TEST_TMPDIR/r1.txt"; echo first >"$REPORT"
+}
+
+@test "first-report.txt: next to the script (one folder), else in the backup folder – not in the state folder" {
+  script_self() { echo /opt/psr/plesk-server-report.sh; }
+  [ "$(CONF_LOCAL=1 first_report_path)" = /opt/psr/first-report.txt ]
+  [ "$(CONF_LOCAL=0 first_report_path)" = /opt/psr/plesk-server-report-backup/first-report.txt ]
+  [ "$(CONF_LOCAL=0 BACKUP_DIR=/srv/keep first_report_path)" = /srv/keep/first-report.txt ]
+}
+
+@test "first-report.txt: written in the first run only, never replaced – also not after the state was deleted" {
+  first_report_setup
   FIRST_RUN=1; keep_first_report
-  [ "$(cat "$STATE_DIR/first-report.txt")" = first ]
-  echo second >"$REPORT"; keep_first_report
-  [ "$(cat "$STATE_DIR/first-report.txt")" = first ]
-  rm "$STATE_DIR/first-report.txt"; FIRST_RUN=0; keep_first_report
+  [ "$(cat "$FR")" = first ]
+  [ "$(stat -c %a "$FR")" = 600 ]
   [ ! -e "$STATE_DIR/first-report.txt" ]
+  rm -rf "$STATE_DIR"; echo second >"$REPORT"; FIRST_RUN=1; keep_first_report
+  [ "$(cat "$FR")" = first ]
+  rm "$FR"; FIRST_RUN=0; keep_first_report
+  [ ! -e "$FR" ]
+}
+
+@test "first-report.txt: the backup folder is created (mode 700) in the usual layout" {
+  first_report_setup; CONF_LOCAL=0
+  FIRST_RUN=1; keep_first_report
+  [ "$(cat "$BATS_TEST_TMPDIR/base/plesk-server-report-backup/first-report.txt")" = first ]
+  [ "$(stat -c %a "$BATS_TEST_TMPDIR/base/plesk-server-report-backup")" = 700 ]
+}
+
+@test "first-report.txt kept in the state folder by 1.15.x moves out of it" {
+  first_report_setup
+  echo original >"$STATE_DIR/first-report.txt"; FIRST_RUN=0; keep_first_report
+  [ "$(cat "$FR")" = original ]
+  [ ! -e "$STATE_DIR/first-report.txt" ]
+}
+
+@test "first-report.txt: after switching to one folder it moves from backup/ next to the script" {
+  first_report_setup; mkdir -p "$BATS_TEST_TMPDIR/base/backup"
+  echo original >"$BATS_TEST_TMPDIR/base/backup/first-report.txt"; FIRST_RUN=0; keep_first_report
+  [ "$(cat "$FR")" = original ]
+  [ ! -e "$BATS_TEST_TMPDIR/base/backup/first-report.txt" ]
+}
+
+@test "first-report.txt: not written into a folder others may change" {
+  first_report_setup; root_only_dir() { return 1; }
+  FIRST_RUN=1; keep_first_report
+  [ ! -e "$FR" ]
 }

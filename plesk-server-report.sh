@@ -1991,7 +1991,7 @@ check_services() {   # failed systemd units, OOM killer
     done
     out "Failed units: ${shown[*]:-none}"
     (( ${#ignored[@]} )) && out "Failed units without an alert (IGNORE_FAILED_UNITS): ${ignored[*]}"
-    (( rcl )) && out "rc-local.service failed at boot – /etc/rc.local is deprecated (see the daily check rc.local); a command in it returned an error, or it could not be run at all (shebang, line endings): systemctl status rc-local shows why"
+    (( rcl )) && out "rc-local.service failed at boot – see rc.local in the daily checks (no alert of its own)"
     (( ${#shown[@]} )) && alert "Service(s) failed: ${shown[*]}"
   fi
   if command -v journalctl >/dev/null; then
@@ -2574,7 +2574,7 @@ rc_local_failed() { command -v systemctl >/dev/null && T "$CMD_TIMEOUT" systemct
 check_rclocal() {
   local n f=""
   echo ""
-  rc_local_failed && f=" rc-local.service failed at boot (systemctl status rc-local shows why)."
+  rc_local_failed && f=" rc-local.service failed at boot: a command in it returned an error, or it could not be run at all (shebang, line endings) – systemctl status rc-local shows why."
   if [[ ! -e $RC_LOCAL ]]; then echo "rc.local: not used ($RC_LOCAL doesn't exist)${f:+ –$f}"; return 0; fi
   if [[ ! -x $RC_LOCAL ]]; then echo "rc.local: not used ($RC_LOCAL is not executable, so systemd doesn't run it)${f:+ –$f}"; return 0; fi
   n=$(grep -cvE '^[[:space:]]*(#.*)?$|^[[:space:]]*exit[[:space:]]+0[[:space:]]*;?[[:space:]]*$' "$RC_LOCAL" 2>/dev/null || true)
@@ -3601,7 +3601,7 @@ is always reported). Processes are not stored – they are checked live in every
 | `upload_failed` | time of the first failed upload, and rclone's last error message | while the upload to `REMOTE` fails, every report raises an alert (local report, mail). Deleted by the next successful upload. |
 | `tmp.*` | temporary files of the current run, removed at its end. |
 | `plesk-server-report.sh.old` | only after an update by version 1.15 or older: the previous version of the script. The next `--self-update` moves it to the backup folder next to the script, where the previous versions are kept from 1.16.0 on – this folder may be deleted without losing them. |
-| `first-report.txt` | the report of the first run, which lists everything as it was found (PHP files in upload folders, cron jobs, SSH keys, ports …). Kept for reference; it is not removed with the old reports in `out/`. Safe to delete. |
+| `first-report.txt` | only from version 1.15: the report of the first run. From 1.16.0 on it is kept outside this folder, so that deleting it doesn't lose it – next to the script (one-folder installation) or in `plesk-server-report-backup/` next to it; the next run moves it there. |
 | `.plesk-server-report-state` | marks this folder as the script's own. The script refuses a `STATE_DIR` with other files in it that has no such mark. |
 | `README.txt` | this description. |
 EOF
@@ -4064,10 +4064,60 @@ maybe_create_conf() {
   config_template >"$d/$CONF_NAME" 2>/dev/null && chmod 600 "$d/$CONF_NAME" && export PSR_CONF_CREATED=1
   return 0
 }
+# cron_note – does a cron line or systemd unit run this copy of the script? A note if not: a test
+# run without the cron job yet, or a cron line still pointing to an old path after a move (then no
+# report would come at all). Only cron files and units in /etc are read; nothing is changed.
+script_self() { readlink -f "$0" 2>/dev/null || echo "$0"; }
+CRON_FILES="/etc/crontab /etc/cron.d/* /var/spool/cron/crontabs/root /var/spool/cron/root /etc/systemd/system/*.service"
+cron_note() {
+  local self f l w ws found="" other=""
+  self=$(script_self)
+  # shellcheck disable=SC2086  # the globs in CRON_FILES are expanded here on purpose
+  for f in $CRON_FILES; do
+    [[ -f $f ]] || continue
+    while IFS= read -r l; do
+      read -r -a ws <<<"$l"
+      for w in "${ws[@]}"; do
+        [[ $w == *=/* ]] && w=${w#*=}       # ExecStart=/path
+        w=${w%%[;&|]*}
+        [[ $w == /* ]] || continue
+        if [[ $(readlink -f "$w" 2>/dev/null) == "$self" ]]; then found=$f; break 3
+        elif [[ ${w##*/} == plesk-server-report.sh ]]; then other="$f runs $w"; fi
+      done
+    done < <(grep -vE '^[[:space:]]*(#|$)' "$f" 2>/dev/null)
+  done
+  [[ -n $found ]] && return 0
+  if [[ -n $other ]]; then
+    note "cron: no cron line runs this copy ($self) – $other; moved the script? Change the path there"
+  else
+    note "cron: no cron line or systemd unit runs $self – reports come only when you start it. Hourly (set your own schedule): echo '5 * * * * root $self' > /etc/cron.d/plesk-server-report"
+  fi
+  return 0
+}
 # keep_first_report – the first report lists everything as it was found (the baseline): kept as
-# first-report.txt, unlike the reports in out/, which are deleted after LOCAL_KEEP_DAYS
+# first-report.txt, unlike the reports in out/, which are deleted after LOCAL_KEEP_DAYS. Not in the
+# state folder, which may be deleted: next to the script in a one-folder installation, else in the
+# backup folder next to the script (with the kept versions). Never replaced – after a reset of the
+# state the original stays. One kept in the state folder by 1.15.x moves there.
+first_report_path() {
+  local self; self=$(script_self)
+  if (( CONF_LOCAL )); then echo "${self%/*}/first-report.txt"; else echo "$(backup_dir "$self")/first-report.txt"; fi
+}
 keep_first_report() {
-  (( FIRST_RUN )) && [[ ! -e $STATE_DIR/first-report.txt && -s $REPORT ]] && cp "$REPORT" "$STATE_DIR/first-report.txt"
+  local f d src old=$STATE_DIR/first-report.txt moved
+  f=$(first_report_path); d=${f%/*}
+  [[ -e $f ]] && return 0
+  # moved from the usual layout into one folder: it came along in the backup folder
+  moved=$(backup_dir "$(script_self)")/first-report.txt
+  [[ $moved != "$f" && -s $moved ]] && old=$moved
+  if [[ -s $old ]]; then src=$old
+  elif (( FIRST_RUN )) && [[ -s $REPORT ]]; then src=$REPORT
+  else return 0; fi
+  if [[ ! -d $d ]]; then mkdir -p "$d" 2>/dev/null && chmod 700 "$d" || return 0; fi
+  root_only_dir "$d" || return 0       # else someone else could swap the file
+  if cp "$src" "$f.tmp" 2>/dev/null && chmod 600 "$f.tmp" && mv -f "$f.tmp" "$f"; then
+    [[ $src == "$old" ]] && rm -f "$old"
+  else rm -f "$f.tmp"; fi
   return 0
 }
 # check_state_dir – STATE_DIR must be this script's own folder: new, empty, or marked. A folder
@@ -4207,6 +4257,7 @@ init() {
     rm -f "$STATE_DIR/mail_failed"
   fi
   command -v plesk >/dev/null || note "plesk command not found – domain list from VHOST_LOGS only, domain aliases unknown"
+  (( ONLY_MODE || SUMMARY_ONLY )) || cron_note
   [[ -n $STATE_NOTE && $STATE_DIR == "$STATE_DIR_DEFAULT" ]] && note "$STATE_NOTE"   # not with STATE_DIR set in the configuration
   (( ${PSR_CONF_CREATED:-0} )) && note "config: created $CONF – every setting with its default, commented out; the state is kept in $STATE_DIR"
   if (( FIRST_RUN )) && [[ ! -e $CONF ]] && ! (( ONLY_MODE || SUMMARY_ONLY )); then

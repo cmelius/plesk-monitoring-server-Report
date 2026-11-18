@@ -54,7 +54,7 @@ setup() {
   RCL_FAILED=1
   check_rclocal >"$BODY"
   run report
-  [[ $output == *"rc.local: in use (1 command line(s)"*"rc-local.service failed at boot (systemctl status rc-local shows why)."* ]]
+  [[ $output == *"rc.local: in use (1 command line(s)"*"rc-local.service failed at boot: a command in it returned an error"*"systemctl status rc-local shows why."* ]]
   run cat "$DALERTS"
   [[ $output == "rc.local: "*"runs 1 command line(s) at boot (and failed) – deprecated"* ]]
   [ "$(alert_severity "$output")" = warning ]

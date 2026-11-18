@@ -32,7 +32,8 @@ setup() {
   check_services || true
   run report
   [[ $output == *"Failed units: postfix.service"* ]]
-  [[ $output == *"rc-local.service failed at boot – /etc/rc.local is deprecated (see the daily check rc.local)"*"systemctl status rc-local"* ]]
+  [[ $output == *"rc-local.service failed at boot – see rc.local in the daily checks (no alert of its own)"* ]]
+  [[ $output != *"systemctl status rc-local"* ]]   # explained once, in the daily check
   run alerts
   [ "$output" = "Service(s) failed: postfix.service" ]
 }
