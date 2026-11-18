@@ -84,7 +84,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.16.0
+VERSION=1.16.1
 
 set -uo pipefail
 export LC_ALL=C
@@ -3831,7 +3831,7 @@ su_edge() {
   su_prune
   exec 9>&-                            # release the lock
   echo "installed the development version $v (commit ${sha:0:7}). The previous copy ($VERSION) is kept in $SU_KEPT (--self-update --rollback goes back)."
-  echo "Test it with your configuration: plesk-server-report.sh --only services"
+  echo "Test it with your configuration: $self --only services"
 }
 self_update_1x() {
   local self dir d src latest v raw same
@@ -3929,7 +3929,7 @@ self_update_1x() {
   su_prune
   exec 9>&-                            # release the lock
   echo "installed version $latest. The previous copy ($VERSION) is kept in $SU_KEPT (--self-update --rollback goes back)."
-  echo "Test it with your configuration: plesk-server-report.sh --only services"
+  echo "Test it with your configuration: $self --only services"
   su_major_note
 }
 
@@ -4088,7 +4088,7 @@ cron_note() {
   done
   [[ -n $found ]] && return 0
   if [[ -n $other ]]; then
-    note "cron: no cron line runs this copy ($self) – $other; moved the script? Change the path there"
+    note "cron: no cron line runs this copy ($self) – $other; moved the script, or is this a second copy? Change the path there, or add a line for this copy"
   else
     note "cron: no cron line or systemd unit runs $self – reports come only when you start it. Hourly (set your own schedule): echo '5 * * * * root $self' > /etc/cron.d/plesk-server-report"
   fi

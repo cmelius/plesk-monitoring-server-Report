@@ -120,6 +120,7 @@ leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
   [ "$(nkept)" -eq 1 ]
   [ ! -e "$STATE_DIR/plesk-server-report.sh.old" ]
   [[ $output == *"is kept in $BK/plesk-server-report-1.12.0.sh"* ]]
+  [[ $output == *"Test it with your configuration: $SU_SELF --only services"* ]]
   [ "$(leftovers)" -eq 0 ]
 }
 

@@ -36,7 +36,7 @@ notes() { cat "$TMPD/notes" 2>/dev/null; }
 @test "a cron line with the old path after a move: named in the note" {
   echo "5 * * * * root /usr/local/sbin/plesk-server-report.sh" >"$C/cron.d/plesk-server-report"
   cron_note
-  [[ $(notes) == "cron: no cron line runs this copy ($SELF) – $C/cron.d/plesk-server-report runs /usr/local/sbin/plesk-server-report.sh; moved the script?"* ]]
+  [[ $(notes) == "cron: no cron line runs this copy ($SELF) – $C/cron.d/plesk-server-report runs /usr/local/sbin/plesk-server-report.sh; moved the script, or is this a second copy?"* ]]
 }
 
 @test "commented-out lines don't count" {

@@ -2,6 +2,12 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
+## [1.16.1] – not yet released (on `main`)
+
+### Changed
+- After `--self-update`, the suggested test command names the script with its full path (`/opt/plesk-server-report/plesk-server-report.sh --only services`) – in a folder of its own the script is not in the `PATH`.
+- The note when a cron line runs another copy of the script also fits a second copy, not only a moved one: "moved the script, or is this a second copy? Change the path there, or add a line for this copy".
+
 ## [1.16.0] – 2026-11-18
 
 ### Changed
