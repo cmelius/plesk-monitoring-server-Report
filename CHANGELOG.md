@@ -2,7 +2,7 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [1.16.0] – not yet released (on `main`)
+## [1.16.0] – 2026-11-18
 
 ### Changed
 - **Previous versions of the script are kept next to it, not in the state folder** ([#3](https://github.com/cmelius/plesk-monitoring-server-Report/issues/3)). The state folder may be deleted at any time – with the kept copy in it, deleting it also took away the way back. `--self-update` now keeps the replaced version as `plesk-server-report-VERSION.sh` (mode 600) in `plesk-server-report-backup/` next to the script, or `backup/` in a one-folder installation; `BACKUP_DIR` names another folder. New setting `SCRIPT_RETENTION` (default 5): how many versions are kept, at least 1. `--self-update --rollback` brings back the newest kept version and keeps the one it replaces; `--self-update --rollback 1.14.0` brings back a specific one. The `plesk-server-report.sh.old` left in the state folder by earlier versions moves there at the next `--self-update` or `--rollback`. README: Updates, Uninstall, switching to one folder.
