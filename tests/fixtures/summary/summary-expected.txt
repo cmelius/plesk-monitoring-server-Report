@@ -161,7 +161,7 @@ Highest CPU per system user (snapshots):
 Filesystems (highest usage):
      8%  /
      8%  /boot/efi
-Failed services / OOM killer: none in any run
+Failed services / OOM killer / crashes: none in any run
 Backups (newest report):
   Plesk backup: last run 2026-11-13 03:23 UTC (2 h ago, TOKEN), status: OK (exit code 0)
   Acronis agent: running

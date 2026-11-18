@@ -6,8 +6,8 @@
 #
 # Focus: outgoing spam from compromised mailboxes or hacked websites, CPU/RAM,
 # plus brute-force noise, fail2ban, web errors, successful logins, new PHP files
-# in upload folders, failed services, OOM kills, DNS blocklists, Plesk backup
-# status – and once a day: pending updates and expiring certificates.
+# in upload folders, failed services, OOM kills, crashing programs, DNS blocklists, Plesk backup
+# status – and once a day: pending updates, rarely used kernel modules and expiring certificates.
 # Mail sent through Roundcube webmail is analysed separately (its SMTP
 # connections come from localhost and are invisible in the mail log).
 # Web logs are also scanned for attack patterns, probes for sensitive files, traffic
@@ -84,7 +84,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.16.1
+VERSION=1.17.0
 
 set -uo pipefail
 export LC_ALL=C
@@ -193,6 +193,13 @@ PERSISTENCE_IGNORE=""         # regex on the text of findings to ignore (e.g. a 
 DNSBL_LISTS="zen.spamhaus.org bl.spamcop.net psbl.surriel.com"   # Barracuda: see README (answers registered resolvers only)
 WEB_IGNORE_DOMAINS=""         # space-separated domains without web alerts (still listed)
 IGNORE_FAILED_UNITS=""        # space-separated systemd units (patterns allowed, e.g. "rc-local.service backup-*") without an alert when failed (still listed)
+# Crashes (hourly): programs killed by a fatal signal – segfault & co. in the kernel log, plus the
+# lines nginx, Apache and PHP-FPM write when a worker dies. Repeated crashes: an attack on a memory bug?
+CRASH_LOGS="/var/log/nginx/error.log /var/log/apache2/error.log /var/log/httpd/error_log /var/log/plesk-php*-fpm/error.log /var/log/php*-fpm.log /var/log/php-fpm/error.log"   # patterns allowed
+IGNORE_CRASHES=""             # space-separated programs (nginx, apache, php-fpm, or the name in the kernel log) without an alert (still listed)
+# Daily: kernel modules of rarely used network protocols – any process can load them by opening a
+# socket, and their bugs were the way to root more than once. Loaded → warning, loadable → recommendation
+RARE_MODULES="sctp dccp tipc rds"   # "" = check off
 # Known legitimate PHP files inside wp-content/uploads (regex on the full path)
 UPLOADS_PHP_IGNORE='/uploads/mailchimp-for-wp/debug-log\.php$'
 
@@ -217,7 +224,7 @@ SYS_BIN_RE='^(/usr/local/sbin|/usr/local/bin|/usr/sbin|/usr/bin|/sbin|/bin)$'   
 # Check names in report order. Hourly checks analyse the log lines since the previous run,
 # daily checks run once a day and are cached in $STATE_DIR/daily.txt.
 HOURLY_CHECKS="mail webmail system fail2ban web uploads logins panel persistence services backups"
-DAILY_CHECKS="updates certificates https serverdns mailtls domaindns exposed webshell mailauth mailboxes rclocal"
+DAILY_CHECKS="updates kmodules certificates https serverdns mailtls domaindns exposed webshell mailauth mailboxes rclocal"
 
 # =============================================================================
 # Helper functions
@@ -233,6 +240,7 @@ dalert() {                                        # daily alert, cached with the
 section() { printf '\n== %s ==\n' "$1" >>"$BODY"; }
 out() { printf '%s\n' "$*" >>"$BODY"; }
 ignored_domain() { [[ " $WEB_IGNORE_DOMAINS " == *" $1 "* ]]; }
+join_comma() { local IFS=$'\n' r; r="$*"; [[ -n $r ]] && printf '%s' "${r//$'\n'/, }" || printf 'none'; }   # join_comma A B … → "A, B" ("none" for nothing)
 num_gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 # state files (offsets, scan stamps, known IPs) are only written in normal runs – not with --only,
 # --summary, or when the previous run still holds the lock
@@ -1973,7 +1981,62 @@ check_persistence() {   # SSH keys, accounts, sudo, cron/autostart, suspicious p
   return 0
 }
 
-check_services() {   # failed systemd units, OOM killer
+# crash_records – one line "PROGRAM TAB COUNT TAB SIGNALS" per program that crashed since the previous run.
+# Sources: the kernel's line for a program killed by a fault (segfault, general protection, invalid
+# opcode, divide error) and the lines nginx ("worker process N exited on signal 11"), Apache ("child
+# pid N exit signal Segmentation fault (11)") and PHP-FPM ("child N exited on signal 11") write in
+# CRASH_LOGS. Only the signals of a program fault count – 4 SIGILL, 6 SIGABRT, 7 SIGBUS, 8 SIGFPE,
+# 11 SIGSEGV –, not a kill (9, 15) by the OOM killer, a timeout or an admin. One crash usually shows
+# in both sources: per program the higher of the two counts is taken.
+crash_records() {
+  local f
+  {
+    if command -v journalctl >/dev/null; then
+      T "$CMD_TIMEOUT" journalctl -k -q -o cat --since "@$SINCE" 2>/dev/null | log_clean |
+        grep -E 'segfault at|general protection|trap (invalid opcode|divide error)' | sed 's/^/K /' || true
+    fi
+    for f in $CRASH_LOGS; do
+      [[ -f $f ]] || continue
+      new_lines "$f" | grep -E 'exited on signal|exit signal' | sed 's/^/L /' || true
+    done
+  } | awk '
+    function norm(p) {
+      if (p ~ /^nginx/) return "nginx"
+      if (p ~ /^(apache2|httpd)/) return "apache"
+      if (p ~ /^php-fpm/) return "php-fpm"
+      return p
+    }
+    function signame(x) { return x == 4 ? "SIGILL" : x == 6 ? "SIGABRT" : x == 7 ? "SIGBUS" : x == 8 ? "SIGFPE" : x == 11 ? "SIGSEGV" : "" }
+    function add(src, p, s) {
+      if (s == "") return
+      p = norm(p); n[src SUBSEP p]++
+      if (!(p in seen)) { seen[p] = 1; order[++np] = p }
+      if (index(" " sg[p] " ", " " s " ") == 0) sg[p] = sg[p] (sg[p] == "" ? "" : " ") s
+    }
+    $1 == "K" {   # "nginx[1234]: segfault at …", "traps: nginx[1234] general protection fault …", "… trap invalid opcode …"
+      if (!match($0, /[A-Za-z0-9_.+-]+\[[0-9]+\]:? (segfault|general protection|trap)/)) next
+      m = substr($0, RSTART, RLENGTH); p = m; sub(/\[.*/, "", p)
+      add("K", p, m ~ /segfault|general protection/ ? "SIGSEGV" : $0 ~ /invalid opcode/ ? "SIGILL" : "SIGFPE")
+      next
+    }
+    $1 == "L" {
+      if (match($0, /process [0-9]+ exited on signal [0-9]+/)) {          # nginx
+        m = substr($0, RSTART, RLENGTH); sub(/.* /, "", m); add("L", "nginx", signame(m + 0))
+      } else if (match($0, /child pid [0-9]+ exit signal [^(]*\([0-9]+\)/)) {   # Apache
+        m = substr($0, RSTART, RLENGTH); sub(/.*\(/, "", m); sub(/\)/, "", m); add("L", "apache", signame(m + 0))
+      } else if (match($0, /child [0-9]+ exited on signal [0-9]+/)) {     # PHP-FPM
+        m = substr($0, RSTART, RLENGTH); sub(/.* /, "", m); add("L", "php-fpm", signame(m + 0))
+      }
+    }
+    END {
+      for (i = 1; i <= np; i++) {
+        p = order[i]; a = n["K" SUBSEP p] + 0; b = n["L" SUBSEP p] + 0
+        printf "%s\t%d\t%s\n", p, (a > b ? a : b), sg[p]
+      }
+    }'
+}
+
+check_services() {   # failed systemd units, OOM killer, crashes
   local FAILED OOM
   section "SERVICES"
   if command -v systemctl >/dev/null; then
@@ -1998,6 +2061,18 @@ check_services() {   # failed systemd units, OOM killer
     OOM=$(T "$CMD_TIMEOUT" journalctl -k --since "@$SINCE" 2>/dev/null | grep -iE 'out of memory|oom-kill|killed process' | grep -oE 'Killed process [0-9]+ \([^)]+\)' | sort | uniq -c | xargs)
     out "OOM killer: ${OOM:-none}"
     [[ -n $OOM ]] && alert "RAM: the kernel killed processes due to low memory: $OOM"
+  fi
+  local p cnt sig crash=() crash_ign=()
+  while IFS=$'\t' read -r p cnt sig; do
+    [[ -n $p ]] || continue
+    if [[ " ${IGNORE_CRASHES:-} " == *" $p "* ]]; then crash_ign+=("$p ${cnt}× ($sig)"); else crash+=("$p ${cnt}× ($sig)"); fi
+  done < <(crash_records)
+  out "Crashes: $(join_comma "${crash[@]}")"
+  (( ${#crash_ign[@]} )) && out "Crashes without an alert (IGNORE_CRASHES): $(join_comma "${crash_ign[@]}")"
+  if (( ${#crash[@]} )); then
+    out "  A program that crashes again and again: an attack on a memory bug in it (probing for an exploit"
+    out "  makes workers crash), or a faulty module or PHP extension. Install updates; its error log shows when."
+    alert "Crash: $(join_comma "${crash[@]}") – an attack on a memory bug, or a faulty module? Install updates, see the error log"
   fi
   return 0
 }
@@ -2107,6 +2182,56 @@ check_updates() {   # pending (security) updates, reboot required
     dnf_reboot_check
   fi
   (( UPDATE_CHECK )) && script_update_check
+  return 0
+}
+
+# Kernel modules of network protocols few servers use (RARE_MODULES: SCTP, DCCP, TIPC, RDS). The kernel
+# loads them on demand when any process opens such a socket – also a web server worker taken over
+# through a vulnerability –, and their bugs were the way to root more than once (SCTP in Nov. 2026,
+# chained with the nginx vulnerabilities "nginx2root"). Read only: the report shows how to block them.
+MODULES_SYS=/sys/module
+MODULES_DIR=/lib/modules
+mod_state() {   # mod_state MODULE – builtin | loaded | blocked | blacklisted | missing | loadable ($MODPROBE_RULES set)
+  local m=$1
+  if grep -qE "/${m}\.ko" "$MODULES_DIR/$(uname -r)/modules.builtin" 2>/dev/null; then echo builtin
+  elif [[ -d $MODULES_SYS/$m ]]; then echo loaded
+  elif mod_blocked "$m"; then echo blocked
+  elif grep -qxF "blacklist $m" <<<"$MODPROBE_RULES"; then echo blacklisted
+  elif ! T "$CMD_TIMEOUT" modinfo -n "$m" >/dev/null 2>&1; then echo missing
+  else echo loadable; fi
+}
+# mod_blocked MODULE – an "install MODULE /bin/false" (or /bin/true) rule: modprobe never loads it
+mod_blocked() { grep -qE "^install $1 (/usr)?/bin/(false|true)( |\$)" <<<"$MODPROBE_RULES"; }
+check_kmodules() {   # rarely used network protocol modules: loaded (warning) or loadable (recommendation)
+  local m st parts=() loaded=() todo=()
+  echo ""
+  if ! command -v modprobe >/dev/null; then echo "Kernel modules: modprobe not found – not checked"; return 0; fi
+  MODPROBE_RULES=$(T "$CMD_TIMEOUT" modprobe -c 2>/dev/null | grep -E '^(install|blacklist) ' || true)
+  for m in $RARE_MODULES; do
+    st=$(mod_state "$m")
+    case $st in
+      loaded)
+        if mod_blocked "$m"; then parts+=("$m LOADED (blocked from the next boot on)")
+        else parts+=("$m LOADED"); todo+=("$m"); fi
+        loaded+=("$m") ;;
+      loadable)    parts+=("$m loadable"); todo+=("$m") ;;
+      blocked)     parts+=("$m blocked") ;;
+      blacklisted) parts+=("$m blacklisted (not loaded automatically)") ;;
+      builtin)     parts+=("$m built into the kernel") ;;
+      missing)     parts+=("$m not installed") ;;
+    esac
+  done
+  echo "Kernel modules of rarely used network protocols: $(join_comma "${parts[@]}")"
+  if (( ${#todo[@]} )); then
+    echo "  Recommendation: block what no service needs (SCTP is used by telephony, a few cluster setups) – any process,"
+    echo "  also a web server worker taken over through a vulnerability, loads them by opening a socket, and their"
+    echo "  bugs were the way to root more than once:"
+    printf '    printf '\''install %%s /bin/false\\n'\'' %s >/etc/modprobe.d/rare-net-modules.conf\n' "${todo[*]}"
+  fi
+  if (( ${#loaded[@]} )); then
+    echo "  Loaded: ${loaded[*]} – no longer needed? After blocking: modprobe -r ${loaded[*]}, or reboot if it is in use"
+    dalert "Kernel: rarely used network module(s) loaded: ${loaded[*]} – a way to root in kernel vulnerabilities; needed by a service? If not, block and unload them (see the report)"
+  fi
   return 0
 }
 
@@ -2648,6 +2773,7 @@ check_enabled() {
     mailboxes) (( WARN_MAILBOX_PCT > 0 || WARN_MAILBOX_UNLIMITED_GB > 0 )) ;;
     https)     (( HTTPS_CHECK )) ;;
     persistence) (( PERSISTENCE_CHECK )) ;;
+    kmodules)  [[ -n ${RARE_MODULES// /} ]] ;;
     *) return 0 ;;
   esac
 }
@@ -2780,7 +2906,7 @@ alert_severity() {
     "Web: "*" served the sensitive file "*|"Web: "*" exposes "*" publicly"*|\
     "Access: new SSH key "*|"Access: account "*" has UID 0"*|"Access: /etc/ld.so.preload "*|\
     "Cron: "*"suspicious"*|"Process: "*|\
-    "Service(s) failed: "*|"fail2ban is not running"*|"RAM: the kernel killed processes"*|\
+    "Service(s) failed: "*|"fail2ban is not running"*|"Crash: "*"nginx "*|"Crash: "*"apache "*|"RAM: the kernel killed processes"*|\
     "DNS: "*" does not resolve"*|"TLS: mail certificate on port "*" has expired"*) echo critical ;;
     *) echo warning ;;
   esac
@@ -3086,7 +3212,7 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       next
     }
     sec ~ /SERVICES/ {
-      if (($0 ~ /^Failed units: / && $0 !~ /: none$/) || ($0 ~ /^OOM killer: / && $0 !~ /: none$/)) print "SVC\t" tm "\t" t($0)
+      if ($0 ~ /^(Failed units|OOM killer|Crashes): / && $0 !~ /: none$/) print "SVC\t" tm "\t" t($0)
       next
     }
     sec ~ /== BACKUPS ==/ {   # backup status: the lines of the newest report
@@ -3213,8 +3339,8 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
     rec CPU | sort -t$'\t' -k1,1nr | head -5 | awk -F'\t' '{printf "  %6s %%  %s (%s)\n", $1, $2, $3}'
     echo "Filesystems (highest usage):"
     rec DISK | sort -t$'\t' -k1,1nr | awk -F'\t' '{printf "  %4s%%  %s\n", $1, $2}'
-    if [[ -n $(rec SVC) ]]; then echo "Failed services / OOM killer:"; rec SVC | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
-    else echo "Failed services / OOM killer: none in any run"; fi
+    if [[ -n $(rec SVC) ]]; then echo "Failed services / OOM killer / crashes:"; rec SVC | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
+    else echo "Failed services / OOM killer / crashes: none in any run"; fi
     if [[ -n $(rec BKP) ]]; then echo "Backups (newest report):"; rec BKP | sed 's/^/  /'; fi
 
     echo ""; echo "== WEB (totals) =="

@@ -2,7 +2,12 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [1.16.1] – not yet released (on `main`)
+## [1.17.0] – not yet released (on `main`)
+
+### Added
+Two checks derived from the nginx vulnerabilities published on 2026-11-18 as **"nginx2root"** ([CVE-2026-123007](https://www.cve.org/CVERecord?id=CVE-2026-123007), with CVE-2026-123634, CVE-2026-123633, CVE-2026-121810 and CVE-2026-113425; fixed in nginx 1.31.9; [write-up by Xint](https://xint.io/blog/nginx2root-remote-code-execution)): unauthenticated code execution in nginx through HTTP/2, chained with a bug in the kernel's SCTP module to become root. The script can't tell whether an nginx is patched (distributions backport fixes without changing the version) – but it can show the traces such an attack leaves and the door it used to root.
+- **Crashing programs** (hourly, *Services*): programs killed by a fatal signal (SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE) – the kernel's segfault lines from the journal, and the lines nginx (`worker process … exited on signal 11`), Apache (`child pid … exit signal Segmentation fault (11)`) and PHP-FPM (`child … exited on signal 11`) write when a worker dies. Probing for an exploit of a memory bug makes the workers crash, so a crash raises an alert – critical for nginx and Apache. A crash seen in both the kernel log and the program's log counts once; a kill (signal 9 or 15: OOM killer, timeout, admin) is no crash. New settings `CRASH_LOGS` (the logs searched) and `IGNORE_CRASHES` (programs listed without an alert, e.g. `php-fpm` with a PHP extension known to crash). The summary lists crashes with the failed services.
+- **Daily check `kmodules`: kernel modules of rarely used network protocols** (`RARE_MODULES`, default `sctp dccp tipc rds`). Any process – also a web server worker in an attacker's hands – makes the kernel load them by opening such a socket, and their bugs led to root more than once (nginx2root used SCTP). Per module: loaded (warning), loadable (recommendation with the command to block them: `install … /bin/false` in `/etc/modprobe.d/`), blocked, blacklisted, not installed or built in. Read only – the script blocks nothing. `RARE_MODULES=""` switches the check off.
 
 ### Changed
 - After `--self-update`, the suggested test command names the script with its full path (`/opt/plesk-server-report/plesk-server-report.sh --only services`) – in a folder of its own the script is not in the `PATH`.
