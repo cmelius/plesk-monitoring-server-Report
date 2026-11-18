@@ -2,7 +2,10 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [1.15.1] – not yet released (on `main`)
+## [1.16.0] – not yet released (on `main`)
+
+### Changed
+- **Previous versions of the script are kept next to it, not in the state folder** ([#3](https://github.com/cmelius/plesk-monitoring-server-Report/issues/3)). The state folder may be deleted at any time – with the kept copy in it, deleting it also took away the way back. `--self-update` now keeps the replaced version as `plesk-server-report-VERSION.sh` (mode 600) in `plesk-server-report-backup/` next to the script, or `backup/` in a one-folder installation; `BACKUP_DIR` names another folder. New setting `SCRIPT_RETENTION` (default 5): how many versions are kept, at least 1. `--self-update --rollback` brings back the newest kept version and keeps the one it replaces; `--self-update --rollback 1.14.0` brings back a specific one. The `plesk-server-report.sh.old` left in the state folder by earlier versions moves there at the next `--self-update` or `--rollback`. README: Updates, Uninstall, switching to one folder.
 
 ### Added
 - **Who rejected the mail, and what to do.** Below the examples of rejections the report now names the list or provider recognised in the replies – Trend Micro ERS, Spamhaus, Cloudmark, Proofpoint, Barracuda, SpamCop, Microsoft 365 (including 5.7.511), Outlook.com/Hotmail, GMX/WEB.DE/IONOS, T-Online, Gmail, Yahoo/AOL, Apple iCloud – with where to check the server's IP and how to get it removed – for Trend Micro, Spamhaus, Proofpoint and Cloudmark the link already carries the IP (if it is public – behind NAT the private address would be the wrong one), one click shows the result; the alert names them too. README and CONTRIBUTING: how to send rejections of providers the report doesn't know yet. Found with a rejection by Trend Micro (the IP was on its Dial-up User List) that no public blocklist showed – removed the same day after a short request.

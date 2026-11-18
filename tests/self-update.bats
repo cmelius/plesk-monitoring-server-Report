@@ -26,9 +26,11 @@ setup() {
     esac
   }
   SU_YES=1
+  BK="$INST/plesk-server-report-backup"
 }
 
 installed() { bash "$SU_SELF" --version; }
+nkept() { find "$BK" -mindepth 1 -maxdepth 1 -name 'plesk-server-report-*' 2>/dev/null | wc -l; }   # also catches leftover .tmp
 leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
 
 @test "only as root" {
@@ -58,7 +60,7 @@ leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
   run self_update_1x
   [ "$status" -eq 0 ]
   [[ $output == *"version 1.12.0 is up to date (latest 1.x release: 1.12.0)"* ]]
-  [ ! -e "$STATE_DIR/plesk-server-report.sh.old" ]
+  [ "$(nkept)" -eq 0 ]
 }
 
 @test "newer than the latest release (from main): nothing to do" {
@@ -75,7 +77,7 @@ leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
   [ "$status" -eq 0 ]
   [[ $output == *"Version 2.0.0 is available. It can't be installed with --self-update of version 1"* ]]
   cmp -s "$SU_SELF" "$ORIG"
-  [ ! -e "$STATE_DIR/plesk-server-report.sh.old" ]
+  [ "$(nkept)" -eq 0 ]
 }
 
 @test "--major is recognised, but not available in 1.x yet" {
@@ -104,7 +106,7 @@ leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
   [ "$(leftovers)" -eq 0 ]
 }
 
-@test "update: changes shown, script replaced, old version kept in the state directory" {
+@test "update: changes shown, script replaced, old version kept next to the script, not in the state folder" {
   run self_update_1x
   [ "$status" -eq 0 ]
   [[ $output == *"version 1.12.1 is available (installed: 1.12.0)"* ]]
@@ -112,9 +114,56 @@ leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
   [[ $output != *"- old"* ]]
   [ "$(installed)" = "plesk-server-report 1.12.1" ]
   [ "$(stat -c %a "$SU_SELF")" = 700 ]
-  [ "$(bash "$STATE_DIR/plesk-server-report.sh.old" --version)" = "plesk-server-report 1.12.0" ]
-  [ "$(stat -c %a "$STATE_DIR/plesk-server-report.sh.old")" = 600 ]
+  [ "$(bash "$BK/plesk-server-report-1.12.0.sh" --version)" = "plesk-server-report 1.12.0" ]
+  [ "$(stat -c %a "$BK/plesk-server-report-1.12.0.sh")" = 600 ]
+  [ "$(stat -c %a "$BK")" = 700 ]
+  [ "$(nkept)" -eq 1 ]
+  [ ! -e "$STATE_DIR/plesk-server-report.sh.old" ]
+  [[ $output == *"is kept in $BK/plesk-server-report-1.12.0.sh"* ]]
   [ "$(leftovers)" -eq 0 ]
+}
+
+@test "one-folder installation: backup/ next to the script; BACKUP_DIR overrides it" {
+  [ "$(CONF_LOCAL=1 backup_dir /opt/psr/plesk-server-report.sh)" = /opt/psr/backup ]
+  [ "$(CONF_LOCAL=0 backup_dir /usr/local/sbin/plesk-server-report.sh)" = /usr/local/sbin/plesk-server-report-backup ]
+  [ "$(BACKUP_DIR=/srv/keep backup_dir /usr/local/sbin/plesk-server-report.sh)" = /srv/keep ]
+  CONF_LOCAL=1 self_update_1x >/dev/null
+  [ -e "$INST/backup/plesk-server-report-1.12.0.sh" ]
+}
+
+@test "the copy kept by 1.15.x in the state folder moves to the backup folder" {
+  mkdir -p "$STATE_DIR"; sed 's/^VERSION=.*/VERSION=1.11.0/' "$ORIG" >"$STATE_DIR/plesk-server-report.sh.old"
+  touch -d '2026-01-01' "$STATE_DIR/plesk-server-report.sh.old"
+  self_update_1x >/dev/null
+  [ ! -e "$STATE_DIR/plesk-server-report.sh.old" ]
+  [ "$(bash "$BK/plesk-server-report-1.11.0.sh" --version)" = "plesk-server-report 1.11.0" ]
+  [ "$(date -r "$BK/plesk-server-report-1.11.0.sh" +%F)" = 2026-01-01 ]
+  [ -e "$BK/plesk-server-report-1.12.0.sh" ]
+}
+
+@test "SCRIPT_RETENTION: only the newest versions are kept, other files in the folder stay" {
+  mkdir -p "$BK"; local v
+  for v in 1.9.0 1.10.0 1.11.0; do
+    sed "s/^VERSION=.*/VERSION=$v/" "$ORIG" >"$BK/plesk-server-report-$v.sh"
+  done
+  touch -d '2026-01-01' "$BK/plesk-server-report-1.9.0.sh"; touch -d '2026-02-01' "$BK/plesk-server-report-1.10.0.sh"
+  touch -d '2026-03-01' "$BK/plesk-server-report-1.11.0.sh"; touch "$BK/notes.txt"
+  SCRIPT_RETENTION=2 self_update_1x >/dev/null
+  [ -e "$BK/plesk-server-report-1.12.0.sh" ] && [ -e "$BK/plesk-server-report-1.11.0.sh" ]
+  [ ! -e "$BK/plesk-server-report-1.10.0.sh" ] && [ ! -e "$BK/plesk-server-report-1.9.0.sh" ]
+  [ -e "$BK/notes.txt" ]
+}
+
+@test "SCRIPT_RETENTION=0 still keeps one version (for --rollback)" {
+  SCRIPT_RETENTION=0 self_update_1x >/dev/null
+  [ "$(nkept)" -eq 1 ]
+}
+
+@test "the same version number with other content gets a name of its own" {
+  mkdir -p "$BK"; sed 's/^# deleted binaries/# (main) deleted binaries/' "$ORIG" >"$BK/plesk-server-report-1.12.0.sh"
+  self_update_1x >/dev/null
+  [ "$(nkept)" -eq 2 ]
+  ls "$BK" | grep -Eq '^plesk-server-report-1\.12\.0-[0-9]{8}-[0-9]{6}\.sh$'
 }
 
 @test "update into a new state folder: marked, so the next run accepts it (issue #3)" {
@@ -139,7 +188,7 @@ leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
   run self_update_1x
   [ "$status" -eq 1 ]
   [[ $output == *"refusing to run"* ]]
-  [ ! -e "$STATE_DIR/plesk-server-report.sh.old" ]
+  [ "$(nkept)" -eq 0 ]
   [ "$(installed)" = "plesk-server-report 1.12.0" ]
 }
 
@@ -152,7 +201,7 @@ leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
   [ "$(leftovers)" -eq 0 ]
 }
 
-@test "--rollback brings the kept version back, and swaps again" {
+@test "--rollback brings the newest kept version back, keeps the replaced one, and goes forward again" {
   self_update_1x >/dev/null
   [ "$(installed)" = "plesk-server-report 1.12.1" ]
   SU_ROLLBACK=1
@@ -160,16 +209,59 @@ leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
   [ "$status" -eq 0 ]
   [[ $output == *"back to 1.12.0"* ]]
   [ "$(installed)" = "plesk-server-report 1.12.0" ]
-  [ "$(bash "$STATE_DIR/plesk-server-report.sh.old" --version)" = "plesk-server-report 1.12.1" ]
+  [ "$(bash "$BK/plesk-server-report-1.12.1.sh" --version)" = "plesk-server-report 1.12.1" ]
   [ "$(stat -c %a "$SU_SELF")" = 700 ]
-  [ "$(stat -c %a "$STATE_DIR/plesk-server-report.sh.old")" = 600 ]
+  [ "$(stat -c %a "$BK/plesk-server-report-1.12.1.sh")" = 600 ]
+  sleep 1; run self_update_1x
+  [ "$status" -eq 0 ]
+  [ "$(installed)" = "plesk-server-report 1.12.1" ]
+}
+
+@test "--rollback VERSION: that version, not the newest" {
+  mkdir -p "$BK"; sed 's/^VERSION=.*/VERSION=1.10.0/' "$ORIG" >"$BK/plesk-server-report-1.10.0.sh"
+  touch -d '2026-01-01' "$BK/plesk-server-report-1.10.0.sh"
+  self_update_1x >/dev/null
+  SU_ROLLBACK=1; SU_ROLLBACK_TO=1.10.0
+  run self_update_1x
+  [ "$status" -eq 0 ]
+  [ "$(installed)" = "plesk-server-report 1.10.0" ]
+  SU_ROLLBACK_TO=1.8.0
+  run self_update_1x
+  [ "$status" -eq 1 ]
+  [[ $output == *"no kept version 1.8.0"*"kept:"*"1.12.1"* ]]
+}
+
+@test "--rollback with only the copy kept by 1.15.x in the state folder" {
+  mkdir -p "$STATE_DIR"; sed 's/^VERSION=.*/VERSION=1.11.0/' "$ORIG" >"$STATE_DIR/plesk-server-report.sh.old"
+  SU_ROLLBACK=1
+  run self_update_1x
+  [ "$status" -eq 0 ]
+  [ "$(installed)" = "plesk-server-report 1.11.0" ]
+  [ ! -e "$STATE_DIR/plesk-server-report.sh.old" ]
+  [ -e "$BK/plesk-server-report-1.12.0.sh" ]
 }
 
 @test "--rollback without a kept version" {
   SU_ROLLBACK=1
   run self_update_1x
   [ "$status" -eq 1 ]
-  [[ $output == *"there is no previous version"* ]]
+  [[ $output == *"no kept version in $BK – kept: none"* ]]
+}
+
+@test "deleting the state folder keeps the versions for --rollback" {
+  self_update_1x >/dev/null
+  rm -rf "$STATE_DIR"
+  SU_ROLLBACK=1
+  run self_update_1x
+  [ "$status" -eq 0 ]
+  [ "$(installed)" = "plesk-server-report 1.12.0" ]
+}
+
+@test "--rollback VERSION is parsed, --rollback alone too" {
+  parse_args --self-update --rollback 1.14.0
+  [ "$SU_ROLLBACK" = 1 ] && [ "$SU_ROLLBACK_TO" = 1.14.0 ]
+  SU_ROLLBACK_TO=""; parse_args --self-update --rollback --yes
+  [ "$SU_ROLLBACK" = 1 ] && [ -z "$SU_ROLLBACK_TO" ] && [ "$SU_YES" = 1 ]
 }
 
 @test "--yes, --rollback and --major only with --self-update" {
@@ -195,7 +287,7 @@ leftovers() { find "$INST" -name '.plesk-server-report.*' | wc -l; }
   [ "$status" -eq 0 ]
   [[ $output == *"your copy of 1.12.0 differs from the release 1.12.0"* ]]
   cmp -s "$SU_SELF" "$NEW"
-  [ -e "$STATE_DIR/plesk-server-report.sh.old" ]
+  [ -e "$BK/plesk-server-report-1.12.0.sh" ]
   [ "$(leftovers)" -eq 0 ]
 }
 
@@ -301,7 +393,7 @@ edge_setup() {
   [[ $output == *"NOT A RELEASE"* ]]
   [[ $output == *"- edge change"* ]]
   [ "$(installed)" = "plesk-server-report 1.12.1" ]
-  [ "$(bash "$STATE_DIR/plesk-server-report.sh.old" --version)" = "plesk-server-report 1.12.0" ]
+  [ "$(bash "$BK/plesk-server-report-1.12.0.sh" --version)" = "plesk-server-report 1.12.0" ]
   [ "$(leftovers)" -eq 0 ]
 }
 

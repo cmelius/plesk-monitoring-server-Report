@@ -638,8 +638,9 @@ How the script finds its files:
 - **Configuration:** `plesk-server-report.conf` next to the script if it exists, else `/etc/plesk-server-report.conf`; `--config FILE` names another one. The same check applies to all of them: owned by root, writable only by root.
 - **First run:** if there is no configuration file at all and the script is *not* in a system folder (`/usr/local/sbin`, `/usr/local/bin`, `/usr/sbin`, …), the first run writes `plesk-server-report.conf` next to it (`chmod 600`, only in a folder that only root can change). It lists every setting with its default, commented out – the defaults apply until you change a line, and settings you leave commented out follow the defaults of later versions too. In a system folder nothing is written next to the script; `--init-config` writes the file on request (then to `/etc/plesk-server-report.conf`). `--init-config` never overwrites a configuration, and `--self-update` only replaces the script – your settings stay as they are. `--print-config` shows the template of the installed version, to compare it with your file.
 - **State:** with the configuration next to the script, the state goes to `state/` next to it – unless an existing installation keeps its state in `/var/lib/plesk-server-report` (then it stays there and the report says how to move it, see below). `STATE_DIR` overrides both. The script marks its state folder and refuses a `STATE_DIR` that holds other files (`STATE_DIR=/root`, a typo), so its files never end up among others.
+- **Previous versions** kept by `--self-update`: `backup/` next to the script (`plesk-server-report-backup/` when the script is in a system folder or uses `/etc/plesk-server-report.conf`), not in the state folder – deleting the state never loses them. `BACKUP_DIR` overrides it, `SCRIPT_RETENTION` (default 5) says how many.
 
-**Switching from the usual layout:** move the script, its configuration (if you have one) and its state – without the state, the next run reads the logs again like a first run and reports what it knew as new.
+**Switching from the usual layout:** move the script, its configuration (if you have one), its state and the kept versions – without the state, the next run reads the logs again like a first run and reports what it knew as new.
 
 ```bash
 rm /etc/cron.d/plesk-server-report                     # no run during the move
@@ -647,6 +648,7 @@ mkdir -m 700 /opt/plesk-server-report
 mv /usr/local/sbin/plesk-server-report.sh /opt/plesk-server-report/
 mv /etc/plesk-server-report.conf /opt/plesk-server-report/      # if it exists
 mv /var/lib/plesk-server-report /opt/plesk-server-report/state
+mv /usr/local/sbin/plesk-server-report-backup /opt/plesk-server-report/backup   # if it exists
 /opt/plesk-server-report/plesk-server-report.sh --show-state | head -1   # State directory: /opt/plesk-server-report/state
 echo '5 * * * * root /opt/plesk-server-report/plesk-server-report.sh' > /etc/cron.d/plesk-server-report
 ```
@@ -887,6 +889,8 @@ All thresholds apply **per run**. With the hourly cron job that means per hour; 
 | `KNOWN_MAIL_IP_DAYS` | 30 | days to remember client IPs of successful mail logins – alert when fail2ban bans one of them |
 | `KNOWN_LOGIN_IP_DAYS` | 90 | days to remember an SSH/Plesk login IP without a login from it (0 = never). After that, the next login from it raises "unknown IP" again |
 | `UPDATE_CHECK` | 1 | once a day, ask GitHub whether a newer release of the script exists and say so in the daily checks (info only, nothing is installed); 0 = no request |
+| `BACKUP_DIR` | (empty) | where `--self-update` keeps the previous versions; empty: next to the script, `plesk-server-report-backup/` – or `backup/` in a one-folder installation |
+| `SCRIPT_RETENTION` | 5 | how many previous versions `--self-update` keeps (at least 1, for `--rollback`) |
 | `REPORT_MAIL_TO` | empty | mail the reports to this address (several: space-separated). Recommended: a mailbox on this server, so the reports never leave it. See [Reports by mail](#reports-by-mail). Empty = no mails |
 | `REPORT_MAIL` | `alerts summary` | what is mailed, one or more words separated by spaces: `alerts` = the report when it has a new alert, `summary` = `summary.txt` once a day, `all` = every report. E.g. `"summary"` = only the daily mail |
 | `REPORT_MAIL_HOUR` | 6 | the summary mail goes out with the first run from this hour on (server time, 0–23) |
@@ -959,7 +963,7 @@ The script runs on a production Plesk server with about 40 domains and is **acti
 /usr/local/sbin/plesk-server-report.sh --only services    # quick test run with your configuration
 ```
 
-It looks for the newest **1.x** release, downloads its script from GitHub, checks it without running it (valid bash, the expected version), shows the CHANGELOG sections since your version and asks before it replaces anything. With the same version number it compares the files: a copy taken from `main` before the release can differ from the release, and is then offered to be replaced by it. It also finds the commit your copy came from – by git's checksum of the file, computed without git, among the last 20 commits that changed the script (one GitHub API request each; 60 an hour are allowed without login) – and lists the commits the release adds; if it can't find it, it shows the release's CHANGELOG section. It waits for a running report to finish. The previous version is kept as `/var/lib/plesk-server-report/plesk-server-report.sh.old`; `--self-update --rollback` brings it back (and swaps again if called twice). `--yes` skips the question – it still has to be started from a terminal, never from cron. A git checkout is refused: update it with `git pull`. Your settings in `/etc/plesk-server-report.conf` and the state are kept.
+It looks for the newest **1.x** release, downloads its script from GitHub, checks it without running it (valid bash, the expected version), shows the CHANGELOG sections since your version and asks before it replaces anything. With the same version number it compares the files: a copy taken from `main` before the release can differ from the release, and is then offered to be replaced by it. It also finds the commit your copy came from – by git's checksum of the file, computed without git, among the last 20 commits that changed the script (one GitHub API request each; 60 an hour are allowed without login) – and lists the commits the release adds; if it can't find it, it shows the release's CHANGELOG section. It waits for a running report to finish. The previous versions are kept next to the script – `plesk-server-report-backup/` (in `/usr/local/sbin`), or `backup/` in a one-folder installation; `BACKUP_DIR` names another folder – as `plesk-server-report-VERSION.sh` (mode 600, not executable), the newest `SCRIPT_RETENTION` (default 5). Not in the state folder: that one may be deleted at any time. `--self-update --rollback` brings back the newest kept version and keeps the one it replaces (called twice, it goes forward again); `--self-update --rollback 1.14.0` brings back that version. `--yes` skips the question – it still has to be started from a terminal, never from cron. A git checkout is refused: update it with `git pull`. Your settings in `/etc/plesk-server-report.conf` and the state are kept.
 
 **On the edge: the development version.** To get changes before they are released (from version 1.14.0 on):
 
@@ -1002,7 +1006,7 @@ First find out where the state is kept: `plesk-server-report.sh --show-state | h
 ```bash
 rm -f /etc/cron.d/plesk-server-report
 rm -f /usr/local/sbin/plesk-server-report.sh /etc/plesk-server-report.conf
-rm -rf /var/lib/plesk-server-report
+rm -rf /usr/local/sbin/plesk-server-report-backup /var/lib/plesk-server-report
 ```
 
 **Everything in one folder:**
@@ -1014,7 +1018,7 @@ If the report said the state stays in `/var/lib/plesk-server-report` (an older i
 
 **Also check:**
 - a cron line in root's crontab (`crontab -l`) instead of `/etc/cron.d`
-- a `STATE_DIR` or `--config FILE` of your own: remove those as well
+- a `STATE_DIR`, `BACKUP_DIR` or `--config FILE` of your own: remove those as well
 - the upload: `rclone config delete reports` removes the remote; the reports already uploaded stay until you delete them
 - SFTP upload: `/root/.ssh/report_upload*`, and the key's line in `authorized_keys` on the target server
 - packages installed only for the script (`rclone`, `mmdb-bin` / `libmaxminddb`), if nothing else uses them
@@ -1125,7 +1129,7 @@ The script leaves nothing else behind: no service, no package, no change to syst
 - Runs as root because it needs to read all logs (and `/proc`, crontabs, `authorized_keys` for the persistence check). Apart from `--self-update` (below) it changes nothing on the server – no IP is blocked, no process stopped, no file removed; findings are reported, the action is yours. It writes only to its state folder (`/var/lib/plesk-server-report` or `state/` next to the script, mode 700) – and once, on the first run of a one-folder installation, its configuration file next to it –, to the configured rclone remote and – with `REPORT_MAIL_TO` – hands mails to the local `sendmail`.
 - Log lines are partly written by attackers – login names, mail addresses, URLs, user agents. The script only reads them as text: tabs and control characters are removed before a check sees a line (no terminal escape sequences in the report, no shifted fields), numbers from state files are checked before the shell computes with them, and nothing from a log is ever run. A test with hostile log lines (`tests/hostile.bats`) checks this on every push.
 - External connections: DNS lookups (blocklists, SPF/DKIM, domain DNS), the rclone upload, the report mails (only if `REPORT_MAIL_TO` is at another provider), the daily HTTPS check of your own domains (to this server's IP), the monthly download of the DB-IP Lite database (only with geolocation), and once a day two requests to the GitHub API for the latest releases of the script (`UPDATE_CHECK=0` switches them off). Nothing about your server is sent.
-- The script never updates itself on its own. `--self-update` replaces it only when root starts it by hand in a terminal – it refuses to run from cron and in a git checkout. It downloads the script of the newest 1.x release by HTTPS from GitHub (the release tag), checks it without running it (valid bash, the expected version in its `VERSION` line), shows the changes and asks – nothing of the new version runs before you say yes. The previous version is kept in the state directory for `--self-update --rollback`. There is no signature for 1.x releases: you trust GitHub and its HTTPS, as with the `curl` command of the installation. Version 2 will be signed; the key to check it is built into 1.12.0 already.
+- The script never updates itself on its own. `--self-update` replaces it only when root starts it by hand in a terminal – it refuses to run from cron and in a git checkout. It downloads the script of the newest 1.x release by HTTPS from GitHub (the release tag), checks it without running it (valid bash, the expected version in its `VERSION` line), shows the changes and asks – nothing of the new version runs before you say yes. The previous versions are kept next to the script for `--self-update --rollback` (see [Updates](#updates)). There is no signature for 1.x releases: you trust GitHub and its HTTPS, as with the `curl` command of the installation. Version 2 will be signed; the key to check it is built into 1.12.0 already.
 - The rclone config (`/root/.config/rclone/rclone.conf`) contains the token for the storage account. That is another reason to use a dedicated account with the narrowest possible scope (`drive.file`, bucket-limited keys, chrooted SFTP user).
 
 ---

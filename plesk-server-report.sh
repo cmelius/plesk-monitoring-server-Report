@@ -58,9 +58,10 @@
 #                     in /usr/local/sbin or a similar system folder); never overwrites one
 #   --print-config    print that template, e.g. to compare it with your configuration
 #   --self-update     install the latest 1.x release: download, test, show the changes, ask,
-#                     then replace this script (only by hand, as root). The previous version
-#                     is kept in the state directory. --yes: don't ask.
-#                     --self-update --rollback: back to the kept version.
+#                     then replace this script (only by hand, as root). The previous versions
+#                     are kept next to the script (BACKUP_DIR, SCRIPT_RETENTION). --yes: don't ask.
+#                     --self-update --rollback [VERSION]: back to the newest kept version (or
+#                     the one named); the version replaced is kept as well.
 #                     --self-update --major: switch to version 2 (not available in 1.x yet)
 #                     --self-update --edge: the development version, the script of the
 #                     newest commit on main (only when its tests on GitHub passed; not a release)
@@ -83,7 +84,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.15.1
+VERSION=1.16.0
 
 set -uo pipefail
 export LC_ALL=C
@@ -97,6 +98,8 @@ STATE_DIR=/var/lib/plesk-server-report   # the script's memory between runs (REA
 REMOTE="reports:server-reports/${HOST}"  # rclone remote:path – empty = local only
 RETENTION_DAYS=7                         # delete remote reports older than x days (0 = never)
 UPDATE_CHECK=1                           # daily: ask GitHub for the latest release of this script (one HTTPS request; 0 = off)
+BACKUP_DIR=""                            # --self-update keeps the previous versions here; empty: next to the script (backup/ in a one-folder installation, else plesk-server-report-backup/)
+SCRIPT_RETENTION=5                       # previous versions kept by --self-update (at least 1, for --rollback)
 MASK_MAILBOXES=0                         # 1 = uploaded and mailed reports show mail addresses pseudonymised (mbx-4f2a91@example.com); local reports stay complete, decode with --decode
 REPORT_MAIL_TO=""                        # mail reports to this address (several: space-separated); "" = no mails. Recommended: a mailbox on this server – the reports never leave it
 REPORT_MAIL="alerts summary"             # what is mailed, one or more words (space-separated): alerts = a report with a new alert right away, summary = summary.txt once a day, all = every report
@@ -3597,7 +3600,7 @@ is always reported). Processes are not stored – they are checked live in every
 | `running` | exists only while a run is active: `PID start now step exit-code`. If it is still there at the next run, that run did not finish, and the report says so (alert "Script: …"). |
 | `upload_failed` | time of the first failed upload, and rclone's last error message | while the upload to `REMOTE` fails, every report raises an alert (local report, mail). Deleted by the next successful upload. |
 | `tmp.*` | temporary files of the current run, removed at its end. |
-| `plesk-server-report.sh.old` | the previous version of the script, kept by `--self-update` (only after an update; not executable, mode 600). `--self-update --rollback` swaps it with the installed one. Safe to delete. |
+| `plesk-server-report.sh.old` | only after an update by version 1.15 or older: the previous version of the script. The next `--self-update` moves it to the backup folder next to the script, where the previous versions are kept from 1.16.0 on – this folder may be deleted without losing them. |
 | `first-report.txt` | the report of the first run, which lists everything as it was found (PHP files in upload folders, cron jobs, SSH keys, ports …). Kept for reference; it is not removed with the old reports in `out/`. Safe to delete. |
 | `.plesk-server-report-state` | marks this folder as the script's own. The script refuses a `STATE_DIR` with other files in it that has no such mark. |
 | `README.txt` | this description. |
@@ -3667,7 +3670,7 @@ show_state() {
 # (built in now, so that this check will not depend on a download).
 # shellcheck disable=SC2034  # for --self-update --major (version 2), not used by 1.x yet
 RELEASE_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBwQHy40R5vtIHxSSKofpOmJe3yW8LnONdOoWJyY/THA"   # the maintainer's public key; empty: no --self-update
-SU_YES=0; SU_ROLLBACK=0; SU_MAJOR=0; SU_EDGE=0
+SU_YES=0; SU_ROLLBACK=0; SU_ROLLBACK_TO=""; SU_MAJOR=0; SU_EDGE=0
 su_fail() { echo "self-update: $*" >&2; [[ -n ${SU_WORK:-} ]] && rm -rf "$SU_WORK"; return 1; }
 su_ask() {   # su_ask QUESTION – yes only for an answer starting with y (or j); with --yes always yes
   local a
@@ -3683,6 +3686,62 @@ su_lock() {   # wait for a running report (at most 15 min), so nothing is replac
   if ! { exec 9>"$STATE_DIR/lock" && flock -w 900 9; }; then
     su_fail "a report run holds the lock – try again later"; return 1
   fi
+}
+# backups of the script: not in the state folder (which may be deleted at any time), but next to
+# the script – backup/ in a one-folder installation, plesk-server-report-backup/ elsewhere (in
+# /usr/local/sbin a folder called "backup" could be another tool's). BACKUP_DIR overrides it.
+backup_dir() {   # backup_dir SCRIPT
+  local d=${1%/*}
+  if [[ -n ${BACKUP_DIR:-} ]]; then echo "$BACKUP_DIR"
+  elif (( CONF_LOCAL )); then echo "$d/backup"
+  else echo "$d/plesk-server-report-backup"; fi
+}
+SU_BACKUP_RE='^plesk-server-report-[0-9][0-9.]*(-[0-9]{8}-[0-9]{6})?\.sh$'
+su_version_of() { sed -n 's/^VERSION=//p' "$1" 2>/dev/null | head -1; }
+su_backups() {   # the kept versions, newest first (only files of this script's naming)
+  # shellcheck disable=SC2010,SC2012  # sorted by time; only names of the script's own pattern count
+  ls -1t "$SU_BACKUP" 2>/dev/null | grep -E "$SU_BACKUP_RE"
+}
+su_keep() {   # su_keep FILE – copy FILE into the backup folder as plesk-server-report-VERSION.sh (mode 600)
+  local f=$1 v dest
+  mkdir -p "$SU_BACKUP" && chmod 700 "$SU_BACKUP" || return 1
+  v=$(su_version_of "$f"); [[ $v =~ ^[0-9]+(\.[0-9]+)*$ ]] || v=0
+  dest=$SU_BACKUP/plesk-server-report-$v.sh
+  # the same version number with other content (a copy from main): a name of its own
+  [[ -e $dest ]] && ! cmp -s "$f" "$dest" && dest=$SU_BACKUP/plesk-server-report-$v-$(date +%Y%m%d-%H%M%S).sh
+  if ! { cp "$f" "$dest.tmp" && chmod 600 "$dest.tmp" && mv -f "$dest.tmp" "$dest" && touch "$dest"; }; then
+    rm -f "$dest.tmp"; return 1
+  fi
+  SU_KEPT=$dest
+}
+su_prune() {   # keep the newest SCRIPT_RETENTION versions (at least 1)
+  local n=0 f keep=${SCRIPT_RETENTION:-5}
+  [[ $keep =~ ^[0-9]+$ ]] && (( keep >= 1 )) || keep=1
+  while IFS= read -r f; do
+    (( ++n > keep )) && rm -f -- "${SU_BACKUP:?}/$f"
+  done < <(su_backups)
+  return 0
+}
+# a copy kept by 1.15.x in the state folder moves to the backup folder
+su_move_old() {
+  local old=$STATE_DIR/plesk-server-report.sh.old
+  [[ -f $old ]] || return 0
+  su_keep "$old" && touch -r "$old" "$SU_KEPT" && rm -f "$old"
+}
+su_find_backup() {   # su_find_backup SCRIPT [VERSION] – the newest kept version (of VERSION) that differs from SCRIPT
+  local self=$1 want=${2:-} f
+  while IFS= read -r f; do
+    f=$SU_BACKUP/$f
+    [[ -z $want || $(su_version_of "$f") == "$want" ]] || continue
+    cmp -s "$f" "$self" && continue
+    echo "$f"; return 0
+  done < <(su_backups)
+  return 1
+}
+su_list_backups() {
+  local f l=""
+  while IFS= read -r f; do l+=" $(su_version_of "$SU_BACKUP/$f") ($(date -r "$SU_BACKUP/$f" '+%Y-%m-%d'))"; done < <(su_backups)
+  echo "${l:- none}"
 }
 is_root() { (( EUID == 0 )); }
 su_by_hand() { [[ -t 0 || -t 1 ]]; }   # a terminal: started by hand, not by cron
@@ -3728,7 +3787,7 @@ su_dev_changes() {
 # commit on main. Only when GitHub's tests of that commit passed, and only within the installed
 # major version. Same test, question, lock and kept copy as an update to a release.
 su_edge() {
-  local self=$1 dir=$2 old=$3 sha checks total ok v raw
+  local self=$1 dir=$2 sha checks total ok v raw
   sha=$(su_api "commits/main" | sed -n 's/^  "sha": "\([0-9a-f]\{40\}\)".*/\1/p' | head -1)
   [[ -n $sha ]] || { su_fail "no answer from GitHub about the newest commit on main"; return 1; }
   # the tests of that commit (GitHub Actions): all finished, none failed
@@ -3763,18 +3822,21 @@ su_edge() {
   rm -f "$SU_WORK.changes"
   su_ask "Install the development version $v (commit ${sha:0:7}) now?" || { rm -f "$SU_WORK"; echo "nothing changed"; return 0; }
   su_lock || return 1
+  su_move_old
   # the kept copy is not executable (chmod 600) – it is only there for --rollback
-  if ! { cp -p "$self" "$old" && chmod 600 "$old" && chown --reference="$self" "$SU_WORK" && chmod --reference="$self" "$SU_WORK" &&
+  if ! { su_keep "$self" && chown --reference="$self" "$SU_WORK" && chmod --reference="$self" "$SU_WORK" &&
          mv -f "$SU_WORK" "$self"; }; then
     su_fail "could not replace $self – it is unchanged"; return 1
   fi
+  su_prune
   exec 9>&-                            # release the lock
-  echo "installed the development version $v (commit ${sha:0:7}). The previous copy ($VERSION) is kept in $old (--self-update --rollback goes back)."
+  echo "installed the development version $v (commit ${sha:0:7}). The previous copy ($VERSION) is kept in $SU_KEPT (--self-update --rollback goes back)."
   echo "Test it with your configuration: plesk-server-report.sh --only services"
 }
 self_update_1x() {
-  local self dir d old="$STATE_DIR/plesk-server-report.sh.old" latest v raw same
+  local self dir d src latest v raw same
   self=${SU_SELF:-$(readlink -f "${BASH_SOURCE[0]}")}; dir=${self%/*}
+  SU_BACKUP=$(backup_dir "$self"); SU_KEPT=""
   # no half-downloaded file left next to the script, also after Ctrl-C
   trap 'rm -f "${SU_WORK:-/nonexistent}" "${SU_WORK:-/nonexistent}.changes"' EXIT
   trap 'exit 130' INT; trap 'exit 143' TERM HUP
@@ -3790,21 +3852,26 @@ self_update_1x() {
     su_major_note; return 0
   fi
   if (( SU_ROLLBACK )); then
-    [[ -f $old ]] || { su_fail "there is no previous version ($old)"; return 1; }
-    v=$(sed -n 's/^VERSION=//p' "$old" | head -1)
-    su_ask "Go back from $VERSION to ${v:-the kept version}?" || { echo "nothing changed"; return 0; }
-    su_lock || return 1
-    SU_WORK=$(mktemp "$dir/.plesk-server-report.XXXXXX") || { su_fail "no temporary file in $dir"; return 1; }
-    # the copy brought back gets the owner and mode of the installed script; the one kept is not executable
-    if ! { cp -p "$old" "$SU_WORK" && chown --reference="$self" "$SU_WORK" && chmod --reference="$self" "$SU_WORK" &&
-           cp -p "$self" "$old" && chmod 600 "$old" && mv -f "$SU_WORK" "$self"; }; then
-      su_fail "could not swap the versions – check $self and $old"; return 1
+    if ! src=$(su_find_backup "$self" "$SU_ROLLBACK_TO") && [[ -f $STATE_DIR/plesk-server-report.sh.old ]]; then
+      su_lock || return 1; su_move_old; src=$(su_find_backup "$self" "$SU_ROLLBACK_TO")
     fi
+    [[ -n $src ]] || { su_fail "no kept version${SU_ROLLBACK_TO:+ $SU_ROLLBACK_TO} in $SU_BACKUP – kept:$(su_list_backups)"; return 1; }
+    v=$(su_version_of "$src")
+    su_ask "Go back from $VERSION to ${v:-the kept version} (kept on $(date -r "$src" '+%Y-%m-%d %H:%M'))?" || { echo "nothing changed"; return 0; }
+    su_lock || return 1
+    su_move_old
+    SU_WORK=$(mktemp "$dir/.plesk-server-report.XXXXXX") || { su_fail "no temporary file in $dir"; return 1; }
+    # the copy brought back gets the owner and mode of the installed script; the one replaced is kept (not executable)
+    if ! { cp "$src" "$SU_WORK" && chown --reference="$self" "$SU_WORK" && chmod --reference="$self" "$SU_WORK" &&
+           su_keep "$self" && mv -f "$SU_WORK" "$self"; }; then
+      su_fail "could not bring back $src – $self is unchanged"; return 1
+    fi
+    su_prune
     exec 9>&-                          # release the lock
-    echo "back to ${v:-the kept version}; version $VERSION is kept in $old (--self-update --rollback swaps again)"
+    echo "back to ${v:-the kept version}; version $VERSION is kept in $SU_KEPT (--self-update --rollback goes back to it)"
     return 0
   fi
-  if (( SU_EDGE )); then su_edge "$self" "$dir" "$old"; return $?; fi
+  if (( SU_EDGE )); then su_edge "$self" "$dir"; return $?; fi
   latest=$(latest_release_in_major "${VERSION%%.*}")
   [[ $latest =~ ^[0-9]+(\.[0-9]+)*$ ]] || { su_fail "no answer from GitHub about the latest release"; return 1; }
   # same number: the file can still differ – a copy taken from main before the release
@@ -3853,13 +3920,15 @@ self_update_1x() {
   local q="Install version $latest now?"; (( same )) && q="Replace your copy with the release $latest?"
   su_ask "$q" || { rm -f "$SU_WORK"; echo "nothing changed"; return 0; }
   su_lock || return 1
+  su_move_old
   # the kept copy is not executable (chmod 600) – it is only there for --rollback
-  if ! { cp -p "$self" "$old" && chmod 600 "$old" && chown --reference="$self" "$SU_WORK" && chmod --reference="$self" "$SU_WORK" &&
+  if ! { su_keep "$self" && chown --reference="$self" "$SU_WORK" && chmod --reference="$self" "$SU_WORK" &&
          mv -f "$SU_WORK" "$self"; }; then
     su_fail "could not replace $self – it is unchanged"; return 1
   fi
+  su_prune
   exec 9>&-                            # release the lock
-  echo "installed version $latest. The previous copy ($VERSION) is kept in $old (--self-update --rollback goes back)."
+  echo "installed version $latest. The previous copy ($VERSION) is kept in $SU_KEPT (--self-update --rollback goes back)."
   echo "Test it with your configuration: plesk-server-report.sh --only services"
   su_major_note
 }
@@ -3885,7 +3954,8 @@ parse_args() {
       --summary) SUMMARY_ONLY=1 ;;
       --version) echo "plesk-server-report $VERSION"; exit 0 ;;
       --self-update) SELF_UPDATE=1 ;;
-      --rollback) SU_ROLLBACK=1 ;;
+      --rollback) SU_ROLLBACK=1
+              if [[ ${2:-} =~ ^[0-9]+(\.[0-9]+)*$ ]]; then SU_ROLLBACK_TO=$2; shift; fi ;;
       --yes) SU_YES=1 ;;
       --major) SU_MAJOR=1 ;;
       --edge) SU_EDGE=1 ;;
