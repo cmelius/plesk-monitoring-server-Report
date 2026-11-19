@@ -84,7 +84,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.17.0
+VERSION=1.18.0
 
 set -uo pipefail
 export LC_ALL=C
@@ -157,6 +157,11 @@ WARN_BACKUP_HOURS=26          # latest Plesk backup older than x hours
 
 # Daily SPF/DKIM/DMARC check of all domains with mail service (needs dig)
 MAILAUTH_CHECK=1              # 0 = off
+# Daily (Plesk): mail forwarding to other providers – is spam deleted before it is forwarded?
+# Plesk forwards spam that the filter only marks or moves; the receiving provider (Gmail,
+# Microsoft …) blames this server for it. Also shows the SpamAssassin size limit and the DNS
+# blocklist for incoming mail. Forwarding without spam filter → warning, else recommendations
+FORWARD_CHECK=1               # 0 = off
 MAILAUTH_IGNORE_DOMAINS=""    # space-separated domains to skip
 # DNS resolver for these checks. A public resolver shows what the world sees; the local
 # one (systemd-resolved, Plesk BIND) may answer from local data, e.g. for the server's
@@ -224,7 +229,7 @@ SYS_BIN_RE='^(/usr/local/sbin|/usr/local/bin|/usr/sbin|/usr/bin|/sbin|/bin)$'   
 # Check names in report order. Hourly checks analyse the log lines since the previous run,
 # daily checks run once a day and are cached in $STATE_DIR/daily.txt.
 HOURLY_CHECKS="mail webmail system fail2ban web uploads logins panel persistence services backups"
-DAILY_CHECKS="updates kmodules certificates https serverdns mailtls domaindns exposed webshell mailauth mailboxes rclocal"
+DAILY_CHECKS="updates kmodules certificates https serverdns mailtls domaindns exposed webshell mailauth mailboxes forwarding rclocal"
 
 # =============================================================================
 # Helper functions
@@ -2711,6 +2716,72 @@ check_rclocal() {
   (( WARN_RC_LOCAL )) && dalert "rc.local: $RC_LOCAL runs $n command line(s) at boot${f:+ (and failed)} – deprecated, and not the default on any current distribution: find out what added it (an old installer, an online guide?) and move the commands to a systemd unit (README: Notes); WARN_RC_LOCAL=0 keeps only the report line"
   return 0
 }
+# Mail forwarding to other providers (Plesk). A forwarded spam mail leaves from this server: Gmail,
+# Microsoft & co. rate this server's IP for it and throttle or reject its mail – for every customer.
+# Plesk runs the spam filter before forwarding, but only "delete" stops the forwarded copy; spam that
+# is marked or moved to the Spam folder is forwarded as well. What else keeps spam out: the
+# SpamAssassin size limit (Plesk's default of 256000 bytes lets bigger spam through unchecked) and a
+# DNS blocklist for incoming mail. Read only: the report shows the setting and how to change it.
+PSA_CONF=/etc/psa/psa.conf
+PSA_SA_DEFAULT=256000
+check_forwarding() {
+  local a sf act tgt d n=0 nd=0 i lim rbl
+  local -A hosted=() fwd_to=() fwd_sf=() fwd_act=()
+  local -a order=() nofilter=() fwdspam=()
+  echo ""; echo "Mail forwarding to other providers (only spam the filter deletes stays here):"
+  if ! command -v plesk >/dev/null; then echo "  not a Plesk server – not checked"; return 0; fi
+  if pgrep -x rspamd >/dev/null 2>&1; then
+    echo "  Rspamd runs (Plesk Email Security?) – its spam actions are not read here; check that spam is blocked, not only marked, for forwarding addresses"
+  else
+    while IFS= read -r d; do [[ -n $d ]] && hosted[${d,,}]=1; done < <(T "$CMD_TIMEOUT" plesk db -Ne "SELECT name FROM domains UNION SELECT name FROM domain_aliases" 2>/dev/null)
+    # address, spam filter on (true/false), action (delete | move | text = mark | - = none; never empty: read
+    # with a tab IFS would merge two tabs), forwarding target
+    while IFS=$'\t' read -r a sf act tgt; do
+      [[ -n $a && -n $tgt ]] || continue
+      d=${tgt##*@}; d=${d,,}
+      [[ -n ${hosted[$d]:-} ]] && continue                     # forwarding to a mailbox on this server
+      if [[ -z ${fwd_sf[$a]+x} ]]; then order+=("$a"); fwd_sf[$a]=$sf; fwd_act[$a]=$act; fi
+      [[ " ${fwd_to[$a]:-} " == *" $d "* ]] || fwd_to[$a]="${fwd_to[$a]:+${fwd_to[$a]} }$d"
+    done < <(T "$CMD_TIMEOUT" plesk db -Ne "SELECT CONCAT(m.mail_name, '@', d.name), m.spamfilter, IFNULL(NULLIF(p.value, ''), '-'), r.address FROM mail m JOIN domains d ON d.id = m.dom_id JOIN mail_redir r ON r.mn_id = m.id LEFT JOIN spamfilter s ON s.username = CONCAT(m.mail_name, '@', d.name) LEFT JOIN spamfilter_preferences p ON p.spamfilter_id = s.id AND p.preference = 'action'" 2>/dev/null)
+    for a in "${order[@]}"; do
+      n=$((n + 1))
+      if [[ ${fwd_sf[$a]} != true ]]; then nofilter+=("$a → ${fwd_to[$a]// /, }")
+      elif [[ ${fwd_act[$a]} == delete ]]; then nd=$((nd + 1))
+      else
+        case ${fwd_act[$a]} in move) act="moved to the Spam folder" ;; text) act="marked" ;; *) act="no action set" ;; esac
+        fwdspam+=("$a → ${fwd_to[$a]// /, } (spam $act)")
+      fi
+    done
+    if (( n == 0 )); then
+      echo "  no address forwards to another provider"
+    else
+      echo "  $n address(es) forward to other providers: $nd delete spam, ${#fwdspam[@]} forward it, ${#nofilter[@]} without spam filter"
+      for i in "${nofilter[@]}"; do echo "  ! no spam filter: $i"; done
+      for i in "${fwdspam[@]}"; do echo "  - spam forwarded too: $i"; done
+      if (( ${#fwdspam[@]} )); then
+        echo "  Recommendation: set the spam filter of these addresses to \"Delete spam\" (Plesk: Mail → address → Spam Filter,"
+        echo "  or: plesk bin spamassassin --update ADDRESS -action del). Moved or marked spam is forwarded as well,"
+        echo "  and the receiving provider rates this server for it."
+      fi
+      (( ${#nofilter[@]} )) && dalert "Mail: ${#nofilter[@]} address(es) forward to other providers without spam filter: ${nofilter[*]:0:3}$( (( ${#nofilter[@]} > 3 )) && echo " …") – all spam goes out from this server; switch the filter on and set it to delete spam"
+    fi
+  fi
+  # the SpamAssassin size limit: bigger mails pass unchecked – and spammers send them big on purpose
+  lim=$(awk '$1 == "SA_MAX_MAIL_SIZE" {print $2; exit}' "$PSA_CONF" 2>/dev/null)
+  if [[ -z $lim ]] || { [[ $lim =~ ^[0-9]+$ ]] && (( lim <= PSA_SA_DEFAULT )); }; then
+    echo "  Spam filter size limit: ${lim:-$PSA_SA_DEFAULT} bytes (Plesk's default) – bigger mails are not checked, and spam is sent bigger"
+    echo "  on purpose. Recommendation: SA_MAX_MAIL_SIZE 5242880 (5 MB) in $PSA_CONF (read for every mail, no restart)"
+  else
+    echo "  Spam filter size limit: $lim bytes ($(awk -v b="$lim" 'BEGIN{printf "%.1f MB", b/1048576}'))"
+  fi
+  # DNS blocklist for incoming mail (Plesk: Tools & Settings → Mail Server Settings → DNS blocklist)
+  rbl=$(T "$CMD_TIMEOUT" postconf -h smtpd_client_restrictions smtpd_recipient_restrictions 2>/dev/null |
+    grep -oE 'reject_rbl_client [^ ,=]+' | awk '{print $2}' | sort -u | tr '\n' ' ')
+  if [[ -n ${rbl// } ]]; then echo "  DNS blocklist for incoming mail: ${rbl% }"
+  else echo "  DNS blocklist for incoming mail: none – Recommendation: e.g. zen.spamhaus.org (Plesk: Tools & Settings → Mail Server Settings)"; fi
+  return 0
+}
+
 check_mailboxes() {
   local who lim sub f used pct n=0 nolim=0 nofile=0 d mb h where kb utot=0 umax=0 uwho="" big
   echo ""; echo "Mailboxes (fill level of the size limit; warning from WARN_MAILBOX_PCT=$WARN_MAILBOX_PCT %, without a limit from WARN_MAILBOX_UNLIMITED_GB=$WARN_MAILBOX_UNLIMITED_GB GB):"
@@ -2771,6 +2842,7 @@ check_enabled() {
     webshell)  (( WEBSHELL_CHECK )) ;;
     mailauth)  (( MAILAUTH_CHECK )) ;;
     mailboxes) (( WARN_MAILBOX_PCT > 0 || WARN_MAILBOX_UNLIMITED_GB > 0 )) ;;
+    forwarding) (( FORWARD_CHECK )) ;;
     https)     (( HTTPS_CHECK )) ;;
     persistence) (( PERSISTENCE_CHECK )) ;;
     kmodules)  [[ -n ${RARE_MODULES// /} ]] ;;

@@ -2,6 +2,11 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
+## [1.18.0] – not yet released (on `main`)
+
+### Added
+- **Daily check `forwarding`: mail forwarding to other providers** (Plesk). A forwarded spam mail leaves from this server, and Gmail, Microsoft & co. rate its IP for it – for every customer. Plesk runs the spam filter before forwarding, but only "Delete spam" stops the forwarded copy; spam that is moved to the Spam folder or marked is forwarded as well. The check lists every address that forwards to another provider (forwarding to a mailbox on the same server is left out) with its spam action: an address without spam filter raises a warning, one whose spam is only moved or marked gets a recommendation with the `plesk bin spamassassin` command. It also shows the SpamAssassin size limit (a recommendation at Plesk's default of 256000 bytes: bigger spam passes unchecked) and the DNS blocklist for incoming mail (a recommendation if there is none). With Rspamd (Plesk Email Security) the spam actions are not read. Read only. `FORWARD_CHECK=0` switches it off. README: a new note on forwarding.
+
 ## [1.17.0] – 2026-11-19
 
 ### Added
