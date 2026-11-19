@@ -2718,50 +2718,56 @@ check_rclocal() {
 }
 # Mail forwarding to other providers (Plesk). A forwarded spam mail leaves from this server: Gmail,
 # Microsoft & co. rate this server's IP for it and throttle or reject its mail – for every customer.
-# Plesk runs the spam filter before forwarding, but only "delete" stops the forwarded copy; spam that
-# is marked or moved to the Spam folder is forwarded as well. What else keeps spam out: the
+# Plesk runs the spam filter before forwarding (tested with a blocklisted sender): spam that is deleted
+# or moved to the Spam folder of the mailbox is not forwarded, spam that is only marked is. "Move"
+# needs a copy kept in the mailbox: with "Do not deliver copies of forwarded emails" Plesk doesn't
+# offer it, and a "move" left from before keeps nothing back – listed like "mark". What else keeps spam out: the
 # SpamAssassin size limit (Plesk's default of 256000 bytes lets bigger spam through unchecked) and a
 # DNS blocklist for incoming mail. Read only: the report shows the setting and how to change it.
 PSA_CONF=/etc/psa/psa.conf
 PSA_SA_DEFAULT=256000
 check_forwarding() {
   local a sf act tgt d n=0 nd=0 i lim rbl
-  local -A hosted=() fwd_to=() fwd_sf=() fwd_act=()
+  local -A hosted=() fwd_to=() fwd_sf=() fwd_act=() fwd_copy=()
   local -a order=() nofilter=() fwdspam=()
-  echo ""; echo "Mail forwarding to other providers (only spam the filter deletes stays here):"
+  echo ""; echo "Mail forwarding to other providers (spam that is only marked is forwarded too):"
   if ! command -v plesk >/dev/null; then echo "  not a Plesk server – not checked"; return 0; fi
   if pgrep -x rspamd >/dev/null 2>&1; then
     echo "  Rspamd runs (Plesk Email Security?) – its spam actions are not read here; check that spam is blocked, not only marked, for forwarding addresses"
   else
     while IFS= read -r d; do [[ -n $d ]] && hosted[${d,,}]=1; done < <(T "$CMD_TIMEOUT" plesk db -Ne "SELECT name FROM domains UNION SELECT name FROM domain_aliases" 2>/dev/null)
     # address, spam filter on (true/false), action (delete | move | text = mark | - = none; never empty: read
-    # with a tab IFS would merge two tabs), forwarding target
-    while IFS=$'\t' read -r a sf act tgt; do
+    # with a tab IFS would merge two tabs), copy kept in the mailbox (true/false), forwarding target
+    while IFS=$'\t' read -r a sf act cp tgt; do
       [[ -n $a && -n $tgt ]] || continue
       d=${tgt##*@}; d=${d,,}
       [[ -n ${hosted[$d]:-} ]] && continue                     # forwarding to a mailbox on this server
-      if [[ -z ${fwd_sf[$a]+x} ]]; then order+=("$a"); fwd_sf[$a]=$sf; fwd_act[$a]=$act; fi
+      if [[ -z ${fwd_sf[$a]+x} ]]; then order+=("$a"); fwd_sf[$a]=$sf; fwd_act[$a]=$act; fwd_copy[$a]=$cp; fi
       [[ " ${fwd_to[$a]:-} " == *" $d "* ]] || fwd_to[$a]="${fwd_to[$a]:+${fwd_to[$a]} }$d"
-    done < <(T "$CMD_TIMEOUT" plesk db -Ne "SELECT CONCAT(m.mail_name, '@', d.name), m.spamfilter, IFNULL(NULLIF(p.value, ''), '-'), r.address FROM mail m JOIN domains d ON d.id = m.dom_id JOIN mail_redir r ON r.mn_id = m.id LEFT JOIN spamfilter s ON s.username = CONCAT(m.mail_name, '@', d.name) LEFT JOIN spamfilter_preferences p ON p.spamfilter_id = s.id AND p.preference = 'action'" 2>/dev/null)
+    done < <(T "$CMD_TIMEOUT" plesk db -Ne "SELECT CONCAT(m.mail_name, '@', d.name), m.spamfilter, IFNULL(NULLIF(p.value, ''), '-'), m.delivery, r.address FROM mail m JOIN domains d ON d.id = m.dom_id JOIN mail_redir r ON r.mn_id = m.id LEFT JOIN spamfilter s ON s.username = CONCAT(m.mail_name, '@', d.name) LEFT JOIN spamfilter_preferences p ON p.spamfilter_id = s.id AND p.preference = 'action'" 2>/dev/null)
     for a in "${order[@]}"; do
       n=$((n + 1))
       if [[ ${fwd_sf[$a]} != true ]]; then nofilter+=("$a → ${fwd_to[$a]// /, }")
-      elif [[ ${fwd_act[$a]} == delete ]]; then nd=$((nd + 1))
+      elif [[ ${fwd_act[$a]} == delete ]] || [[ ${fwd_act[$a]} == move && ${fwd_copy[$a]} == true ]]; then nd=$((nd + 1))
       else
-        case ${fwd_act[$a]} in move) act="moved to the Spam folder" ;; text) act="marked" ;; *) act="no action set" ;; esac
+        case ${fwd_act[$a]} in
+          move) act="set to move, but no copy is kept in the mailbox" ;;
+          text) act="marked" ;;
+          *)    act="no action set" ;;
+        esac
         fwdspam+=("$a → ${fwd_to[$a]// /, } (spam $act)")
       fi
     done
     if (( n == 0 )); then
       echo "  no address forwards to another provider"
     else
-      echo "  $n address(es) forward to other providers: $nd delete spam, ${#fwdspam[@]} forward it, ${#nofilter[@]} without spam filter"
+      echo "  $n address(es) forward to other providers: $nd keep spam back (delete, or move with a copy kept), ${#fwdspam[@]} forward it, ${#nofilter[@]} without spam filter"
       for i in "${nofilter[@]}"; do echo "  ! no spam filter: $i"; done
       for i in "${fwdspam[@]}"; do echo "  - spam forwarded too: $i"; done
       if (( ${#fwdspam[@]} )); then
         echo "  Recommendation: set the spam filter of these addresses to \"Delete spam\" (Plesk: Mail → address → Spam Filter,"
-        echo "  or: plesk bin spamassassin --update ADDRESS -action del). Moved or marked spam is forwarded as well,"
-        echo "  and the receiving provider rates this server for it."
+        echo "  or: plesk bin spamassassin --update ADDRESS -action del) – or to \"Move spam to the Spam folder\" with copies"
+        echo "  kept in the mailbox. Marked spam is forwarded, and the receiving provider rates this server for it."
       fi
       (( ${#nofilter[@]} )) && dalert "Mail: ${#nofilter[@]} address(es) forward to other providers without spam filter: ${nofilter[*]:0:3}$( (( ${#nofilter[@]} > 3 )) && echo " …") – all spam goes out from this server; switch the filter on and set it to delete spam"
     fi

@@ -21,11 +21,12 @@ permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination'
   pgrep() { return 1; }
 }
 
-fwd() { FWD+=$(printf '%s\t%s\t%s\t%s' "$@")$'\n'; }
+# address, spam filter, action, copy kept in the mailbox, target
+fwd() { FWD+=$(printf '%s\t%s\t%s\t%s\t%s' "$@")$'\n'; }
 
 @test "no forwarding to other providers" {
-  fwd info@example.com true move office@example.org        # target on this server (case ignored)
-  fwd a@example.com true move b@alias.example.net
+  fwd info@example.com true move false office@example.org        # target on this server (case ignored)
+  fwd a@example.com true move false b@alias.example.net
   run check_forwarding
   [[ $output == *"no address forwards to another provider"* ]]
   [[ $output == *"Spam filter size limit: 5242880 bytes (5.0 MB)"* ]]
@@ -34,28 +35,30 @@ fwd() { FWD+=$(printf '%s\t%s\t%s\t%s' "$@")$'\n'; }
 }
 
 @test "delete, move, mark, no action, no filter – one line per address, targets grouped" {
-  fwd del@example.com true delete x@gmail.example
-  fwd mv@example.com true move x@gmail.example
-  fwd mv@example.com true move y@outlook.example
-  fwd mv@example.com true move z@gmail.example
-  fwd mk@example.com true text x@t-online.example
-  fwd na@example.com true - x@gmail.example
-  fwd off@example.com false delete x@gmail.example
+  fwd del@example.com true delete false x@gmail.example
+  fwd mvcopy@example.com true move true x@gmail.example
+  fwd mv@example.com true move false x@gmail.example
+  fwd mv@example.com true move false y@outlook.example
+  fwd mv@example.com true move false z@gmail.example
+  fwd mk@example.com true text false x@t-online.example
+  fwd na@example.com true - false x@gmail.example
+  fwd off@example.com false delete false x@gmail.example
   check_forwarding >"$BODY" || true
   run report
-  [[ $output == *"5 address(es) forward to other providers: 1 delete spam, 3 forward it, 1 without spam filter"* ]]
+  [[ $output == *"6 address(es) forward to other providers: 2 keep spam back (delete, or move with a copy kept), 3 forward it, 1 without spam filter"* ]]
   [[ $output == *"! no spam filter: off@example.com → gmail.example"* ]]
-  [[ $output == *"- spam forwarded too: mv@example.com → gmail.example, outlook.example (spam moved to the Spam folder)"* ]]
+  [[ $output == *"- spam forwarded too: mv@example.com → gmail.example, outlook.example (spam set to move, but no copy is kept in the mailbox)"* ]]
   [[ $output == *"- spam forwarded too: mk@example.com → t-online.example (spam marked)"* ]]
   [[ $output == *"- spam forwarded too: na@example.com → gmail.example (spam no action set)"* ]]
   [[ $output != *"del@example.com"* ]]
+  [[ $output != *"mvcopy@example.com"* ]]
   [[ $output == *"plesk bin spamassassin --update ADDRESS -action del"* ]]
   run cat "$DALERTS"
   [[ $output == *"Mail: 1 address(es) forward to other providers without spam filter: off@example.com → gmail.example – "* ]]
 }
 
 @test "only recommendations without an address lacking a spam filter: no alert" {
-  fwd mv@example.com true move x@gmail.example
+  fwd mv@example.com true move false x@gmail.example
   check_forwarding >"$BODY" || true
   [ ! -s "$DALERTS" ]
 }
@@ -79,7 +82,7 @@ permit_mynetworks, reject_unauth_destination'
 
 @test "Rspamd (Plesk Email Security): forwarding addresses not read" {
   pgrep() { return 0; }
-  fwd off@example.com false delete x@gmail.example
+  fwd off@example.com false delete false x@gmail.example
   check_forwarding >"$BODY" || true
   run report
   [[ $output == *"Rspamd runs"* ]]
