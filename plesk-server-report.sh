@@ -1102,6 +1102,20 @@ old_password_check() {
     ip=${ip#::ffff:}; [[ -n $ip ]] || continue
     [[ ${KW[$ip]:-} == *" $who "* ]] || KW[$ip]+=" $who "; KT["$ip $who"]=$(date +%s)
   done < <(grep -E '^(IMOK|SAIP)' <<<"$MAILSTATS")
+  # keep the failed logins from these IPs for a day: when fail2ban bans one of them later, the ban
+  # alert names the login that caused it (check_fail2ban)
+  local FK="$STATE_DIR/failed_from_known_ips" now
+  now=$(date +%s)
+  if can_write_state; then
+    {
+      [[ -r $FK ]] && awk -v min=$(( now - 86400 )) '$4 ~ /^[0-9]+$/ && $4 >= min' "$FK"
+      while IFS=$'\t' read -r _ n who ip; do
+        ip=${ip#::ffff:}
+        [[ -n ${KW[$ip]:-} && $who =~ ^[A-Za-z0-9._@+-]+$ ]] || continue
+        echo "$ip $who $n $now $([[ -n ${NOU[$who]+x} ]] && echo 1 || echo 0)"
+      done < <(grep '^FPAIR' <<<"$MAILSTATS")
+    } | tail -n 2000 >"$FK.new" && mv "$FK.new" "$FK"
+  fi
   while IFS=$'\t' read -r _ n who ip; do
     ip=${ip#::ffff:}
     if [[ -z ${KW[$ip]:-} ]] || (( n < WARN_OLD_PASSWORD )); then continue; fi
@@ -1282,7 +1296,8 @@ remember_mail_ips() {
 
 check_fail2ban() {
   local JAILS j s cb tb cf ip k who t ban="" KM="$STATE_DIR/known_mail_ips" KL="$STATE_DIR/known_login_ips"
-  local -A MW=() ML=()
+  local FK="$STATE_DIR/failed_from_known_ips" n nu fl hint
+  local -A MW=() ML=() FW=() FN=()
   section "FAIL2BAN"
   if command -v fail2ban-client >/dev/null; then
     # IPs with earlier successful logins: mail clients (mailbox, last seen) and SSH/panel
@@ -1291,6 +1306,15 @@ check_fail2ban() {
         [[ $t =~ ^[0-9]+$ ]] || continue   # only a number may reach (( ))
         MW[$ip]+="$who, "; (( t > ${ML[$ip]:-0} )) && ML[$ip]=$t
       done <"$KM"
+    fi
+    # failed logins from these IPs in the last day (old_password_check): the login behind a ban
+    if [[ -r $FK ]]; then
+      while read -r ip who n nu; do
+        [[ $n =~ ^[0-9]+$ ]] || continue
+        FN["$ip $who"]=$(( ${FN["$ip $who"]:-0} + n ))
+        [[ $nu == 1 ]] && FN["$ip $who nu"]=1
+        [[ " ${FW[$ip]:-} " == *" $who "* ]] || FW[$ip]+=" $who"
+      done < <(awk '{print $1, $2, $3, $5}' "$FK")
     fi
     local st nto
     nto=$(timeouts_seen)
@@ -1322,8 +1346,20 @@ check_fail2ban() {
         known_login_ip "$ip" "$KL" && k="${k:+$k; }SSH/Plesk logins"
         [[ -n $k ]] || continue
         geo "$ip"
-        ban+="    $j: $ip${GEO_LABEL:+ ($GEO_LABEL)} – earlier successful $k"$'\n'
-        alert "fail2ban: jail $j bans $ip${GEO_LABEL:+ ($GEO_LABEL)}, which had successful logins before ($k) – a device with an outdated password? Unban: fail2ban-client set $j unbanip $ip"
+        # which login failed from there – usually one device names the cause
+        fl=""; hint="a device with an outdated password?"
+        if [[ -n ${FW[$ip]:-} ]]; then
+          local nall=0 nnu=0
+          for who in ${FW[$ip]}; do
+            fl+="${fl:+, }$who ×${FN["$ip $who"]}"
+            nall=$(( nall + 1 ))
+            [[ -n ${FN["$ip $who nu"]:-} ]] && { fl+=" (no such mailbox)"; nnu=$(( nnu + 1 )); }
+          done
+          (( nnu == nall )) && hint="a device still set up for a mailbox that doesn't exist (any more)? Remove that account from the device."
+          fl="; failed logins from there: $fl"
+        fi
+        ban+="    $j: $ip${GEO_LABEL:+ ($GEO_LABEL)} – earlier successful $k$fl"$'\n'
+        alert "fail2ban: jail $j bans $ip${GEO_LABEL:+ ($GEO_LABEL)}, which had successful logins before ($k)$fl – $hint Unban: fail2ban-client set $j unbanip $ip"
       done
     done
     if (( nj == 0 )); then
@@ -3760,6 +3796,7 @@ Timestamps are Unix time (seconds since 1970, UTC): `date -d @1793684400`.
 
 | File | Content (one entry per line) | Used for |
 |---|---|---|
+| `failed_from_known_ips` | `IP login count time no-such-mailbox` | failed mail logins from IPs in `known_mail_ips`, kept for a day: when fail2ban bans such an IP, the alert names the login that failed from there (often one device with an outdated password, or with an account of a deleted mailbox). |
 | `known_login_ips` | `IP last-seen` | SSH and Plesk panel logins: an IP not in this list raises "login … from previously unknown IP". The first run fills it without alerts. An IP not seen for `KNOWN_LOGIN_IP_DAYS` is dropped. |
 | `known_mail_ips` | `IP mailbox last-seen` | client IPs of successful IMAP/POP3 and SMTP logins, kept for `KNOWN_MAIL_IP_DAYS`. Failed logins from one of them raise "… failed logins of … – a device with an outdated password?" (`WARN_OLD_PASSWORD`); when fail2ban bans one of them, the report raises "fail2ban: jail … bans … which had successful logins before". |
 | `deferred_mails` | `time provider queue-ID` | mails to other servers whose delivery was deferred, kept 2 days. `summary.txt` counts the distinct mails behind the deferred attempts from it ("deferred attempts (mails)"): a mail Postfix retries in many runs counts once. |

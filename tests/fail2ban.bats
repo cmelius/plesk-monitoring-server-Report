@@ -29,6 +29,25 @@ setup() {
   [[ $output == *"bans 198.18.0.30"*"mail logins of info@d1.example"*"Unban: fail2ban-client set "*" unbanip 198.18.0.30"* ]]
 }
 
+@test "the ban alert names the login that failed from there (outdated password)" {
+  echo "198.18.0.30 info@d1.example $(date +%s)" >"$STATE_DIR/known_mail_ips"
+  echo "198.18.0.30 office@d1.example 3 $(date +%s) 0
+198.18.0.30 office@d1.example 2 $(date +%s) 0" >"$STATE_DIR/failed_from_known_ips"
+  check_fail2ban || true
+  run alerts
+  [[ $output == *"bans 198.18.0.30"*"(mail logins of info@d1.example"*"); failed logins from there: office@d1.example ×5 – a device with an outdated password? Unban:"* ]]
+  run report
+  [[ $output == *"failed logins from there: office@d1.example ×5"* ]]
+}
+
+@test "the ban alert: a login that doesn't exist → remove the account from the device" {
+  echo "198.18.0.30 info@d1.example $(date +%s)" >"$STATE_DIR/known_mail_ips"
+  echo "198.18.0.30 iphone@d2.example 4 $(date +%s) 1" >"$STATE_DIR/failed_from_known_ips"
+  check_fail2ban || true
+  run alerts
+  [[ $output == *"failed logins from there: iphone@d2.example ×4 (no such mailbox) – a device still set up for a mailbox that doesn't exist (any more)? Remove that account from the device. Unban:"* ]]
+}
+
 @test "fail2ban installed, but its server doesn't answer: critical alert 'not running'" {
   fail2ban-client() { echo "ERROR   Failed to access socket path: /var/run/fail2ban/fail2ban.sock. Is fail2ban running?"; return 255; }
   check_fail2ban || true

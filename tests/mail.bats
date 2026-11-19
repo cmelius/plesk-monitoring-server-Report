@@ -34,6 +34,11 @@ mail_on() { MAIL_LOG="$FIX/mail/$1"; check_mail || true; }
   [[ $output == *"logged in successfully from there: info@d113.example"* ]]
 }
 
+@test "failed logins from a known IP are kept for the fail2ban ban alert" {
+  mail_on tablets.log
+  grep -q '^198.18.0.11 user16@d113.example 170 [0-9]* [01]$' "$STATE_DIR/failed_from_known_ips"
+}
+
 @test "login names that don't exist are counted" {
   mail_on nouser.log
   run report

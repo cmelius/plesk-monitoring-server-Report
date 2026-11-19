@@ -23,6 +23,7 @@ Timestamps are Unix time (seconds since 1970, UTC): `date -d @1793684400`.
 
 | File | Content (one entry per line) | Used for |
 |---|---|---|
+| `failed_from_known_ips` | `IP login count time no-such-mailbox` | failed mail logins from IPs in `known_mail_ips`, kept for a day: when fail2ban bans such an IP, the alert names the login that failed from there (often one device with an outdated password, or with an account of a deleted mailbox). |
 | `known_login_ips` | `IP last-seen` | SSH and Plesk panel logins: an IP not in this list raises "login … from previously unknown IP". The first run fills it without alerts. An IP not seen for `KNOWN_LOGIN_IP_DAYS` is dropped. |
 | `known_mail_ips` | `IP mailbox last-seen` | client IPs of successful IMAP/POP3 and SMTP logins, kept for `KNOWN_MAIL_IP_DAYS`. Failed logins from one of them raise "… failed logins of … – a device with an outdated password?" (`WARN_OLD_PASSWORD`); when fail2ban bans one of them, the report raises "fail2ban: jail … bans … which had successful logins before". |
 | `deferred_mails` | `time provider queue-ID` | mails to other servers whose delivery was deferred, kept 2 days. `summary.txt` counts the distinct mails behind the deferred attempts from it ("deferred attempts (mails)"): a mail Postfix retries in many runs counts once. |
