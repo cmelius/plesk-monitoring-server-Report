@@ -9,6 +9,7 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 
 ### Changed
 - **Plesk panel logins now name the user.** The panel's access log has no user name, so the report said "user not logged". Plesk's *Action Log* (Log Browser; database table `log_actions`) records every panel login with IP and user: the report takes the name from there, matched by IP ("Plesk admin from …", and the alert "Plesk panel login as admin from previously unknown IP …"). Without a match it stays "user not logged".
+- **Crashes of the Plesk panel.** Plesk runs its panel (ports 8443/8880) on a nginx of its own, `sw-cp-server`, which nginx2root affects too (Plesk's advisory: `plesk bin http2_pref` covers only the websites). Its error log `/var/log/sw-cp-server/error_log` is now in `CRASH_LOGS`, its crashes – there or as `sw-cp-serverd` in the kernel log – are listed as `plesk-panel`, and they are critical like those of nginx and Apache.
 
 ## [1.17.0] – 2026-11-19
 

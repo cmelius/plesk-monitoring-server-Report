@@ -12,7 +12,8 @@ setup() {
   journalctl() { [[ " $* " == *" -o cat "* ]] && printf '%s' "$KERNEL_LOG"; return 0; }
   IGNORE_FAILED_UNITS=""; IGNORE_CRASHES=""
   SINCE=0
-  CRASH_LOGS="$BATS_TEST_TMPDIR/nginx-error.log $BATS_TEST_TMPDIR/apache-error.log $BATS_TEST_TMPDIR/php*-fpm.log"
+  mkdir -p "$BATS_TEST_TMPDIR/sw-cp-server"
+  CRASH_LOGS="$BATS_TEST_TMPDIR/nginx-error.log $BATS_TEST_TMPDIR/sw-cp-server/error_log $BATS_TEST_TMPDIR/apache-error.log $BATS_TEST_TMPDIR/php*-fpm.log"
 }
 
 @test "no failed unit: none, no alert" {
@@ -126,4 +127,18 @@ traps: someprog[778] trap invalid opcode ip:401000 sp:7ffd error:0 in someprog[4
   [[ $output == *"Crashes without an alert (IGNORE_CRASHES): php-fpm 1× (SIGSEGV)"* ]]
   run alerts
   [ -z "$output" ]
+}
+
+@test "Plesk panel (sw-cp-server): its nginx counts as plesk-panel, kernel log and its error log once, critical" {
+  KERNEL_LOG='sw-cp-serverd[3101]: segfault at 0 ip 000055d1c3a0b2f1 sp 00007ffd4c1e2a10 error 4 in sw-cp-serverd[55d1c39f0000+120000]
+'
+  cat >"$BATS_TEST_TMPDIR/sw-cp-server/error_log" <<'L'
+2026/11/19 10:01:02 [alert] 3000#3000: worker process 3101 exited on signal 11
+L
+  : >"$BATS_TEST_TMPDIR/nginx-error.log"
+  check_services || true
+  run report
+  [[ $output == *"Crashes: plesk-panel 1× (SIGSEGV)"* ]]
+  [[ $output != *"nginx 1×"* ]]
+  [ "$(alert_severity "${ALERTS[0]}")" = critical ]
 }

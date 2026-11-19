@@ -200,8 +200,8 @@ WEB_IGNORE_DOMAINS=""         # space-separated domains without web alerts (stil
 IGNORE_FAILED_UNITS=""        # space-separated systemd units (patterns allowed, e.g. "rc-local.service backup-*") without an alert when failed (still listed)
 # Crashes (hourly): programs killed by a fatal signal – segfault & co. in the kernel log, plus the
 # lines nginx, Apache and PHP-FPM write when a worker dies. Repeated crashes: an attack on a memory bug?
-CRASH_LOGS="/var/log/nginx/error.log /var/log/apache2/error.log /var/log/httpd/error_log /var/log/plesk-php*-fpm/error.log /var/log/php*-fpm.log /var/log/php-fpm/error.log"   # patterns allowed
-IGNORE_CRASHES=""             # space-separated programs (nginx, apache, php-fpm, or the name in the kernel log) without an alert (still listed)
+CRASH_LOGS="/var/log/nginx/error.log /var/log/sw-cp-server/error_log /var/log/apache2/error.log /var/log/httpd/error_log /var/log/plesk-php*-fpm/error.log /var/log/php*-fpm.log /var/log/php-fpm/error.log"   # patterns allowed
+IGNORE_CRASHES=""             # space-separated programs (nginx, plesk-panel, apache, php-fpm, or the name in the kernel log) without an alert (still listed)
 # Daily: kernel modules of rarely used network protocols – any process can load them by opening a
 # socket, and their bugs were the way to root more than once. Loaded → warning, loadable → recommendation
 RARE_MODULES="sctp dccp tipc rds"   # "" = check off
@@ -2001,7 +2001,8 @@ check_persistence() {   # SSH keys, accounts, sudo, cron/autostart, suspicious p
 # Sources: the kernel's line for a program killed by a fault (segfault, general protection, invalid
 # opcode, divide error) and the lines nginx ("worker process N exited on signal 11"), Apache ("child
 # pid N exit signal Segmentation fault (11)") and PHP-FPM ("child N exited on signal 11") write in
-# CRASH_LOGS. Only the signals of a program fault count – 4 SIGILL, 6 SIGABRT, 7 SIGBUS, 8 SIGFPE,
+# CRASH_LOGS. Plesk runs its panel (ports 8443/8880) on a nginx of its own, sw-cp-server, with its
+# own error log: its workers count as "plesk-panel", in either source. Only the signals of a program fault count – 4 SIGILL, 6 SIGABRT, 7 SIGBUS, 8 SIGFPE,
 # 11 SIGSEGV –, not a kill (9, 15) by the OOM killer, a timeout or an admin. One crash usually shows
 # in both sources: per program the higher of the two counts is taken.
 crash_records() {
@@ -2013,10 +2014,12 @@ crash_records() {
     fi
     for f in $CRASH_LOGS; do
       [[ -f $f ]] || continue
-      new_lines "$f" | grep -E 'exited on signal|exit signal' | sed 's/^/L /' || true
+      # P = the Plesk panel's nginx (sw-cp-server), L = every other log
+      new_lines "$f" | grep -E 'exited on signal|exit signal' | sed "s/^/$([[ $f == */sw-cp-server/* ]] && echo P || echo L) /" || true
     done
   } | awk '
     function norm(p) {
+      if (p ~ /^sw-cp-server/) return "plesk-panel"
       if (p ~ /^nginx/) return "nginx"
       if (p ~ /^(apache2|httpd)/) return "apache"
       if (p ~ /^php-fpm/) return "php-fpm"
@@ -2033,6 +2036,12 @@ crash_records() {
       if (!match($0, /[A-Za-z0-9_.+-]+\[[0-9]+\]:? (segfault|general protection|trap)/)) next
       m = substr($0, RSTART, RLENGTH); p = m; sub(/\[.*/, "", p)
       add("K", p, m ~ /segfault|general protection/ ? "SIGSEGV" : $0 ~ /invalid opcode/ ? "SIGILL" : "SIGFPE")
+      next
+    }
+    $1 == "P" {                                                            # the Plesk panel (sw-cp-server)
+      if (match($0, /process [0-9]+ exited on signal [0-9]+/)) {
+        m = substr($0, RSTART, RLENGTH); sub(/.* /, "", m); add("L", "plesk-panel", signame(m + 0))
+      }
       next
     }
     $1 == "L" {
@@ -2997,7 +3006,7 @@ alert_severity() {
     "Web: "*" served the sensitive file "*|"Web: "*" exposes "*" publicly"*|\
     "Access: new SSH key "*|"Access: account "*" has UID 0"*|"Access: /etc/ld.so.preload "*|\
     "Cron: "*"suspicious"*|"Process: "*|\
-    "Service(s) failed: "*|"fail2ban is not running"*|"Crash: "*"nginx "*|"Crash: "*"apache "*|"RAM: the kernel killed processes"*|\
+    "Service(s) failed: "*|"fail2ban is not running"*|"Crash: "*"nginx "*|"Crash: "*"apache "*|"Crash: "*"plesk-panel "*|"RAM: the kernel killed processes"*|\
     "DNS: "*" does not resolve"*|"TLS: mail certificate on port "*" has expired"*) echo critical ;;
     *) echo warning ;;
   esac
