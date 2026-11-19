@@ -2,7 +2,7 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [1.17.0] – not yet released (on `main`)
+## [1.17.0] – 2026-11-19
 
 ### Added
 Two checks derived from the nginx vulnerabilities published on 2026-11-18 as **"nginx2root"** ([CVE-2026-123007](https://www.cve.org/CVERecord?id=CVE-2026-123007), with CVE-2026-123634, CVE-2026-123633, CVE-2026-121810 and CVE-2026-113425; fixed in nginx 1.31.9; [write-up by Xint](https://xint.io/blog/nginx2root-remote-code-execution)): unauthenticated code execution in nginx through HTTP/2, chained with a bug in the kernel's SCTP module to become root. The script can't tell whether an nginx is patched (distributions backport fixes without changing the version) – but it can show the traces such an attack leaves and the door it used to root.
