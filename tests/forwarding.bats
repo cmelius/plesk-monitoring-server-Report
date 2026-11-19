@@ -100,3 +100,9 @@ permit_mynetworks, reject_unauth_destination'
   FORWARD_CHECK=0
   ! check_enabled forwarding
 }
+
+@test "only active forwarding is read (the query asks for mail_group = 'true')" {
+  plesk() { [[ $* == *mail_redir* ]] && echo "$*" >"$BATS_TEST_TMPDIR/q"; return 0; }
+  check_forwarding >/dev/null
+  grep -q "WHERE m.mail_group = 'true'" "$BATS_TEST_TMPDIR/q"
+}

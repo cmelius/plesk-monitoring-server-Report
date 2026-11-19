@@ -2737,14 +2737,16 @@ check_forwarding() {
   else
     while IFS= read -r d; do [[ -n $d ]] && hosted[${d,,}]=1; done < <(T "$CMD_TIMEOUT" plesk db -Ne "SELECT name FROM domains UNION SELECT name FROM domain_aliases" 2>/dev/null)
     # address, spam filter on (true/false), action (delete | move | text = mark | - = none; never empty: read
-    # with a tab IFS would merge two tabs), copy kept in the mailbox (true/false), forwarding target
+    # with a tab IFS would merge two tabs), copy kept in the mailbox (true/false), forwarding target.
+    # Only active forwarding: mail_group = 'true' is the switch "Switch on mail forwarding" – the
+    # addresses in mail_redir stay when it is switched off
     while IFS=$'\t' read -r a sf act cp tgt; do
       [[ -n $a && -n $tgt ]] || continue
       d=${tgt##*@}; d=${d,,}
       [[ -n ${hosted[$d]:-} ]] && continue                     # forwarding to a mailbox on this server
       if [[ -z ${fwd_sf[$a]+x} ]]; then order+=("$a"); fwd_sf[$a]=$sf; fwd_act[$a]=$act; fwd_copy[$a]=$cp; fi
       [[ " ${fwd_to[$a]:-} " == *" $d "* ]] || fwd_to[$a]="${fwd_to[$a]:+${fwd_to[$a]} }$d"
-    done < <(T "$CMD_TIMEOUT" plesk db -Ne "SELECT CONCAT(m.mail_name, '@', d.name), m.spamfilter, IFNULL(NULLIF(p.value, ''), '-'), m.delivery, r.address FROM mail m JOIN domains d ON d.id = m.dom_id JOIN mail_redir r ON r.mn_id = m.id LEFT JOIN spamfilter s ON s.username = CONCAT(m.mail_name, '@', d.name) LEFT JOIN spamfilter_preferences p ON p.spamfilter_id = s.id AND p.preference = 'action'" 2>/dev/null)
+    done < <(T "$CMD_TIMEOUT" plesk db -Ne "SELECT CONCAT(m.mail_name, '@', d.name), m.spamfilter, IFNULL(NULLIF(p.value, ''), '-'), m.delivery, r.address FROM mail m JOIN domains d ON d.id = m.dom_id JOIN mail_redir r ON r.mn_id = m.id LEFT JOIN spamfilter s ON s.username = CONCAT(m.mail_name, '@', d.name) LEFT JOIN spamfilter_preferences p ON p.spamfilter_id = s.id AND p.preference = 'action' WHERE m.mail_group = 'true'" 2>/dev/null)
     for a in "${order[@]}"; do
       n=$((n + 1))
       if [[ ${fwd_sf[$a]} != true ]]; then nofilter+=("$a → ${fwd_to[$a]// /, }")
