@@ -1557,7 +1557,7 @@ compact_login_ips() {
 }
 
 check_logins() {   # successful SSH and Plesk panel logins, alert for previously unknown IPs
-  local KNOWN NEWLOGINS FIRST_LOGIN_RUN cnt rest kind user ip meth fnote a
+  local KNOWN NEWLOGINS FIRST_LOGIN_RUN cnt rest kind user ip meth fnote a who
   section "SUCCESSFUL LOGINS (SSH, Plesk panel)"
   KNOWN="$STATE_DIR/known_login_ips"
   NEWLOGINS=$TMPD/new_login_alerts
@@ -1572,18 +1572,27 @@ check_logins() {   # successful SSH and Plesk panel logins, alert for previously
     else note "logins: no SSH log (/var/log/auth.log, /var/log/secure) and no journal – SSH logins not checked"; fi |
       awk '/sshd.*Accepted / { for (i=1;i<=NF;i++) { if ($i=="Accepted") m=$(i+1); if ($i=="for") u=$(i+1); if ($i=="from") ip=$(i+1) }
                                print "SSH\t" u "\t" ip "\t" m }'
-    # Plesk panel: Plesk logs no login events, but its access log shows them: a login is a
-    # "POST /login_up.php", and only a successful one is followed by a page of the panel
-    # (/admin/, /smb/, /cp/) with login_up.php as referrer. The user name is not logged.
-    # Requests proxied through a domain (https://domain/login.php) come from 127.0.0.1 with
-    # the real client IP in the last quoted field.
-    new_lines "$PLESK_PANEL_LOG" | awk -F'"' -v failf="$TMPD/panel_fail" '
+    # Plesk panel: the access log shows the logins: a login is a "POST /login_up.php", and only
+    # a successful one is followed by a page of the panel (/admin/, /smb/, /cp/) with
+    # login_up.php as referrer. Requests proxied through a domain (https://domain/login.php)
+    # come from 127.0.0.1 with the real client IP in the last quoted field. The user name is
+    # not in that log – but in Plesk's action log (database table log_actions, "Action Log" in
+    # the Log Browser): cp_user_login with IP and user, matched here by IP.
+    : >"$TMPD/panel_users"
+    if command -v plesk >/dev/null; then
+      T "$CMD_TIMEOUT" plesk db -Ne "SELECT ip_address, GROUP_CONCAT(DISTINCT user ORDER BY user SEPARATOR ',') FROM log_actions WHERE action_name = 'cp_user_login' AND date >= FROM_UNIXTIME($((SINCE - 300))) GROUP BY ip_address" \
+        >"$TMPD/panel_users" 2>/dev/null || : >"$TMPD/panel_users"
+    fi
+    new_lines "$PLESK_PANEL_LOG" | awk -F'"' -v failf="$TMPD/panel_fail" -v usersf="$TMPD/panel_users" '
+      BEGIN { while ((getline l < usersf) > 0) { split(l, uf, "\t"); if (uf[1] != "" && uf[2] ~ /^[A-Za-z0-9_.@,+-]+$/) pu[uf[1]] = uf[2] } }
       { ip = $1; sub(/ .*/, "", ip)
         if ((ip == "127.0.0.1" || ip == "::1") && $(NF-1) ~ /^[0-9a-fA-F:.]+$/) ip = $(NF-1)
         split($2, rq, " "); st = $3; sub(/^ /, "", st); sub(/ .*/, "", st) }
       rq[1] == "POST" && rq[2] ~ /^\/login_up\.php/ { pend[ip]++; next }
       (ip in pend) && rq[1] == "GET" && rq[2] ~ /^\/(admin|smb|cp)\// && $4 ~ /login_up\.php/ && st ~ /^(200|30[0-9])$/ {
-        print "Plesk\t-\t" ip "\tpanel, user not logged"; delete pend[ip] }
+        if (ip in pu) print "Plesk\t" pu[ip] "\t" ip "\tpanel"
+        else print "Plesk\t-\t" ip "\tpanel, user not logged"
+        delete pend[ip] }
       END { for (i in pend) f += pend[i]; print f + 0 > failf }'
   } | sort | uniq -c | while read -r cnt rest; do
     IFS=$'\t' read -r kind user ip meth <<<"$rest"
@@ -1594,7 +1603,9 @@ check_logins() {   # successful SSH and Plesk panel logins, alert for previously
     else
       can_write_state && echo "$ip $(date +%s)" >>"$KNOWN"
       fnote=""; geo_foreign && fnote=" – OUTSIDE $ALLOWED_COUNTRIES"
-      (( FIRST_LOGIN_RUN )) || echo "$( [[ $kind == Plesk ]] && echo "Plesk panel login" || echo "$kind login as $user") from previously unknown IP $ip${GEO_LABEL:+ ($GEO_LABEL)}$fnote" >>"$NEWLOGINS"
+      if [[ $kind == Plesk ]]; then who="Plesk panel login"; [[ $user != - ]] && who+=" as $user"
+      else who="$kind login as $user"; fi
+      (( FIRST_LOGIN_RUN )) || echo "$who from previously unknown IP $ip${GEO_LABEL:+ ($GEO_LABEL)}$fnote" >>"$NEWLOGINS"
     fi
   done
   compact_login_ips "$KNOWN"

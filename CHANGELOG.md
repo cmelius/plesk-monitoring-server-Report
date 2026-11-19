@@ -7,6 +7,9 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 ### Added
 - **Daily check `forwarding`: mail forwarding to other providers** (Plesk). A forwarded spam mail leaves from this server, and Gmail, Microsoft & co. rate its IP for it – for every customer. Plesk runs the spam filter before forwarding, and what it does with spam decides (tested with a blocklisted sender): spam that is deleted or moved to the Spam folder is not forwarded, spam that is only marked is. *Move* needs a copy kept in the mailbox; without one (Plesk then offers only *delete* and *mark*) an old *move* setting is listed like *mark*. The check lists every address with forwarding switched on to another provider (forwarding to a mailbox on the same server, and addresses still entered with forwarding switched off, are left out) with its spam action: an address without spam filter raises a warning, one whose spam is only marked (or set to *move* without a copy kept, or without an action) gets a recommendation with the `plesk bin spamassassin` command. It also shows the SpamAssassin size limit (a recommendation at Plesk's default of 256000 bytes: bigger spam passes unchecked) and the DNS blocklist for incoming mail (a recommendation if there is none). With Rspamd (Plesk Email Security) the spam actions are not read. Read only. `FORWARD_CHECK=0` switches it off. README: a new note on forwarding.
 
+### Changed
+- **Plesk panel logins now name the user.** The panel's access log has no user name, so the report said "user not logged". Plesk's *Action Log* (Log Browser; database table `log_actions`) records every panel login with IP and user: the report takes the name from there, matched by IP ("Plesk admin from …", and the alert "Plesk panel login as admin from previously unknown IP …"). Without a match it stays "user not logged".
+
 ## [1.17.0] – 2026-11-19
 
 ### Added
