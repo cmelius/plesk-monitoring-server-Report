@@ -64,6 +64,7 @@ is always reported). Processes are not stored – they are checked live in every
 | File | Content | Used for |
 |---|---|---|
 | `last_run` | Unix time of the last normal run | everything "since the last run" (journal, web logs). |
+| `upload_time` | seconds the upload of the last run took | the next report shows it after its own run time (the upload comes after the report is written). |
 | `offsets/` | one file per log, named after a hash of its path; content `inode bytes-read path` | the script reads only the lines added since the last run. The inode identifies the file after a rotation (`maillog` → `maillog.processed`), so the rest of the old file is still read. Delete a file here and that log is read again from its last 20,000 lines. |
 | `journal_since` | Unix time | position in the systemd journal (only if there is no mail log file). |
 | `last_scan` | empty; its modification time counts | new PHP files in upload folders are files changed after this – by file date or by inode change time, so a file with its date set back is found too. |

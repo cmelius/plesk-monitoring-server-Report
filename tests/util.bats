@@ -31,3 +31,15 @@ setup() { load_script; }
   [ "$status" -ne 0 ]
   grep -qE "$UPLOADS_PHP_IGNORE" <<<"/var/www/vhosts/d1.example/httpdocs/wp-content/uploads/mailchimp-for-wp/debug-log.php"
 }
+
+@test "daily checks: duration with the slowest checks (5 s and more)" {
+  DALERTS="$BATS_TEST_TMPDIR/dalerts"
+  detect_pubip6() { :; }
+  check_slowa() { SECONDS=$(( SECONDS + 95 )); echo a; }
+  check_slowb() { SECONDS=$(( SECONDS + 7 )); echo b; }
+  check_quick() { echo q; }
+  run run_daily slowa quick slowb
+  [[ $output == *"Daily checks took 1 min 42 s (slowest: slowa 95 s, slowb 7 s)"* ]]
+  run fmt_dur 42
+  [[ $output == "42 s" ]]
+}

@@ -29,7 +29,7 @@ jq_py() { python3 -c "import json, sys; d = json.load(open(sys.argv[1])); print(
   JSON_REPORT=0; one_run "$BATS_TEST_TMPDIR/s"; mv "$BATS_TEST_TMPDIR/s" "$BATS_TEST_TMPDIR/a"
   JSON_REPORT=1; one_run "$BATS_TEST_TMPDIR/s"
   # the daily checks print the time they ran ("As of:"), which may differ by a minute
-  diff <(grep -v '^As of:' "$BATS_TEST_TMPDIR/a/out/report.txt") <(grep -v '^As of:' "$BATS_TEST_TMPDIR/s/out/report.txt")
+  diff <(grep -Ev '^(As of:|Run time:|Daily checks took )' "$BATS_TEST_TMPDIR/a/out/report.txt") <(grep -Ev '^(As of:|Run time:|Daily checks took )' "$BATS_TEST_TMPDIR/s/out/report.txt")
   [ ! -e "$BATS_TEST_TMPDIR/a/out/report.json" ]
   [ -s "$BATS_TEST_TMPDIR/s/out/report.json" ]
 }

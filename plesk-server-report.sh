@@ -2974,7 +2974,8 @@ run_hourly() {   # run_hourly NAME… – checks write directly into the report 
 # each alert and the byte range of each check's text in $DAILY_OUT (the file stdout goes to) go
 # to $DJSON, cached like the text
 run_daily() {
-  local c s=0
+  local c s=0 t0 t1 dt=() d
+  t0=$SECONDS
   : >"$DALERTS"
   json_on && [[ -n ${DJSON:-} ]] && : >"$DJSON"
   echo "As of: $(date '+%Y-%m-%d %H:%M %Z')"
@@ -2984,12 +2985,20 @@ run_daily() {
     check_needs_dig "$c" && ! command -v dig >/dev/null && continue
     step "daily: $c"; CUR_CHECK=$c
     json_on && s=$(fsize "${DAILY_OUT:-}")
+    t1=$SECONDS
     "check_$c"
+    dt+=("$(( SECONDS - t1 )) $c")
     json_on && [[ -n ${DJSON:-} ]] && jline S "$c" 1 "$s" "$(fsize "${DAILY_OUT:-}")" >>"$DJSON"
   done
+  # how long they took, with the slowest checks (5 s and more) – they wait for DNS and web servers
+  d=$(printf '%s\n' "${dt[@]}" | sort -rn | awk '$1 >= 5 && n < 3 {printf "%s%s %s", (n++ ? ", " : ""), $2, $1 " s"}')
+  echo ""
+  echo "Daily checks took $(fmt_dur $(( SECONDS - t0 )))${d:+ (slowest: $d)}"
   CUR_CHECK=script
   return 0
 }
+# fmt_dur SECONDS – "42 s" or "3 min 12 s"
+fmt_dur() { if (( $1 < 60 )); then echo "$1 s"; else echo "$(( $1 / 60 )) min $(( $1 % 60 )) s"; fi; }
 # replay_daily_alerts – the cached daily alerts become alerts of this report; with JSON_REPORT=1
 # each keeps the name of its check (from $DJSON), and the sections of the daily checks are added
 replay_daily_alerts() {
@@ -3062,6 +3071,9 @@ write_report() {
     [[ -s $TMPD/notes ]] && sed 's/^/ i /' "$TMPD/notes"
     cat "$BODY"
     echo ""
+    # run time up to the report (the upload follows; its time is from the previous run)
+    local ut=""; [[ -r $STATE_DIR/upload_time ]] && ut=$(<"$STATE_DIR/upload_time"); [[ $ut =~ ^[0-9]+$ ]] || ut=""
+    [[ -n ${RUN_START:-} ]] && echo "Run time: $(fmt_dur $(( $(date +%s) - RUN_START )))${ut:+ (upload in the previous run: $(fmt_dur "$ut"))}"
     if (( GEO_OK )); then echo "IP geolocation: DB-IP.com Lite databases (CC BY 4.0)"
     elif [[ -n $GEO_NOTE ]]; then echo "$GEO_NOTE"; fi
   } | LC_ALL=C tr -d '\000-\010\013-\037\177' >"$REPORT"   # file names and the like: no terminal control sequences
@@ -3888,6 +3900,7 @@ is always reported). Processes are not stored – they are checked live in every
 | File | Content | Used for |
 |---|---|---|
 | `last_run` | Unix time of the last normal run | everything "since the last run" (journal, web logs). |
+| `upload_time` | seconds the upload of the last run took | the next report shows it after its own run time (the upload comes after the report is written). |
 | `offsets/` | one file per log, named after a hash of its path; content `inode bytes-read path` | the script reads only the lines added since the last run. The inode identifies the file after a rotation (`maillog` → `maillog.processed`), so the rest of the old file is still read. Delete a file here and that log is read again from its last 20,000 lines. |
 | `journal_since` | Unix time | position in the systemd journal (only if there is no mail log file). |
 | `last_scan` | empty; its modification time counts | new PHP files in upload folders are files changed after this – by file date or by inode change time, so a file with its date set back is found too. |
@@ -4650,7 +4663,9 @@ main() {
   keep_first_report
   (( SUMMARY )) && write_summary "$OUT_DIR/summary.txt"
   step "upload"
+  local ut0=$SECONDS
   upload_report
+  can_write_state && echo "$(( SECONDS - ut0 ))" >"$STATE_DIR/upload_time"
   step "mail"
   mail_reports
   # -mmin instead of -mtime: "-mtime +7" only matches files at least 8 full days old
