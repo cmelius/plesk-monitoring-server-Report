@@ -1617,7 +1617,7 @@ check_uploads() {   # new PHP files in wp-content/uploads
     fi
   done < <(T "$FIND_TIMEOUT" find "$(dirname "$VHOST_LOGS")" -mindepth 2 -maxdepth 7 -type d -path '*/wp-content/uploads' ! -path '*/system/*' 2>/dev/null) |
     tr '\n\0' '?\n' |   # one name per line: a line break in a name is shown as ?
-    grep -vE "$UPLOADS_PHP_IGNORE" >"$TMP"
+    grep -vE "$UPLOADS_PHP_IGNORE" >"$TMP" || true   # (no file left: grep fails – fine)
   CNT=$(wc -l <"$TMP")
   if [[ -f $SCAN_STAMP ]]; then
     out "New since last run: $CNT"
@@ -2037,8 +2037,8 @@ check_persistence() {   # SSH keys, accounts, sudo, cron/autostart, suspicious p
         [[ -e ${exe% (deleted)} ]] && continue        # replaced by an update, only a restart is pending
         why="program deleted after start"
       fi
-      user=$(getent passwd "$uid" 2>/dev/null | cut -d: -f1); user=${user:-uid $uid}
-      cmd=$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | cut -c1-120 | sed 's/ *$//')
+      user=$(getent passwd "$uid" 2>/dev/null | cut -d: -f1) || true; user=${user:-uid $uid}
+      cmd=$( { tr '\0' ' ' <"/proc/$pid/cmdline"; } 2>/dev/null | cut -c1-120 | sed 's/ *$//') || true
       persist_finding '!' "process $pid of $user $why: $exe${cmd:+ – $cmd}" "Process: PID $pid of $user $why: $exe – crypto miner or backdoor? Check it" &&
         c=$((c + 1))
     done <"$TMP.p"
@@ -2062,7 +2062,7 @@ check_persistence() {   # SSH keys, accounts, sudo, cron/autostart, suspicious p
         first=0
         while IFS=$'\t' read -r k v; do [[ -n $k ]] && oldp[$k]=${v:-?}; done <"$STATE_DIR/baseline/ports"
       fi
-      baseline_diff ports "$TMP.o"
+      baseline_diff ports "$TMP.o" || true   # first run: decided above, by the stored file
       ports=$(sort -t$'\t' -k1,1n "$TMP.o" | awk -F'\t' '{ printf "%s%s %s", (NR > 1 ? ", " : ""), $1, $2 }')
       out "Listening TCP ports (not loopback): ${ports:-none}$(persist_first_note "$first")"
       while IFS=$'\t' read -r k v; do
