@@ -163,3 +163,47 @@ mail_on() { MAIL_LOG="$FIX/mail/$1"; check_mail || true; }
   run alerts
   [[ $output != *"rejections by remote servers"* ]]
 }
+
+# forwarded mails rejected by Gmail: n mails, sender SRS0 with original domain d40.example
+fwd_rejects() {
+  local i n=$1 extra=${2:-}
+  for ((i = 1; i <= n; i++)); do
+    printf 'Nov 19 15:28:%02d host postfix/qmgr[1]: FX%08d: from=<SRS0=ab12=JI=D40.example=chj+bncX@d41.example>, size=9000, nrcpt=1 (queue active)\n' "$i" "$i"
+    printf 'Nov 19 15:29:%02d host postfix/smtp[1]: FX%08d: to=<User@gmail.com>,%s relay=alt1.gmail-smtp-in.l.google.com[192.0.2.27]:25, delay=9, delays=0/0/0.5/0.1, dsn=4.7.28, status=deferred (host alt1.gmail-smtp-in.l.google.com[192.0.2.27] said: 421-4.7.28 Gmail has detected this message exceeded its quota for sending messages with the same Message-ID. (in reply to end of DATA command))\n' "$i" "$i" "$extra"
+  done
+}
+
+@test "forwarded rejections: forwarding address from Plesk, original sender, no alert below WARN_FORWARD_REJECT" {
+  fwd_rejects 3 >"$BATS_TEST_TMPDIR/fw3.log"
+  plesk() { [[ $* == *mail_redir* ]] && printf 'user@gmail.com\tmobil@d41.example\n'; return 0; }
+  WARN_FORWARD_REJECT=10
+  MAIL_LOG="$BATS_TEST_TMPDIR/fw3.log"; check_mail || true
+  run report
+  [[ $output == *"Rejections of forwarded mail: 3 (forwarding here, sender rewritten with SRS – not sent by a customer, but forwarded spam still counts against this server's IP"* ]]
+  [[ $output == *"  mobil@d41.example → user@gmail.com: 3 rejected (original sender: d40.example)"* ]]
+  run alerts
+  [[ $output != *"forwarded mails rejected"* ]]
+}
+
+@test "forwarded rejections: alert from WARN_FORWARD_REJECT on, forwarding address from orig_to" {
+  fwd_rejects 4 ' orig_to=<Mobil@d41.example>,' >"$BATS_TEST_TMPDIR/fw4.log"
+  plesk() { echo "plesk must not be asked" >&2; return 1; }
+  WARN_FORWARD_REJECT=4
+  MAIL_LOG="$BATS_TEST_TMPDIR/fw4.log"; check_mail || true
+  run report
+  [[ $output == *"  mobil@d41.example → user@gmail.com: 4 rejected (original sender: d40.example)"* ]]
+  run alerts
+  [[ $output == *"Mail: 4 forwarded mails rejected by other providers (mobil@d41.example → user@gmail.com ×4 (original sender: d40.example)) – forwarded spam counts against this server's IP"*"--only forwarding"* ]]
+  [[ $output != *"rejections by remote servers"* ]]
+}
+
+@test "forwarded rejections: WARN_FORWARD_REJECT=0 never alerts; unknown forwarding address said so" {
+  fwd_rejects 12 >"$BATS_TEST_TMPDIR/fw12.log"
+  plesk() { return 0; }
+  WARN_FORWARD_REJECT=0
+  MAIL_LOG="$BATS_TEST_TMPDIR/fw12.log"; check_mail || true
+  run report
+  [[ $output == *"  forwarding address unknown → user@gmail.com: 12 rejected (original sender: d40.example)"* ]]
+  run alerts
+  [[ $output != *"forwarded mails rejected"* ]]
+}
