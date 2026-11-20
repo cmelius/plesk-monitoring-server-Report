@@ -170,6 +170,7 @@ MAILAUTH_IGNORE_DOMAINS=""    # space-separated domains to skip
 BLOCKLIST_RESOLVER=""         # DNS resolver for blocklist lookups (IP and domain blocklists). Empty: 127.0.0.1 if a
                               # resolver answers there (Plesk: BIND), else the system resolver; "system" forces that
 MAILAUTH_RESOLVER="1.1.1.1"     # daily DNS checks: mail authentication, server and domain DNS, HTTPS; "" = system resolver
+PAR_JOBS=4                    # daily DNS checks (mail authentication, domain DNS): domains checked at the same time, 1 = one after the other
 MAILAUTH_SHOW_ALL=0           # 1 = list every domain, 0 = only domains with findings
 DKIM_KEY_DIR=/etc/domainkeys  # Plesk DKIM private keys: <dir>/<domain>/<selector>
 DKIM_SELECTOR=default         # Plesk signs with selector "default"
@@ -239,8 +240,8 @@ DAILY_CHECKS="updates kmodules certificates https serverdns mailtls domaindns ex
 # ---------------------------------------------------------------- report output
 alert() { ALERTS+=("$*"); ALERT_CHK+=("$CUR_CHECK $ALERT_DAILY"); }   # hourly alert → STATUS line
 dalert() {                                        # daily alert, cached with the daily checks
-  echo "$*" >>"$DALERTS"
-  json_on && [[ -n ${DJSON:-} ]] && jline A "$CUR_CHECK" >>"$DJSON"
+  echo "$*" >>"${PAR_DALERTS:-$DALERTS}"            # (a job of par_map: its own file first)
+  json_on && [[ -n ${DJSON:-} ]] && jline A "$CUR_CHECK" >>"${PAR_DJSON:-$DJSON}"
   return 0
 }
 section() { printf '\n== %s ==\n' "$1" >>"$BODY"; }
@@ -462,6 +463,22 @@ detect_pubip6() {
 # ---------------------------------------------------------------- DNS, SPF
 DIGQ() { dig +short +time=3 +tries=2 ${MAILAUTH_RESOLVER:+"@$MAILAUTH_RESOLVER"} "$@" 2>/dev/null; }
 txt_records() { DIGQ TXT "$1" | sed 's/" "//g; s/"//g'; }          # one TXT record per line
+# txt_get NAME – TXT records of NAME (one per line) in TXT_RECS; TXT_FAIL=1 when no answer came
+# (timeout, SERVFAIL, REFUSED – after one retry): then "no record" is not known, only "no answer"
+txt_get() {
+  local o st i
+  TXT_RECS=""; TXT_FAIL=1
+  for i in 1 2; do
+    o=$(dig +noall +comments +answer +time=3 +tries=2 ${MAILAUTH_RESOLVER:+"@$MAILAUTH_RESOLVER"} TXT "$1" 2>/dev/null) || true
+    st=$(sed -n 's/.*status: \([A-Z]*\).*/\1/p' <<<"$o" | head -1)
+    if [[ $st == NOERROR || $st == NXDOMAIN ]]; then
+      TXT_FAIL=0
+      TXT_RECS=$(awk '!/^;/ && $4 == "TXT" { for (i = 0; i < 4; i++) sub(/^[^ \t]+[ \t]+/, ""); print }' <<<"$o" | sed 's/" "//g; s/"//g')
+      return 0
+    fi
+  done
+  return 0
+}
 ip2int() { local IFS=. a b c d; read -r a b c d <<<"$1"; echo $(( (a << 24) + (b << 16) + (c << 8) + d )); }
 in_cidr() {   # in_cidr IP NET[/BITS] – IPv4 natively, IPv6 via python3
   if [[ $1 == *:* || $2 == *:* ]]; then
@@ -494,7 +511,9 @@ _spf() {
   local d=$1 ip=$2 depth=$3 recs n rec t q m arg bits red="" mxh v6=0
   [[ $ip == *:* ]] && v6=1
   if (( depth > 10 )); then SPF_RES="permerror:loop"; return; fi
-  recs=$(txt_records "$d" | grep -i '^v=spf1')
+  txt_get "$d"
+  if (( TXT_FAIL )); then SPF_RES="temperror"; return; fi   # no answer – not "no SPF"
+  recs=$(grep -i '^v=spf1' <<<"$TXT_RECS") || true
   n=$(grep -c . <<<"$recs")
   if [[ -z $recs ]]; then SPF_RES=none; (( depth > 0 )) && SPF_RES="permerror:include-without-spf"; return; fi
   if (( n > 1 )); then SPF_RES="permerror:$n-records"; return; fi
@@ -522,7 +541,7 @@ _spf() {
              done
            fi ;;
       include) _spf "$arg" "$ip" $((depth + 1))
-               [[ $SPF_RES == permerror* ]] && return
+               [[ $SPF_RES == permerror* || $SPF_RES == temperror ]] && return
                [[ $q == + && $SPF_RES == pass ]] && { SPF_RES=pass; return; } ;;
       redirect) red=${t#*=} ;;
       all) if [[ $q == + ]]; then (( depth == 0 )) && SPF_PLUSALL=1; SPF_RES=pass; return; fi
@@ -2531,56 +2550,65 @@ check_mailtls() {   # certificate of the mail server on the mail ports
   done
 }
 
+# domaindns_one DOMAIN – findings as lines "  domain: …"; "REFUSED<TAB>list" for a blocklist that
+# refused the query
+domaindns_one() {
+  local d=$1 st a aaaa here caa par r bl
+  st=$(dig_status "$d" A)
+  if [[ $st == SERVFAIL ]]; then
+    if [[ $(dig +cd +time=3 +tries=2 ${MAILAUTH_RESOLVER:+"@$MAILAUTH_RESOLVER"} A "$d" 2>/dev/null | sed -n 's/.*status: \([A-Z]*\).*/\1/p' | head -1) == NOERROR ]]; then
+      printf '%s\n' "  $d: DNSSEC broken – validating resolvers cannot resolve the domain"
+      dalert "DNS: $d does not resolve for validating resolvers – DNSSEC is broken (DS record at the registrar vs. zone signing)"
+    else
+      printf '%s\n' "  $d: SERVFAIL – name servers not answering"
+      dalert "DNS: $d does not resolve (SERVFAIL) – website and mail unreachable"
+    fi
+    return 0
+  fi
+  [[ $st == NXDOMAIN ]] && { printf '%s\n' "  $d: does not exist in public DNS (NXDOMAIN)"; return 0; }
+  # does the domain still point here?
+  a=$(DIGQ A "$d" | grep -E '^[0-9.]+$' | xargs); here=0
+  [[ " $a " == *" $PUBIP "* ]] && here=1
+  if (( ! here )) && [[ -n $a ]]; then
+    geo "${a%% *}"; printf '%s\n' "  $d: website points elsewhere ($a${GEO_LABEL:+, $GEO_LABEL}) – moved? CDN?"
+  elif [[ -z $a ]]; then printf '%s\n' "  $d: no A record"; fi
+  if [[ -n ${PUBIP6:-} ]]; then
+    aaaa=$(DIGQ AAAA "$d" | grep ':' | xargs)
+    [[ -n $aaaa && " $aaaa " != *" $PUBIP6 "* ]] && (( here )) &&
+      printf '%s\n' "  $d: AAAA ($aaaa) differs from A – IPv6 visitors reach another server"
+  fi
+  # CAA: issuance by Let's Encrypt allowed? (CAA is inherited from parent domains)
+  if [[ " $LE_DOMAINS " == *" $d "* ]]; then
+    par=$d; caa=""
+    while [[ $par == *.* && -z $caa ]]; do caa=$(DIGQ CAA "$par" | grep -i 'issue'); [[ -z $caa ]] && par=${par#*.}; done
+    if [[ -n $caa ]] && ! grep -qi 'issue.*letsencrypt\.org' <<<"$caa"; then
+      printf '%s\n' "  $d: CAA ($par) does not allow Let's Encrypt – renewal will fail"
+      dalert "TLS: CAA record of $par does not allow Let's Encrypt – the certificate of $d cannot be renewed"
+    fi
+  fi
+  # domain blocklists (listed domains: phishing/malware on a hacked site, or spam links)
+  for bl in $DOMAIN_BLOCKLISTS; do
+    r=$(bl_lookup "$d.$bl")
+    [[ -z $r ]] && continue
+    case "$bl:$r" in
+      *:127.255.255.*|dbl.spamhaus.org:127.0.1.255|multi.surbl.org:127.0.0.1|multi.uribl.com:127.0.0.1) printf 'REFUSED\t%s\n' "$bl" ;;
+      *) printf '%s\n' "  $d: LISTED on $bl ($r)"
+         dalert "DNS: domain $d is listed on $bl ($r) – mails mentioning it get rejected; check the website for malware/phishing" ;;
+    esac
+  done
+  return 0
+}
 check_domaindns() {   # still pointing here?, CAA vs. Let's Encrypt, DNSSEC, domain blocklists
-  local d st a aaaa here caa par n=0 out="" r bl
+  local d n=0 out="" doms=() line
   cert_scan   # Let's Encrypt sites for the CAA check
   BL_REFUSED=""; bl_init
   for d in $(site_domains); do
     [[ $d == "$HOST" || $d =~ ^[0-9.]+$ ]] && continue
-    n=$((n + 1))
-    st=$(dig_status "$d" A)
-    if [[ $st == SERVFAIL ]]; then
-      if [[ $(dig +cd +time=3 +tries=2 ${MAILAUTH_RESOLVER:+"@$MAILAUTH_RESOLVER"} A "$d" 2>/dev/null | sed -n 's/.*status: \([A-Z]*\).*/\1/p' | head -1) == NOERROR ]]; then
-        out+="  $d: DNSSEC broken – validating resolvers cannot resolve the domain"$'\n'
-        dalert "DNS: $d does not resolve for validating resolvers – DNSSEC is broken (DS record at the registrar vs. zone signing)"
-      else
-        out+="  $d: SERVFAIL – name servers not answering"$'\n'
-        dalert "DNS: $d does not resolve (SERVFAIL) – website and mail unreachable"
-      fi
-      continue
-    fi
-    [[ $st == NXDOMAIN ]] && { out+="  $d: does not exist in public DNS (NXDOMAIN)"$'\n'; continue; }
-    # does the domain still point here?
-    a=$(DIGQ A "$d" | grep -E '^[0-9.]+$' | xargs); here=0
-    [[ " $a " == *" $PUBIP "* ]] && here=1
-    if (( ! here )) && [[ -n $a ]]; then
-      geo "${a%% *}"; out+="  $d: website points elsewhere ($a${GEO_LABEL:+, $GEO_LABEL}) – moved? CDN?"$'\n'
-    elif [[ -z $a ]]; then out+="  $d: no A record"$'\n'; fi
-    if [[ -n ${PUBIP6:-} ]]; then
-      aaaa=$(DIGQ AAAA "$d" | grep ':' | xargs)
-      [[ -n $aaaa && " $aaaa " != *" $PUBIP6 "* ]] && (( here )) &&
-        out+="  $d: AAAA ($aaaa) differs from A – IPv6 visitors reach another server"$'\n'
-    fi
-    # CAA: issuance by Let's Encrypt allowed? (CAA is inherited from parent domains)
-    if [[ " $LE_DOMAINS " == *" $d "* ]]; then
-      par=$d; caa=""
-      while [[ $par == *.* && -z $caa ]]; do caa=$(DIGQ CAA "$par" | grep -i 'issue'); [[ -z $caa ]] && par=${par#*.}; done
-      if [[ -n $caa ]] && ! grep -qi 'issue.*letsencrypt\.org' <<<"$caa"; then
-        out+="  $d: CAA ($par) does not allow Let's Encrypt – renewal will fail"$'\n'
-        dalert "TLS: CAA record of $par does not allow Let's Encrypt – the certificate of $d cannot be renewed"
-      fi
-    fi
-    # domain blocklists (listed domains: phishing/malware on a hacked site, or spam links)
-    for bl in $DOMAIN_BLOCKLISTS; do
-      r=$(bl_lookup "$d.$bl")
-      [[ -z $r ]] && continue
-      case "$bl:$r" in
-        *:127.255.255.*|dbl.spamhaus.org:127.0.1.255|multi.surbl.org:127.0.0.1|multi.uribl.com:127.0.0.1) BL_REFUSED+=" $bl" ;;
-        *) out+="  $d: LISTED on $bl ($r)"$'\n'
-           dalert "DNS: domain $d is listed on $bl ($r) – mails mentioning it get rejected; check the website for malware/phishing" ;;
-      esac
-    done
+    n=$((n + 1)); doms+=("$d")
   done
+  while IFS= read -r line; do
+    if [[ $line == REFUSED$'\t'* ]]; then BL_REFUSED+=" ${line#*$'\t'}"; else out+="$line"$'\n'; fi
+  done < <(par_map domaindns_one "${doms[@]}")
   echo ""; echo "Domain DNS (points here? CAA, DNSSEC, domain blocklists):"
   [[ -n $out ]] && printf '%s' "$out"
   echo "  $n domain(s) checked, findings listed above"
@@ -2695,24 +2723,44 @@ load_aliases() {
   done < <(T "$CMD_TIMEOUT" plesk db -Ne "SELECT a.name, a.mail, d.name FROM domain_aliases a JOIN domains d ON d.id = a.dom_id" 2>/dev/null)
   return 0
 }
-mailauth_scan() {
-  local d doms ok=0 bad=0 nomail=0 spf spf_ok dkim dmarc mxinfo mxhere ns line key dnskey m nmb probs mailoff note
-  load_aliases
-  [[ -n $MAILNAMES_DIR && -d $MAILNAMES_DIR ]] ||
-    note "mailauth: mailbox directory MAILNAMES_DIR=\"$MAILNAMES_DIR\" not found – mailbox counts are 0"
-  doms=$( { ls "$MAILNAMES_DIR" 2>/dev/null; ls "$DKIM_KEY_DIR" 2>/dev/null; } | sort -u)
-  for d in $doms; do
-    [[ $d == *.* && " $MAILAUTH_IGNORE_DOMAINS " != *" $d "* ]] || continue
+# par_map FUNC ITEM… – FUNC ITEM for every item, PAR_JOBS at a time (the DNS checks of many
+# domains wait for name servers, not for the CPU). Output, daily alerts and JSON lines come out in
+# the order of the items, as if they had run one after the other.
+par_map() {
+  local f=$1 i=0 k dir pids=() p
+  shift
+  dir=$(mktemp -d "${TMPD:-/tmp}/par.XXXXXX") || { for k in "$@"; do "$f" "$k"; done; return 0; }
+  for k in "$@"; do
+    i=$((i + 1))
+    ( PAR_DALERTS="$dir/$i.a"; PAR_DJSON="$dir/$i.j"; "$f" "$k" >"$dir/$i.o" ) &
+    pids+=("$!")
+    if (( ${#pids[@]} >= ${PAR_JOBS:-1} )); then wait "${pids[0]}" 2>/dev/null || true; pids=("${pids[@]:1}"); fi
+  done
+  for p in "${pids[@]}"; do wait "$p" 2>/dev/null || true; done
+  for ((k = 1; k <= i; k++)); do
+    [[ -f $dir/$k.o ]] && cat "$dir/$k.o"
+    [[ -f $dir/$k.a ]] && cat "$dir/$k.a" >>"$DALERTS"
+    [[ -n ${DJSON:-} && -f $dir/$k.j ]] && cat "$dir/$k.j" >>"$DJSON"
+  done
+  rm -rf "$dir"
+  return 0
+}
+
+# mailauth_one DOMAIN – one line "RESULT<TAB>text" (ok, bad, nomail, unknown – or nothing: no mail)
+mailauth_one() {
+  local d=$1 spf spf_ok dkim dmarc mxinfo mxhere ns line key dnskey m nmb probs mailoff note unk=""
+  {
     nmb=$(T "$CMD_TIMEOUT" find "$MAILNAMES_DIR/$d" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | grep -vc '/@')
     # MX: is mail for this domain hosted here?
     mxhere=0; mxinfo=""
     for m in $(DIGQ MX "$d" | awk '{print $2}'); do
       if host_has_ip "${m%.}" "$PUBIP"; then mxhere=1; else mxinfo+="${mxinfo:+,}${m%.}"; fi
     done
-    (( nmb == 0 && mxhere == 0 )) && [[ -z $mxinfo ]] && continue     # no MX, no mailboxes → no mail
+    (( nmb == 0 && mxhere == 0 )) && [[ -z $mxinfo ]] && return 0     # no MX, no mailboxes → no mail
     # SPF
     spf_eval "$d" "$PUBIP"; spf=$SPF_RES; spf_ok=0
     [[ $spf == pass ]] && spf_ok=1
+    [[ $spf == temperror ]] && { spf="?"; unk+=" SPF"; }
     (( SPF_PLUSALL )) && spf="+all"
     if [[ -n ${PUBIP6:-} ]]; then   # server sends via IPv6 too: SPF must cover both addresses
       spf_eval "$d" "$PUBIP6"
@@ -2722,12 +2770,16 @@ mailauth_scan() {
     dkim="off"
     if [[ -r $DKIM_KEY_DIR/$d/$DKIM_SELECTOR ]]; then
       key=$(openssl rsa -in "$DKIM_KEY_DIR/$d/$DKIM_SELECTOR" -pubout -outform DER 2>/dev/null | base64 -w0)
-      dnskey=$(txt_records "$DKIM_SELECTOR._domainkey.$d" | grep -i 'p=' | head -1 | tr -d ' ' | sed -n 's/.*p=\([^;]*\).*/\1/p')
-      if [[ -z $dnskey ]]; then dkim="MISSING"
+      txt_get "$DKIM_SELECTOR._domainkey.$d"
+      dnskey=$(grep -i 'p=' <<<"$TXT_RECS" | head -1 | tr -d ' ' | sed -n 's/.*p=\([^;]*\).*/\1/p') || true
+      if (( TXT_FAIL )); then dkim="?"; unk+=" DKIM"
+      elif [[ -z $dnskey ]]; then dkim="MISSING"
       elif [[ $dnskey == "$key" ]]; then dkim="ok"
       else dkim="MISMATCH"; fi
     fi
-    dmarc=$(txt_records "_dmarc.$d" | grep -i '^v=DMARC1' | head -1 | grep -oiE 'p=[a-z]+' | head -1)
+    txt_get "_dmarc.$d"
+    dmarc=$(grep -i '^v=DMARC1' <<<"$TXT_RECS" | head -1 | grep -oiE 'p=[a-z]+' | head -1) || true
+    (( TXT_FAIL )) && { dmarc="?"; unk+=" DMARC"; }
     ns=$(DIGQ NS "$d" | head -1); ns=${ns%.}
     # Plesk alias with mail service switched off: nobody can send or receive mail with this domain
     # here, so missing SPF/DKIM is irrelevant (SPF -all + DMARC p=reject is even the right setup)
@@ -2736,7 +2788,7 @@ mailauth_scan() {
       mailoff=1; note=" | alias of ${ALIAS_OF[$d]}, mail off – info only"
     fi
     probs=""
-    (( spf_ok )) || [[ $spf == "+all" ]] || probs+=" SPF:${spf}"
+    (( spf_ok )) || [[ $spf == "+all" || $spf == "?" ]] || probs+=" SPF:${spf}"
     if [[ $spf == "+all" ]] && (( mxhere || mailoff )); then   # +all lets anyone forge mail, sending or not
       dalert "Mail auth: $d – SPF ends in +all: anyone may send mail as this domain (DNS at ${ns:-?})"
     fi
@@ -2749,22 +2801,42 @@ mailauth_scan() {
     [[ -z $dmarc ]] && (( mxhere )) && probs+=" DMARC:missing"
     # DMARC passes if SPF *or* DKIM passes – only both failing breaks delivery
     local broken=0
-    (( ! spf_ok )) && [[ $spf != "+all" && $dkim != ok ]] && broken=1
+    (( ! spf_ok )) && [[ $spf != "+all" && $spf != "?" && $dkim != ok && $dkim != "?" ]] && broken=1
     line=$(printf '  %-28s SPF %-9s | DKIM %-8s | DMARC %-12s | MX %s | DNS %s%s' "$d" \
       "$spf" "$dkim" "${dmarc:-missing}" "$( ((mxhere)) && echo here || echo "${mxinfo:-none}")" "${ns:-?}" "$note")
+    [[ -n $unk ]] && line+=" | no DNS answer for${unk} – not rated"
     if (( mailoff )); then
-      nomail=$((nomail + 1)); [[ -n $probs ]] || (( MAILAUTH_SHOW_ALL )) && echo "$line"
+      printf 'nomail\t%s\n' "$( [[ -n $probs ]] || (( MAILAUTH_SHOW_ALL )) && echo "$line")"
     elif [[ -n $probs ]]; then
-      bad=$((bad + 1)); echo "$line"
+      printf 'bad\t%s\n' "$line"
       # alert only if mail for the domain is hosted here (users send through this server)
       # and neither SPF nor DKIM passes; a single failing one is listed as a recommendation
       if (( mxhere && broken )) && [[ $spf != permerror* ]]; then   # permerror already alerted above
         dalert "Mail auth: $d – neither SPF nor DKIM passes (${probs# }, DNS at ${ns:-?}) – mails from this domain are likely rejected or marked as spam"
       fi
+    elif [[ -n $unk ]]; then
+      printf 'unknown\t%s\n' "$line"
     else
-      ok=$((ok + 1)); (( MAILAUTH_SHOW_ALL )) && echo "$line"
+      printf 'ok\t%s\n' "$( (( MAILAUTH_SHOW_ALL )) && echo "$line")"
     fi
+  }
+  return 0
+}
+mailauth_scan() {
+  local d doms=() ok=0 bad=0 nomail=0 unk=0 r line
+  load_aliases
+  [[ -n $MAILNAMES_DIR && -d $MAILNAMES_DIR ]] ||
+    note "mailauth: mailbox directory MAILNAMES_DIR=\"$MAILNAMES_DIR\" not found – mailbox counts are 0"
+  for d in $( { ls "$MAILNAMES_DIR" 2>/dev/null; ls "$DKIM_KEY_DIR" 2>/dev/null; } | sort -u); do
+    [[ $d == *.* && " $MAILAUTH_IGNORE_DOMAINS " != *" $d "* ]] && doms+=("$d")
   done
+  while IFS=$'\t' read -r r line; do
+    case $r in
+      ok) ok=$((ok + 1)) ;; bad) bad=$((bad + 1)) ;; nomail) nomail=$((nomail + 1)) ;; unknown) unk=$((unk + 1)) ;; *) continue ;;
+    esac
+    [[ -n $line ]] && echo "$line"
+  done < <(par_map mailauth_one "${doms[@]}")
+  (( unk )) && echo "  $unk domain(s) not rated: the name server gave no answer (timeout or SERVFAIL, after a retry) – checked again in the next daily run"
   echo "  $ok domain(s) OK, $bad with findings$( ((nomail)) && echo ", $nomail alias(es) without mail service (info only)"). Alert only if SPF and DKIM both fail and the MX points here;"
   echo "  a single missing/outdated record (SPF, DKIM or DMARC) is a recommendation (DMARC passes if SPF or DKIM passes)."
   echo "  DNS queried via ${MAILAUTH_RESOLVER:-system resolver}"
