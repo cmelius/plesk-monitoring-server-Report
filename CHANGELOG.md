@@ -2,7 +2,10 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [1.18.1] – not yet released (on `main`)
+## [1.19.0] – not yet released (on `main`)
+
+### Added
+- **Run time in the report.** `Run time: …` at the end of every report (with the upload time of the previous run – the upload comes after the report is written), and `Daily checks took … (slowest: mailauth 95 s, …)` under DAILY CHECKS. A manual test run after an update repeats the daily checks and takes minutes, mostly waiting for DNS servers and websites; the README now explains that, and how to see what a running run is doing: `cat /var/lib/plesk-server-report/running`.
 
 ### Changed
 - **Rejections of forwarded mail are counted apart, with the forwarding address and their own alert.** A mail this server forwards (Plesk rewrites its sender with SRS: `SRS0=…@your domain`) was not sent by a customer – but the receiver sees it coming from your IP, so forwarded spam still counts against it. Seen in practice: a spam wave sent through Google Groups reached 14 mailboxes on the server, one of them forwarded to Gmail – Gmail throttled it ("421-4.7.28 … same Message-ID", "unusual rate of mail originating from your DKIM domain [the spammer's domain]"), and the report raised "rejections by remote servers … check the server IP" with Gmail as the one to ask, as if a customer were sending spam. Such rejections are now counted on a line of their own, "Rejections of forwarded mail: N", listed per forwarding address (from `orig_to` in the log, else from Plesk's forwarding settings), target and original sender domain, with up to two examples; the summary adds them up. They raise no rejection alert, but from `WARN_FORWARD_REJECT` (default 10 per run, `0` = never) an alert of their own that names the forwarding address and points to the fix: set its spam filter to delete spam or move it with a copy kept (daily check `forwarding`). New metric `mail_forwarded_rejections`.
@@ -10,9 +13,6 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 
 ### Fixed
 - **A DNS lookup without answer no longer counts as a missing record** (mail authentication). A timeout or SERVFAIL of the DKIM, DMARC or SPF lookup was taken as "no record": the report showed "DKIM MISSING" for a domain whose key was in DNS (seen on a real server, where one slow run of the daily checks reported it for a domain that had never had a finding) – and with SPF and DKIM both hit, it would have raised a false "neither SPF nor DKIM passes" alert. Such a lookup is now retried once; without an answer the value shows as `?`, the domain is counted as *not rated* (with a line saying so), and it never raises an alert.
-
-### Added
-- **Run time in the report.** `Run time: …` at the end of every report (with the upload time of the previous run – the upload comes after the report is written), and `Daily checks took … (slowest: mailauth 95 s, …)` under DAILY CHECKS. A manual test run after an update repeats the daily checks and takes minutes, mostly waiting for DNS servers and websites; the README now explains that, and how to see what a running run is doing: `cat /var/lib/plesk-server-report/running`.
 
 ## [1.18.0] – 2026-11-20
 
