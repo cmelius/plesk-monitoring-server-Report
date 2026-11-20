@@ -84,7 +84,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.18.0
+VERSION=1.18.1
 
 set -uo pipefail
 export LC_ALL=C
@@ -682,6 +682,9 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       f=$0; sub(/.*from=</, "", f); sub(/>.*/, "", f); if (f=="") f="<> (bounce)"
       n=$0; sub(/.*nrcpt=/, "", n); sub(/[^0-9].*/, "", n); rc[f]+=n
       q=qid($0)
+      # a sender rewritten with SRS (Plesk forwarding: SRS0=hash=tt=domain=user@this domain) – mail
+      # this server forwards, not mail a customer sent
+      if (q != "" && f ~ /^SRS[01][=+-]/) srsq[q] = 1
       # outgoing only: submitted after a mailbox login or injected by a local script;
       # counted once per message (qmgr logs a message again on every delivery retry)
       if (q != "" && ((q in sq) || (q in pq)) && !(q in oseen)) { oseen[q]=1; orc[f]+=n }
@@ -724,6 +727,13 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       # server waits a few minutes, then it is accepted – it matched "listed" before.
       if (l ~ /greylist|graylist|grey-list|gray-list|postgrey/) { }
       else if (l ~ /blacklist|blocklist|block list|blocked|spamhaus|barracuda|spamcop|listed|reputation|poor ip|banned|unsolicited|spam|rate limit|rate-limit|unusual rate|4\.7\.28|5\.7\.26|4\.7\.650|local policy|\[cs0[0-9]\]|\[hm0[0-9]\]|\[hme[0-9]\]|excessive volume|unexpected volume|user complaints|\[ts+[0-9]+\]|dnsbl|policy restrictions|tosa@rx\.t-online|dmarc|spf and dkim/) {
+        # a forwarded mail (SRS sender): its rejection is about the original sender, not the customers
+        # here – counted apart, without an alert (Gmail throttles a spam wave forwarded from several
+        # servers: "same Message-ID", "unusual rate of mail originating from your DKIM domain" – of the original sender)
+        if (qid($0) in srsq) { fwn++
+          if (fwx < 2) { d=$0; e=substr($0, 1, 15); sub(/.* to=<[^@>]*@?/, "", d); sub(/>.*/, "", d); r=$0; sub(/.* status=(deferred|bounced) \(/, "", r)
+            fex[++fwx]=e " " d ": " substr(r, 1, 220) }
+          next }
         # example: time, recipient domain and the remote reply (without the delivery details)
         if (blx < 3) { d=$0
           e=substr($0, 1, 15); sub(/.* to=<[^@>]*@?/, "", d); sub(/>.*/, "", d); r=$0; sub(/.* status=(deferred|bounced) \(/, "", r)
@@ -838,6 +848,8 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       for (u in nu)   printf "NOUSR\t%d\t%s\n", nu[u], u
       for (u in mm)   printf "MISM\t%d\t%s\t%s\n", mm[u], u, mml[u]
       for (i=1; i<=blx; i++) printf "BLEX\t%s\n", bex[i]
+      printf "FWREJ\t%d\n", fwn
+      for (i=1; i<=fwx; i++) printf "FWEX\t%s\n", fex[i]
       for (k in rkn) printf "REJBY\t%d\t%s\n", rkn[k], k
       if (ownn) printf "OWNF\t%d\t%s\n", ownn, ownx
       else if (bnc) printf "OWNF\t%d\t%s\n", bnc, "a mail to the sender address " self " arrived – probably a later bounce from the receiving server"
@@ -866,6 +878,14 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       out "    $(rej_hint "$rk" name) (${rn}×): $(rej_hint "$rk")"
     done < <(grep '^REJBY' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr)
   fi
+  # rejections of forwarded mail: the receiver judges the original sender, not this server's customers
+  local fwn
+  read -r _ fwn <<<"$(grep '^FWREJ' <<<"$MAILSTATS" | tr '\t' ' ')"
+  if (( ${fwn:-0} > 0 )); then
+    out "Rejections of forwarded mail: $fwn (forwarding here, sender rewritten with SRS – not sent by a customer; the receiver judges the original sender)"
+    grep '^FWEX' <<<"$MAILSTATS" | cut -f2- | sed 's/^/  example (forwarded): /' >>"$BODY"
+  fi
+  metric mail_forwarded_rejections "${fwn:-0}"
   # outgoing deliveries per receiving mail server: shows trouble with a big provider whatever its
   # reply says. Grouped by the MX host, not the recipient's domain: a forged sender's domain shows
   # up under the name of its (often unreachable) mail server.
@@ -3250,6 +3270,8 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       if ($0 ~ /^Delivered: /) { n = split($0, x, /[^0-9]+/); dl += x[2]; df += x[3]; bo += x[4]; if (x[5] + 0 > mq) { mq = x[5] + 0; mqt = tm }; next }
       if ($0 ~ /^Rejections mentioning/) { r = $0; sub(/.*: /, "", r); rj += r; next }
       if ($0 ~ /^  example: /) { if (nbx < 5) { l = $0; sub(/^  example: /, "", l); print "BLX\t" tm "\t" t(substr(l, 1, 260)); nbx++ }; next }
+      if ($0 ~ /^Rejections of forwarded mail: /) { r = $0; sub(/^Rejections of forwarded mail: /, "", r); sub(/ .*/, "", r); fwr += r; next }
+      if ($0 ~ /^  example \(forwarded\): /) { if (nfx < 3) { l = $0; sub(/^  example \(forwarded\): /, "", l); print "FWX\t" tm "\t" t(substr(l, 1, 260)); nfx++ }; next }
       if ($0 ~ /^Outgoing deliveries per (provider|receiving mail server)/) { sub_ = "prov"; next }
       if (sub_ == "prov" && $0 ~ /^  [^ ].* [0-9]+ \/ [0-9]+( \([0-9]+ mails?\))? \/ [0-9]+$/) {
         sub(/ \([0-9]+ mails?\)/, "")   # distinct mails: from the state file deferred_mails, not summed
@@ -3361,6 +3383,7 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       for (i = 1; i <= nno; i++) { a = no[i]; print "NOTE\t" nc[a] "\t" nf[a] "\t" nl[a] "\t" t(a) }
       for (i = 1; i <= nbk; i++) print "BKP\t" t(bk[i])
       printf "MAILTOT\t%d\t%d\t%d\t%d\t%s\t%d\n", dl, df, bo, mq, mqt, rj
+      if (fwr) printf "FWTOT\t%d\n", fwr
       printf "SKIPTOT\t%d\t%s\n", skt, skl
       for (p in ps) printf "PROVTOT\t%d\t%d\t%d\t%d\t%s\n", ps[p] + pd[p] + pb[p], ps[p], pd[p], pb[p], p
       for (w in ws) printf "WATCHTOT\t%d\t%d\t%d\t%s\n", ws[w], wd[w], wb[w], w
@@ -3417,6 +3440,8 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
     echo ""; echo "== MAIL =="
     rec MAILTOT | awk -F'\t' '{printf "Delivered: %d | deferred: %d | bounced: %d | highest queue: %d%s\nRejections mentioning blocklist/reputation/spam/rate limit: %d\n", $1, $2, $3, $4, ($5 != "" ? " (" $5 ")" : ""), $6}'
     rec BLX | awk -F'\t' '{printf "  example (%s): %s\n", $1, $2}'
+    rec FWTOT | awk -F'\t' '{printf "Rejections of forwarded mail: %d (forwarding here, sender rewritten with SRS – not sent by a customer)\n", $1}'
+    rec FWX | awk -F'\t' '{printf "  example, forwarded (%s): %s\n", $1, $2}'
     if [[ -n $(rec PROVTOT) ]]; then
       echo "Outgoing deliveries per receiving mail server (provider or MX host; total sent / deferred attempts (mails) / bounced):"
       # distinct deferred mails of the period, from the state file (one line per provider and queue ID)

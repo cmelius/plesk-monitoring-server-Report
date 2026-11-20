@@ -130,3 +130,36 @@ mail_on() { MAIL_LOG="$FIX/mail/$1"; check_mail || true; }
   run rej_hint proofpoint
   [[ $output == *"https://www.proofpoint.com/us/ipcheck (IP,"* ]]
 }
+
+@test "rejection of a forwarded mail (SRS sender): counted apart, no alert" {
+  printf '%s\n' \
+   'Nov 19 15:28:30 host postfix/qmgr[1]: FW00000001: from=<SRS0=IPn8=JI=d40.example=chj+bncX@d41.example>, size=9000, nrcpt=1 (queue active)' \
+   'Nov 19 15:28:39 host postfix/smtp[1]: FW00000001: to=<user@gmail.com>, relay=alt1.gmail-smtp-in.l.google.com[192.0.2.27]:25, delay=9, delays=0/0/0.5/0.1, dsn=4.7.28, status=deferred (host alt1.gmail-smtp-in.l.google.com[192.0.2.27] said: 421-4.7.28 Gmail has detected an unusual rate of mail originating from your DKIM 421-4.7.28 domain [d40.example 36]. (in reply to end of DATA command))' \
+   'Nov 19 15:30:00 host postfix/qmgr[1]: CU00000001: from=<info@d41.example>, size=900, nrcpt=1 (queue active)' \
+   'Nov 19 15:30:05 host postfix/smtp[1]: CU00000001: to=<x@d42.example>, relay=mx.d42.example[198.18.1.1]:25, delay=1, delays=0/0/0.5/0.1, dsn=5.7.1, status=bounced (host mx.d42.example[198.18.1.1] said: 554 5.7.1 Client host [203.0.113.10] blocked using zen.spamhaus.org (in reply to RCPT TO command))' \
+   >"$BATS_TEST_TMPDIR/fw.log"
+  WARN_BLOCKLIST=1
+  MAIL_LOG="$BATS_TEST_TMPDIR/fw.log"; check_mail || true
+  run report
+  [[ $output == *"Rejections mentioning blocklist/reputation/spam/rate limit: 1"* ]]
+  [[ $output == *"Rejections of forwarded mail: 1 (forwarding here, sender rewritten with SRS – not sent by a customer"* ]]
+  [[ $output == *"  example (forwarded): Nov 19 15:28:39 gmail.com: host alt1.gmail-smtp-in"*"unusual rate"* ]]
+  [[ $output != *"Gmail (1×)"* ]]
+  run alerts
+  [[ $output == *"Mail: 1 rejections by remote servers"*"Spamhaus"* ]]
+  [[ $output != *Gmail* ]]
+}
+
+@test "only forwarded mail rejected: no rejection alert" {
+  printf '%s\n' \
+   'Nov 19 15:28:30 host postfix/qmgr[1]: FW00000002: from=<SRS0=ab12=JI=d40.example=x@d41.example>, size=9000, nrcpt=1 (queue active)' \
+   'Nov 19 15:28:39 host postfix/smtp[1]: FW00000002: to=<user@gmail.com>, relay=alt1.gmail-smtp-in.l.google.com[192.0.2.27]:25, delay=9, delays=0/0/0.5/0.1, dsn=4.7.28, status=deferred (host alt1.gmail-smtp-in.l.google.com[192.0.2.27] said: 421-4.7.28 Gmail has detected this message exceeded its quota for sending messages with the same Message-ID. (in reply to end of DATA command))' \
+   >"$BATS_TEST_TMPDIR/fw2.log"
+  WARN_BLOCKLIST=1
+  MAIL_LOG="$BATS_TEST_TMPDIR/fw2.log"; check_mail || true
+  run report
+  [[ $output == *"Rejections mentioning blocklist/reputation/spam/rate limit: 0"* ]]
+  [[ $output == *"Rejections of forwarded mail: 1"* ]]
+  run alerts
+  [[ $output != *"rejections by remote servers"* ]]
+}

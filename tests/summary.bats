@@ -46,3 +46,16 @@ section() { sed -n "/^== $1/,/^\$/p" "$2"; }
   run grep -E '^  d123.example ' "$BATS_TEST_TMPDIR/summary2.txt"
   [[ $output =~ /\ [0-9]+\ \(2\ mails\)\ / ]]
 }
+
+@test "rejections of forwarded mail: summed over the runs, with examples" {
+  local a b
+  a=$(ls "$OUT_DIR"/report-*.txt | tail -1); b=$(ls "$OUT_DIR"/report-*.txt | tail -2 | head -1)
+  for f in "$a" "$b"; do
+    sed -i '/^Rejections mentioning/a Rejections of forwarded mail: 2 (forwarding here, sender rewritten with SRS – not sent by a customer; the receiver judges the original sender)\n  example (forwarded): Nov 19 15:28:39 gmail.com: host alt1.gmail-smtp-in.l.google.com[192.0.2.27] said: 421-4.7.28 unusual rate' "$f"
+  done
+  write_summary "$BATS_TEST_TMPDIR/summary3.txt" || true
+  run cat "$BATS_TEST_TMPDIR/summary3.txt"
+  [[ $output == *"Rejections of forwarded mail: 4 (forwarding here, sender rewritten with SRS – not sent by a customer)"* ]]
+  [[ $output == *"  example, forwarded (2026-11-13 "*"): Nov 19 15:28:39 gmail.com: "*"unusual rate"* ]]
+  [[ $output == *"Rejections mentioning blocklist/reputation/spam/rate limit: 1"* ]]
+}

@@ -2,6 +2,11 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
+## [1.18.1] – not yet released (on `main`)
+
+### Changed
+- **Rejections of forwarded mail no longer raise the rejection alert.** A mail this server forwards (Plesk rewrites its sender with SRS: `SRS0=…@your domain`) is judged by the receiver for its original sender, not for the customers here. Seen in practice: a spam wave sent through Google Groups reached 14 mailboxes on the server, one of them forwarded to Gmail – Gmail throttled it ("421-4.7.28 … same Message-ID", "unusual rate of mail originating from your DKIM domain [the spammer's domain]"), and the report raised "rejections by remote servers … check the server IP" with Gmail as the one to ask. Such rejections are now counted on a line of their own, "Rejections of forwarded mail: N (… not sent by a customer)", with up to two examples and without an alert; the summary adds them up. The line still shows how often forwarded spam reaches Gmail & co. – if it grows, check the spam action of the forwarding addresses (daily check `forwarding`). New metric `mail_forwarded_rejections`.
+
 ## [1.18.0] – 2026-11-20
 
 ### Added
