@@ -2,6 +2,11 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
+## [1.20.0] – not yet released (on `main`)
+
+### Added
+- **`MAIL_TRUSTED_LOGINS`: trust one mailbox from one address.** An application on a rented server that sends through a customer's mailbox (seen in practice: a mailbox sending a single mail now and then from an OVH server in France) raised "submitted mails after logins from outside … – password compromised?" in every run. The only way out was `GEO_TRUSTED_ORGS`, which exempts a whole operator for every mailbox – and attackers use the same clouds. `MAIL_TRUSTED_LOGINS="info@example.com=198.51.100.20"` (or `=NET/BITS`, several separated by spaces) trusts exactly that pair: no alert for mails sent, IMAP/POP3 logins or webmail from there, and no line in the datacenter list. The same mailbox from another address, or another mailbox from that address, still raises the alert. Trusted logins stay listed, marked `[trusted]`; a malformed entry is named in a note.
+
 ## [1.19.0] – 2026-11-21
 
 ### Added

@@ -84,7 +84,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.19.0
+VERSION=1.20.0
 
 set -uo pipefail
 export LC_ALL=C
@@ -217,6 +217,7 @@ GEOIP=1                       # 0 = off
 GEOIP_DIR=""                  # default: $STATE_DIR/geoip
 ALLOWED_COUNTRIES=""          # e.g. "DE AT CH": alert on successful logins from other countries ("" = no alerts)
 GEO_TRUSTED_ORGS=""           # regex of operators exempt from country alerts, e.g. "Microsoft|Google"
+MAIL_TRUSTED_LOGINS=""        # "mailbox=IP[/bits] …": known logins (e.g. an application on a rented server) – no country alert for that pair
 GEO_DATACENTER_RE='amazon|google|microsoft|oracle|digitalocean|ovh|hetzner|linode|akamai|vultr|contabo|alibaba|tencent|huawei|leaseweb|scaleway|m247|choopa|hostinger|hostwinds|colocrossing|datacamp|cloudflare|ionos|strato|netcup|hosting|server|cloud|data ?cent'
 # -----------------------------------------------------------------------------
 
@@ -480,6 +481,20 @@ txt_get() {
   return 0
 }
 ip2int() { local IFS=. a b c d; read -r a b c d <<<"$1"; echo $(( (a << 24) + (b << 16) + (c << 8) + d )); }
+# mail_trusted MAILBOX IP – listed in MAIL_TRUSTED_LOGINS ("mailbox=IP" or "mailbox=NET/BITS", mailbox
+# without regard to case): this mailbox is known to log in from there, no country alert for the pair
+mail_trusted() {
+  local p m n
+  [[ -n $MAIL_TRUSTED_LOGINS && -n ${2:-} ]] || return 1
+  for p in $MAIL_TRUSTED_LOGINS; do
+    [[ $p == *@*=* ]] || continue
+    m=${p%%=*}; n=${p#*=}
+    [[ ${m,,} == "${1,,}" ]] || continue
+    [[ $2 == "$n" ]] && return 0
+    [[ $n == */* ]] && in_cidr "$2" "$n" && return 0
+  done
+  return 1
+}
 in_cidr() {   # in_cidr IP NET[/BITS] – IPv4 natively, IPv6 via python3
   if [[ $1 == *:* || $2 == *:* ]]; then
     [[ $1 == *:* && $2 == *:* ]] || return 1
@@ -1016,6 +1031,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     while IFS=$'\t' read -r _ c _ ip; do
       k=$((k + 1)); (( k > 5 )) && { line+=", …"; break; }
       geo "$ip"; line+="${line:+, }$ip${GEO_LABEL:+ ($GEO_LABEL)} ×$c"
+      mail_trusted "$who" "$ip" && line+=" [trusted]"
     done < <(awk -F'\t' -v u="$who" '$3 == u' <<<"$SAIP")
     [[ -n $line ]] && printf '          %s\n' "$line" >>"$BODY"
   done < <(grep '^SASL' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -10)
@@ -1024,7 +1040,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   while IFS=$'\t' read -r _ c who ip; do
     [[ -n $ip ]] || continue
     geo "$ip"
-    if geo_foreign; then
+    if geo_foreign && ! mail_trusted "$who" "$ip"; then
       FOREIGN_N[$who]=$(( ${FOREIGN_N[$who]:-0} + c ))
       [[ ${FOREIGN_W[$who]:-} == *"$ip "* ]] || FOREIGN_W[$who]+="$ip ($GEO_LABEL) "
     fi
@@ -1064,7 +1080,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     geo "$ip"
     if geo_foreign; then
       isnew=""
-      [[ -n ${KC["$who $GEO_CC"]+x} ]] || { (( firstc )) || isnew=1; }
+      [[ -n ${KC["$who $GEO_CC"]+x} ]] || { (( firstc )) || mail_trusted "$who" "$ip" || isnew=1; }
       KC["$who $GEO_CC"]=$now
       rd=""
       if [[ -n ${RD["$who $ip"]+x} ]]; then
@@ -1072,9 +1088,10 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
         if (( b == 0 )); then rd="no mail read"
         else rd="$(awk -v b="$b" 'BEGIN { if (b >= 1048576) printf "%.1f MB", b/1048576; else printf "%d KB", (b+1023)/1024 }') of mail read"; fi
       fi
-      printf '  %6d  %s  from %s (%s)%s%s\n' "$c" "$who" "$ip" "$GEO_LABEL" "${rd:+  – $rd}" "${isnew:+  – first login from $GEO_CC}" >>"$BODY"
+      printf '  %6d  %s  from %s (%s)%s%s%s\n' "$c" "$who" "$ip" "$GEO_LABEL" "${rd:+  – $rd}" "${isnew:+  – first login from $GEO_CC}" \
+        "$(mail_trusted "$who" "$ip" && echo "  – trusted (MAIL_TRUSTED_LOGINS)")" >>"$BODY"
       [[ -n $isnew && ${IMF[$who]:-} != *"$ip "* ]] && IMF[$who]+="$ip ($GEO_LABEL${rd:+, $rd}) "
-    elif [[ $GEO_LABEL == *"[datacenter]"* ]] && ! { [[ -n $GEO_TRUSTED_ORGS ]] && grep -qiE "$GEO_TRUSTED_ORGS" <<<"$GEO_ORG"; }; then
+    elif [[ $GEO_LABEL == *"[datacenter]"* ]] && ! mail_trusted "$who" "$ip" && ! { [[ -n $GEO_TRUSTED_ORGS ]] && grep -qiE "$GEO_TRUSTED_ORGS" <<<"$GEO_ORG"; }; then
       DCL+="$(printf '  %6d  %s  from %s (%s)  – IMAP/POP3' "$c" "$who" "$ip" "$GEO_LABEL")"$'\n'
     fi
   done < <(grep '^IMOK' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr)
@@ -1098,6 +1115,7 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
       geo "$ip"; geo_foreign && continue
       [[ $GEO_LABEL == *"[datacenter]"* ]] || continue
       [[ -n $GEO_TRUSTED_ORGS ]] && grep -qiE "$GEO_TRUSTED_ORGS" <<<"$GEO_ORG" && continue
+      mail_trusted "$who" "$ip" && continue
       DCL+="$(printf '  %6d  %s  from %s (%s)  – SMTP, mails sent' "$c" "$who" "$ip" "$GEO_LABEL")"$'\n'
     done <<<"$SAIP"
     if [[ -n $DCL ]]; then
@@ -1249,7 +1267,7 @@ check_webmail() {   # Roundcube: mails sent per mailbox with real client IP, fai
     while IFS=$'\t' read -r _ c who ip fails; do
       [[ -n $ip ]] || continue
       geo "$ip"
-      geo_foreign && WFOREIGN[$who]+="$ip ($GEO_LABEL) "
+      geo_foreign && ! mail_trusted "$who" "$ip" && WFOREIGN[$who]+="$ip ($GEO_LABEL) "
       (( fails >= WARN_LOGIN_BRUTE_FAILS )) &&
         alert "Mail: webmail user $who sent $c mails from $ip${GEO_LABEL:+ ($GEO_LABEL)} after $fails failed logins from that IP – password guessed?"
     done <<<"$WSIP"
@@ -4655,6 +4673,11 @@ init() {
     note "mail: sendmail refused the report mail of $(cat "$STATE_DIR/mail_failed") – see journalctl -t plesk-server-report"
     rm -f "$STATE_DIR/mail_failed"
   fi
+  local mtl
+  for mtl in $MAIL_TRUSTED_LOGINS; do
+    [[ $mtl =~ ^[^=@[:space:]]+@[^=[:space:]]+=[0-9A-Fa-f:.]+(/[0-9]+)?$ ]] ||
+      note "config: MAIL_TRUSTED_LOGINS entry \"$mtl\" is not mailbox=IP or mailbox=NET/BITS – ignored"
+  done
   command -v plesk >/dev/null || note "plesk command not found – domain list from VHOST_LOGS only, domain aliases unknown"
   (( ONLY_MODE || SUMMARY_ONLY )) || cron_note
   [[ -n $STATE_NOTE && $STATE_DIR == "$STATE_DIR_DEFAULT" ]] && note "$STATE_NOTE"   # not with STATE_DIR set in the configuration

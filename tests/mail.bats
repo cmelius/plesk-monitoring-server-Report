@@ -207,3 +207,53 @@ fwd_rejects() {
   run alerts
   [[ $output != *"forwarded mails rejected"* ]]
 }
+
+# --- MAIL_TRUSTED_LOGINS: a known mailbox/IP pair outside ALLOWED_COUNTRIES raises no country alert
+trusted_setup() {
+  GEO_OK=1; ALLOWED_COUNTRIES="DE"; GEO_TRUSTED_ORGS=""
+  GEO_CACHE[198.51.100.20]="FR|OVH SAS"; GEO_CACHE[198.51.100.30]="FR|OVH SAS"
+  STATE_DIR="$BATS_TEST_TMPDIR/state"; mkdir -p "$STATE_DIR"; echo "app@d1.example DE 1" >"$STATE_DIR/known_imap_countries"
+  {
+    echo "Nov 21 10:00:01 host postfix/smtpd[1]: AB00000001: client=unknown[198.51.100.20], sasl_method=LOGIN, sasl_username=app@d1.example"
+    echo "Nov 21 10:00:02 host courier-imapd[2]: LOGIN, user=app@d1.example, ip=[::ffff:198.51.100.20], port=[1], protocol=IMAP"
+    echo "Nov 21 10:00:03 host postfix/smtpd[1]: AB00000002: client=unknown[198.51.100.30], sasl_method=LOGIN, sasl_username=app@d1.example"
+    echo "Nov 21 10:00:04 host postfix/smtpd[1]: AB00000003: client=unknown[198.51.100.20], sasl_method=LOGIN, sasl_username=other@d1.example"
+  } >"$BATS_TEST_TMPDIR/trusted.log"
+  MAIL_LOG="$BATS_TEST_TMPDIR/trusted.log"
+}
+
+@test "MAIL_TRUSTED_LOGINS: the trusted pair raises nothing, the same mailbox from another IP and another mailbox from that IP do" {
+  trusted_setup
+  MAIL_TRUSTED_LOGINS="APP@d1.example=198.51.100.20"
+  check_mail || true
+  run alerts
+  [[ $output == *"Mail: mailbox app@d1.example submitted 1 mails after logins from outside DE: 198.51.100.30 (FR, OVH SAS"* ]]
+  [[ $output != *"198.51.100.30 (FR, OVH SAS [datacenter]) 198.51.100.20"* && $output != *"app@d1.example submitted 2"* ]]
+  [[ $output == *"Mail: mailbox other@d1.example submitted 1 mails after logins from outside DE: 198.51.100.20"* ]]
+  [[ $output != *"app@d1.example logged in via IMAP/POP3 from a new country"* ]]
+  run report
+  [[ $output == *"198.51.100.20 (FR, OVH SAS [datacenter]) ×1 [trusted]"* ]]
+  [[ $output == *"app@d1.example  from 198.51.100.20 (FR, OVH SAS [datacenter])  – trusted (MAIL_TRUSTED_LOGINS)"* ]]
+}
+
+@test "MAIL_TRUSTED_LOGINS: a network with /bits; without the setting both alerts come" {
+  trusted_setup
+  MAIL_TRUSTED_LOGINS="app@d1.example=198.51.100.0/24"
+  check_mail || true
+  run alerts
+  [[ $output != *"mailbox app@d1.example"* ]]
+  ALERTS=(); : >"$BODY"; MAIL_TRUSTED_LOGINS=""
+  echo "app@d1.example DE 1" >"$STATE_DIR/known_imap_countries"
+  check_mail || true
+  run alerts
+  [[ $output == *"Mail: mailbox app@d1.example submitted 2 mails after logins from outside DE"* ]]
+  [[ $output == *"Mail: mailbox app@d1.example logged in via IMAP/POP3 from a new country outside DE: 198.51.100.20"* ]]
+}
+
+@test "MAIL_TRUSTED_LOGINS: malformed entries are ignored" {
+  run mail_trusted app@d1.example 198.51.100.20
+  [ "$status" -ne 0 ]
+  MAIL_TRUSTED_LOGINS="198.51.100.20 app@d1.example=nonsense app@d1.example=198.51.100.20"
+  mail_trusted app@d1.example 198.51.100.20
+  ! mail_trusted app@d1.example 198.51.100.21
+}
