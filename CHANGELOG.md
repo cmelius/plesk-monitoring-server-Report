@@ -2,7 +2,7 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
-## [1.19.0] – not yet released (on `main`)
+## [1.19.0] – 2026-11-21
 
 ### Added
 - **Run time in the report.** `Run time: …` at the end of every report (with the upload time of the previous run – the upload comes after the report is written), and `Daily checks took … (slowest: mailauth 95 s, …)` under DAILY CHECKS. A manual test run after an update repeats the daily checks and takes minutes, mostly waiting for DNS servers and websites; the README now explains that, and how to see what a running run is doing: `cat /var/lib/plesk-server-report/running`.
