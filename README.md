@@ -9,7 +9,7 @@ It is built around the most common way a shared Plesk server gets into trouble: 
 The script only **reads** logs and system state. It never changes the server configuration, mail queue or websites.
 
 **Contents**
-- **Start:** [Quick start](#quick-start--no-configuration-needed) · [Check it before you run it as root](#check-it-before-you-run-it-as-root)
+- **Start:** [Quick start](#quick-start--no-configuration-needed) · [Everything in one folder](#everything-in-one-folder) · [Check it before you run it as root](#check-it-before-you-run-it-as-root)
 - **What it does:** [What it found so far](#what-it-found-so-far) · [What the report covers](#what-the-report-covers) · **[Example report](#example-report-fictional-data)**
 - **Setup:** [Requirements](#requirements) · [Installation](#installation) · [Storage for the reports](#storage-for-the-reports) · [Reports by mail](#reports-by-mail) · [Configuration](#configuration) · [First run](#first-run)
 - **Running it:** [Reading the reports](#reading-the-reports) · [What the script remembers](#what-the-script-remembers) · [Updates](#updates) · [Uninstall](#uninstall)
@@ -32,11 +32,22 @@ chmod 700 /usr/local/sbin/plesk-server-report.sh
 echo '5 * * * * root /usr/local/sbin/plesk-server-report.sh' > /etc/cron.d/plesk-server-report
 ```
 
-**Prefer everything in one folder** – script, configuration and state, removed in one go? See [Everything in one folder](#everything-in-one-folder). The commands below that use `/etc/plesk-server-report.conf` then go to `plesk-server-report.conf` in that folder.
+**Or: everything in one folder.** Script, configuration, state and previous versions in one place, removed in one go with `rm -rf` – apart from the cron line, nothing in `/etc`, `/var/lib` or `/usr/local/sbin`:
+
+```bash
+mkdir -p /opt/plesk-server-report && chmod 700 /opt/plesk-server-report
+curl -fsSL -o /opt/plesk-server-report/plesk-server-report.sh \
+  https://github.com/cmelius/plesk-monitoring-server-Report/releases/latest/download/plesk-server-report.sh
+chmod 700 /opt/plesk-server-report/plesk-server-report.sh
+/opt/plesk-server-report/plesk-server-report.sh --no-upload        # test run: prints the report
+echo '5 * * * * root /opt/plesk-server-report/plesk-server-report.sh' > /etc/cron.d/plesk-server-report
+```
+
+Details, and how to switch an existing installation: [Everything in one folder](#everything-in-one-folder). In a one-folder installation, the commands below that use `/etc/plesk-server-report.conf` go to `plesk-server-report.conf` in that folder, and the state is in `state/` there instead of `/var/lib/plesk-server-report/`.
 
 The `curl` command is for the first installation. From version 1.12.0 on, the script updates itself when you ask it to: `plesk-server-report.sh --self-update` (see [Updates](#updates)).
 
-That's it: from now on a report is written every hour to `/var/lib/plesk-server-report/out/`. Four optional extras are worth the few minutes:
+That's it: from now on a report is written every hour to `/var/lib/plesk-server-report/out/` (in a one-folder installation: `state/out/` in that folder). Four optional extras are worth the few minutes:
 
 1. **Upload** the reports to cloud storage, so you (or an AI assistant) can read them anywhere – [Storage for the reports](#storage-for-the-reports). Without it, the reports stay on the server.
 2. **Geolocation** of login IPs: `apt install mmdb-bin` – no configuration needed.
@@ -603,6 +614,8 @@ Only in the JSON files – the text report doesn't show it. **`critical`** means
 ---
 
 ## Installation
+
+Two layouts, both fully supported: the usual Linux layout below, or [everything in one folder](#everything-in-one-folder).
 
 ```bash
 # latest release (recommended)

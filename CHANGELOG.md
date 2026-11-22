@@ -7,6 +7,9 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 ### Added
 - **`MAIL_TRUSTED_LOGINS`: servers running customers' applications.** Many customers send mail through their mailbox not only from their devices but from a server of their own: a shop, a CRM or ERP system, a website hosted elsewhere, a scanner or backup job – often rented from a cloud provider in another country. Every mail from there raised "submitted mails after logins from outside … – password compromised?", in every run (seen in practice: a mailbox sending a single mail now and then from an OVH server in France). The only way out was `GEO_TRUSTED_ORGS`, which exempts a whole operator for every mailbox – and attackers rent from the same clouds. `MAIL_TRUSTED_LOGINS="info@example.com=198.51.100.20"` (or `=NET/BITS`, several separated by spaces) trusts exactly the mailbox of that application from that server: no alert for mails sent, IMAP/POP3 logins or webmail from there, and no line in the datacenter list. The same mailbox from another address, or another mailbox from that address, still raises the alert – a stolen password used elsewhere is still noticed. Trusted logins stay listed, marked `[trusted]`; a malformed entry is named in a note.
 
+### Changed
+- **README: the one-folder installation is shown in the Quick start**, with its own commands next to the usual layout, and listed in the contents at the top. It was only a link before, easy to miss.
+
 ## [1.19.0] – 2026-11-21
 
 ### Added
