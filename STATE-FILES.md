@@ -79,6 +79,8 @@ is always reported). Processes are not stored – they are checked live in every
 | `daily.txt` | their output, repeated in every report of that day under DAILY CHECKS. |
 | `daily_alerts.txt` | their alerts, repeated in every report of that day. |
 | `daily_json.txt` | only with `JSON_REPORT=1`: the check of each daily alert and where each check's text is in `daily.txt`, for the JSON report. |
+| `php_domains` | `domain version state` | daily check of PHP versions: each domain's PHP version and whether it had security support (`ok`, `soon`, `eol`) at the last check. A domain that is `eol` now and wasn't before raises "PHP: … now use a PHP version without security support". Deleted: the first check after that names every domain without support once. |
+| `php_eol` | `version=date` | the end of security support of each PHP version, from php.net's list of branches, fetched at most once a day (`PHP_EOL_ONLINE=0`: never). Kept when php.net can't be reached; deleted: fetched again. |
 
 ## Other
 

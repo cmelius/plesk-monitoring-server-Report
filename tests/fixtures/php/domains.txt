@@ -1,0 +1,3 @@
+a.example	plesk-php84-fpm-dedicated
+b.example	plesk-php84-fpm-dedicated
+c.example	plesk-php85-fpm-dedicated

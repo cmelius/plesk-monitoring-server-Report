@@ -215,6 +215,11 @@ WARN_INSTALLER_OPEN=1         # Plesk installer (port 8447) allowed from everywh
 # keys file the account can change itself (in its web space). Full shell → warning, unless listed here
 SSHUSERS_CHECK=1              # 0 = off
 ALLOWED_FULL_SHELL_USERS=""   # system users with a full shell on purpose, separated by spaces
+# Daily: PHP versions in use, installed and in service plans, with the end of their security support.
+# An alert only when a domain newly uses a version without support (also when its version loses it)
+PHP_CHECK=1                   # 0 = off
+PHP_EOL=""                    # your own dates, win over all others, e.g. "8.6=2030-12-31 8.7=2031-12-31"
+PHP_EOL_ONLINE=1              # fetch the dates from php.net once a day (kept in the state folder); 0 = never
 # Known legitimate PHP files inside wp-content/uploads (regex on the full path)
 UPLOADS_PHP_IGNORE='/uploads/mailchimp-for-wp/debug-log\.php$'
 
@@ -240,7 +245,7 @@ SYS_BIN_RE='^(/usr/local/sbin|/usr/local/bin|/usr/sbin|/usr/bin|/sbin|/bin)$'   
 # Check names in report order. Hourly checks analyse the log lines since the previous run,
 # daily checks run once a day and are cached in $STATE_DIR/daily.txt.
 HOURLY_CHECKS="mail webmail system fail2ban web uploads logins panel persistence services backups"
-DAILY_CHECKS="updates kmodules firewall sshusers certificates https serverdns mailtls domaindns exposed webshell mailauth mailboxes forwarding rclocal"
+DAILY_CHECKS="updates kmodules firewall sshusers php certificates https serverdns mailtls domaindns exposed webshell mailauth mailboxes forwarding rclocal"
 
 # =============================================================================
 # Helper functions
@@ -3070,6 +3075,140 @@ check_sshusers() {
   done
   return 0
 }
+# PHP versions without security support. Which version each domain uses (Plesk's database), which
+# are installed (plesk bin php_handler --list) and still the default of a service plan – a plan with
+# an old version gives every new subscription that version. The end of security support of each
+# version comes, in this order, from PHP_EOL, from php.net's list of branches (once a day, kept in
+# the state folder, PHP_EOL_ONLINE=0 = never), from the table below, else it is estimated from
+# php.net's schedule since 8.2 (a new 8.x every November, security fixes until 31 Dec four years
+# later: 8.N until 31 Dec 2024+N). A daily alert only when something changes: a domain that newly
+# uses a version without support, or a version in use that loses it – once.
+PHP_EOL_BUILTIN="5.6=2018-12-31 7.0=2019-01-10 7.1=2019-12-01 7.2=2020-11-30 7.3=2021-12-06 7.4=2022-11-28 8.0=2023-11-26 8.1=2025-12-31 8.2=2026-12-31 8.3=2027-12-31 8.4=2028-12-31 8.5=2029-12-31 8.6=2030-12-31"
+PHP_EOL_URL="https://www.php.net/releases/states.php"
+php_states() {   # php.net's JSON list of branches (stdin) → "8.1=2025-12-31" lines, only well-formed ones
+  tr -d '\n' | awk '{
+    s = $0
+    while (match(s, /"[0-9]+\.[0-9]+" *: *\{[^}]*\}/)) {
+      e = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+      v = e; sub(/^"/, "", v); sub(/".*/, "", v)
+      if (match(e, /"security_support_end" *: *"[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)) {
+        d = substr(e, RSTART, RLENGTH); sub(/.*"/, "", d); print v "=" d
+      }
+    } }'
+}
+php_eol_load() {   # fills PHPEOL[version]=date and PHPEOL_SRC[version]=source
+  local f="$STATE_DIR/php_eol" kv new
+  declare -gA PHPEOL=() PHPEOL_SRC=()
+  for kv in $PHP_EOL_BUILTIN; do PHPEOL[${kv%%=*}]=${kv#*=}; PHPEOL_SRC[${kv%%=*}]=built-in; done
+  if (( PHP_EOL_ONLINE )) && command -v curl >/dev/null; then
+    if [[ ! -s $f || -n $(find "$f" -mmin +1380 2>/dev/null) ]]; then
+      new=$(T 20 curl -fsS --connect-timeout 5 --max-time 15 "$PHP_EOL_URL" 2>/dev/null | php_states)
+      if [[ $(grep -c . <<<"$new") -ge 5 ]]; then echo "$new" >"$f.tmp" && mv "$f.tmp" "$f"; fi
+    fi
+    if [[ -s $f ]]; then
+      while IFS='=' read -r k v; do
+        [[ $k =~ ^[0-9]+\.[0-9]+$ && $v =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || continue
+        PHPEOL[$k]=$v; PHPEOL_SRC[$k]=php.net
+      done <"$f"
+    fi
+  fi
+  for kv in $PHP_EOL; do
+    [[ ${kv%%=*} =~ ^[0-9]+\.[0-9]+$ && ${kv#*=} =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || continue
+    PHPEOL[${kv%%=*}]=${kv#*=}; PHPEOL_SRC[${kv%%=*}]=PHP_EOL
+  done
+}
+php_eol() {   # php_eol VERSION – "date source", estimated for an unknown 8.x, nothing if unknown
+  local v=$1
+  if [[ -n ${PHPEOL[$v]:-} ]]; then echo "${PHPEOL[$v]} ${PHPEOL_SRC[$v]}"
+  elif [[ $v =~ ^8\.([0-9]+)$ ]] && (( BASH_REMATCH[1] >= 2 )); then echo "$((2024 + BASH_REMATCH[1]))-12-31 estimated"; fi
+}
+php_state() {   # php_state VERSION TODAY – eol, soon (within 90 days), ok or unknown
+  local e d
+  e=$(php_eol "$1"); [[ -n $e ]] || { echo unknown; return; }
+  d=${e%% *}
+  if [[ ! $d > $2 ]]; then echo eol
+  elif [[ ! $d > $(date -d "$2 + 90 days" +%F 2>/dev/null || echo 9999) ]]; then echo soon
+  else echo ok; fi
+}
+php_join() {   # php_join MAX – stdin lines joined with ", ", the first MAX and "…"
+  awk -v m="$1" 'NR <= m { o = o (NR > 1 ? ", " : "") $0 } END { if (NR > m) o = o ", …"; print o }'
+}
+check_php() {
+  local today handlers doms plans v st e src f="$STATE_DIR/php_domains" d h n line out=""
+  local -A hver=() dcount=() dlist=() plan=() installed=() now=() prev=()
+  today=$(date +%F)
+  php_eol_load
+  echo ""
+  if ! command -v plesk >/dev/null; then
+    v=$(T "$CMD_TIMEOUT" php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null)
+    if [[ -z $v ]]; then echo "PHP: no php command – not checked"; return 0; fi
+    e=$(php_eol "$v"); st=$(php_state "$v" "$today")
+    echo "PHP (php command, no Plesk): $v – $(php_say "$st" "$e")"
+    [[ $st == eol ]] && echo "  Recommendation: update to a version with security support"
+    return 0
+  fi
+  # handler id → version, installed handlers (enabled ones count as installed)
+  handlers=$(T "$CMD_TIMEOUT" plesk bin php_handler --list 2>/dev/null)
+  while read -r h v; do   # the id, then the first column that is only "major.minor" (the display name may have spaces)
+    hver[$h]=$v; installed[$v]=1
+  done < <(awk '{ for (i = 2; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+$/) { print $1, $i; break } }' <<<"$handlers")
+  doms=$(T "$CMD_TIMEOUT" plesk db -Ne "SELECT d.name, h.php_handler_id FROM domains d JOIN hosting h ON h.dom_id = d.id WHERE h.php = 'true'" 2>/dev/null)
+  plans=$(T "$CMD_TIMEOUT" plesk db -Ne "SELECT t.name, c.type, c.login, td.value FROM Templates t JOIN TmplData td ON td.tmpl_id = t.id LEFT JOIN clients c ON c.id = t.owner_id WHERE td.element = 'php_handler_id' AND t.type = 'domain'" 2>/dev/null)
+  while IFS=$'\t' read -r d h; do
+    [[ -n $d ]] || continue
+    v=${hver[$h]:-}; [[ -n $v ]] || { [[ $h =~ php([0-9])([0-9]+) ]] && v="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"; }
+    [[ -n $v ]] || v="? ($h)"
+    now[$d]=$v; dcount[$v]=$(( ${dcount[$v]:-0} + 1 )); dlist[$v]+="$d"$'\n'
+  done <<<"$doms"
+  while IFS=$'\t' read -r n st line h; do
+    [[ -n $n ]] || continue
+    v=${hver[$h]:-}; [[ -n $v ]] || { [[ $h =~ php([0-9])([0-9]+) ]] && v="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"; }
+    [[ -n $v ]] || continue
+    if [[ $st == admin || -z $line ]]; then plan[$v]+="$n"$'\n'; else plan[$v]+="$n ($st $line)"$'\n'; fi
+  done <<<"$plans"
+  echo "PHP versions (security support per ${PHP_EOL_URL%%/releases*}; domains with PHP: ${#now[@]}):"
+  for v in $(printf '%s\n' "${!dcount[@]}" "${!installed[@]}" "${!plan[@]}" | sort -uV); do
+    e=$(php_eol "$v"); st=$(php_state "$v" "$today")
+    if [[ -n ${dcount[$v]:-} ]]; then
+      line="  $v – ${dcount[$v]} domain(s), $(php_say "$st" "$e")"
+      [[ $st == eol || $st == soon ]] && line+=": $(sed '/^$/d' <<<"${dlist[$v]}" | sort | php_join 8)"
+      echo "$line"
+    elif [[ -n ${plan[$v]:-} ]]; then
+      echo "  $v – no domain, but the default of $(grep -c . <<<"${plan[$v]}") service plan(s): $(sed '/^$/d' <<<"${plan[$v]}" | php_join 6) – $(php_say "$st" "$e")"
+      [[ $st == eol || $st == soon ]] && echo "  Recommendation: set a newer PHP version in these plans – new subscriptions get this one"
+    else
+      echo "  $v – installed, used by no domain and no service plan – $(php_say "$st" "$e")"
+      [[ $st == eol ]] && echo "  Recommendation: remove it (Tools & Settings → Updates → Add/Remove Components)"
+    fi
+    [[ $st == unknown ]] && echo "  (support end of $v unknown – add it to PHP_EOL, e.g. PHP_EOL=\"$v=YYYY-12-31\")"
+  done
+  (( ${#now[@]} )) || echo "  no domain with PHP"
+  # alert only on a change: a domain that newly uses a version without support (new domain, switched,
+  # or its version lost support since the last check); the first check names all of them once
+  if [[ -f $f ]]; then while IFS=$'\t' read -r d v st; do prev[$d]="$v $st"; done <"$f"; fi
+  local -a newly=()
+  : >"$f.tmp"
+  for d in "${!now[@]}"; do
+    v=${now[$d]}; st=$(php_state "$v" "$today")
+    printf '%s\t%s\t%s\n' "$d" "$v" "$st" >>"$f.tmp"
+    [[ $st == eol && ${prev[$d]:-} != "$v eol" ]] && newly+=("$d ($v)")
+  done
+  mv "$f.tmp" "$f"
+  if (( ${#newly[@]} )); then
+    out=$(printf '%s\n' "${newly[@]}" | sort | php_join 8)
+    dalert "PHP: ${#newly[@]} domain(s) now use a PHP version without security support: $out – switch them to a supported version (Plesk: the domain → PHP)"
+  fi
+  return 0
+}
+php_say() {   # php_say STATE "DATE SOURCE" – words for the report
+  local d=${2%% *} src=${2#* }
+  case $1 in
+    eol)     echo "WITHOUT security support since $d ($src)" ;;
+    soon)    echo "security support ends $d ($src) – within 90 days" ;;
+    ok)      echo "supported until $d ($src)" ;;
+    *)       echo "support end unknown" ;;
+  esac
+}
 # Reachable from outside: database servers and the Plesk installer. A database that listens on all
 # addresses and is not filtered can be attacked directly (password guessing, bugs of the server);
 # Plesk only opens it with "Allow local MySQL server to accept external connections". The Plesk
@@ -3322,6 +3461,7 @@ check_enabled() {
     kmodules)  [[ -n ${RARE_MODULES// /} ]] ;;
     firewall)  (( FIREWALL_CHECK )) ;;
     sshusers)  (( SSHUSERS_CHECK )) ;;
+    php)       (( PHP_CHECK )) ;;
     *) return 0 ;;
   esac
 }
@@ -4285,6 +4425,8 @@ is always reported). Processes are not stored – they are checked live in every
 | `daily.txt` | their output, repeated in every report of that day under DAILY CHECKS. |
 | `daily_alerts.txt` | their alerts, repeated in every report of that day. |
 | `daily_json.txt` | only with `JSON_REPORT=1`: the check of each daily alert and where each check's text is in `daily.txt`, for the JSON report. |
+| `php_domains` | `domain version state` | daily check of PHP versions: each domain's PHP version and whether it had security support (`ok`, `soon`, `eol`) at the last check. A domain that is `eol` now and wasn't before raises "PHP: … now use a PHP version without security support". Deleted: the first check after that names every domain without support once. |
+| `php_eol` | `version=date` | the end of security support of each PHP version, from php.net's list of branches, fetched at most once a day (`PHP_EOL_ONLINE=0`: never). Kept when php.net can't be reached; deleted: fetched again. |
 
 ## Other
 

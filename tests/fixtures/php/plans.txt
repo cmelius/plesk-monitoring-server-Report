@@ -1,0 +1,3 @@
+Default Domain	admin	admin	plesk-php84-fpm
+Unlimited	reseller	reseller1	plesk-php83-cgi
+Default Domain	reseller	reseller2	plesk-php83-cgi

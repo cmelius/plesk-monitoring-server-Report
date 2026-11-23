@@ -1,0 +1,10 @@
+                        id:  display name:  full version:  version:    type:                         cgi-bin:                    php-cli:                        php.ini:  custom:  status:
+            plesk-php83-cgi         8.3.37         8.3.37       8.3      cgi   /opt/plesk/php/8.3/bin/php-cgi  /opt/plesk/php/8.3/bin/php  /opt/plesk/php/8.3/etc/php.ini     true disabled
+        plesk-php83-fastcgi         8.3.37         8.3.37       8.3  fastcgi   /opt/plesk/php/8.3/bin/php-cgi  /opt/plesk/php/8.3/bin/php  /opt/plesk/php/8.3/etc/php.ini     true  enabled
+            plesk-php83-fpm         8.3.37         8.3.37       8.3      fpm  /opt/plesk/php/8.3/sbin/php-fpm  /opt/plesk/php/8.3/bin/php  /opt/plesk/php/8.3/etc/php.ini     true  enabled
+  plesk-php83-fpm-dedicated         8.3.37         8.3.37       8.3      fpm  /opt/plesk/php/8.3/sbin/php-fpm  /opt/plesk/php/8.3/bin/php  /opt/plesk/php/8.3/etc/php.ini     true  enabled
+            plesk-php84-cgi         8.4.28         8.4.28       8.4      cgi   /opt/plesk/php/8.4/bin/php-cgi  /opt/plesk/php/8.4/bin/php  /opt/plesk/php/8.4/etc/php.ini     true disabled
+            plesk-php84-fpm         8.4.28         8.4.28       8.4      fpm  /opt/plesk/php/8.4/sbin/php-fpm  /opt/plesk/php/8.4/bin/php  /opt/plesk/php/8.4/etc/php.ini     true  enabled
+  plesk-php84-fpm-dedicated         8.4.28         8.4.28       8.4      fpm  /opt/plesk/php/8.4/sbin/php-fpm  /opt/plesk/php/8.4/bin/php  /opt/plesk/php/8.4/etc/php.ini     true  enabled
+  plesk-php85-fpm-dedicated         8.5.13         8.5.13       8.5      fpm  /opt/plesk/php/8.5/sbin/php-fpm  /opt/plesk/php/8.5/bin/php  /opt/plesk/php/8.5/etc/php.ini     true  enabled
+                        fpm  7.4.33 (OS vendor)        7.4.33       7.4      fpm         /usr/sbin/php-fpm7.4         /usr/bin/php7.4        /etc/php/7.4/fpm/php.ini    false  enabled
