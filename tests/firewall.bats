@@ -45,16 +45,17 @@ listen() {   # listen ADDRESS:PORT … – ss output with these listening socket
   [ "$(grep -c . <<<"$output")" -eq 8 ]
 }
 
-@test "fw_reach: no sources = everyone, sources = only them (or everyone but them)" {
+@test "fw_reach: the rule covering the port – no sources = everyone, sources = only them (or everyone but them)" {
   rule mysql allow "198.51.100.7, 203.0.113.0/24"
   FW_RULES=$(fw_rules <"$RULES")
-  [ "$(fw_reach mysql)" = "only: 198.51.100.7, 203.0.113.0/24" ]
-  [ "$(fw_reach postgresql)" = none ]
-  [ "$(fw_reach autoinstaller)" = all ]
-  [ "$(fw_reach smtp)" = none ]                      # no rule: the catch-all input rule
+  [ "$(fw_reach 3306)" = "only: 198.51.100.7, 203.0.113.0/24" ]
+  [ "$(fw_reach 5432)" = none ]
+  [ "$(fw_reach 8447)" = all ]
+  [ "$(fw_reach 50000)" = none ]                     # inside the passive FTP range 49152-65535
+  [ "$(fw_reach 25)" = none ]                        # no rule: the catch-all input rule
   rule mysql deny 198.51.100.7
   FW_RULES=$(fw_rules <"$RULES")
-  [ "$(fw_reach mysql)" = "all except: 198.51.100.7" ]
+  [ "$(fw_reach 3306)" = "all except: 198.51.100.7" ]
 }
 
 @test "the real server: MariaDB only local, installer allowed from everywhere – recommendation, no alert" {
@@ -168,4 +169,39 @@ listen() {   # listen ADDRESS:PORT … – ss output with these listening socket
 @test "FIREWALL_CHECK=0 switches it off" {
   FIREWALL_CHECK=0
   ! check_enabled firewall
+}
+
+@test "fw_procports: the ports a database process listens on, from ss -p" {
+  run fw_procports 'mysqld|mariadbd' <"$FIX/firewall/ss-local.txt"
+  [ "$output" = 3306 ]
+  run fw_procports 'postgres|postmaster' <"$FIX/firewall/ss-local.txt"
+  [ -z "$output" ]
+}
+
+@test "MariaDB on another port: checked on that port, with the firewall rule for it (none here: catch-all)" {
+  SS="$BATS_TEST_TMPDIR/ss.txt"
+  echo 'LISTEN 0      80           0.0.0.0:3307       0.0.0.0:*    users:(("mariadbd",pid=824,fd=127))' >"$SS"
+  check_firewall >"$BODY"
+  run report
+  [[ $output == *"MySQL/MariaDB (3307): listens on 0.0.0.0, the firewall blocks it"* ]]
+  [[ $output != *"(3306)"* ]]
+  run alerts
+  [ -z "$output" ]
+}
+
+@test "MariaDB on another port the firewall allows from everywhere: warning for that port" {
+  SS="$BATS_TEST_TMPDIR/ss.txt"
+  echo 'LISTEN 0      80           0.0.0.0:3307       0.0.0.0:*    users:(("mariadbd",pid=824,fd=127))' >"$SS"
+  RULES="$BATS_TEST_TMPDIR/rules.json"
+  python3 - "$FIX/firewall/rules.json" "$RULES" <<'PY'
+import json, sys
+r = json.load(open(sys.argv[1]))
+r.insert(0, {"type": "service", "class": "custom-db", "direction": "input", "ports": "3307/tcp", "action": "allow", "id": 1})
+open(sys.argv[2], "w").write(json.dumps(r, indent=4).replace("/", "\\/"))
+PY
+  check_firewall >"$BODY"
+  run report
+  [[ $output == *"MySQL/MariaDB (3307): listens on 0.0.0.0, the firewall allows it from everywhere – reachable from the internet"* ]]
+  run alerts
+  [[ $output == *"Database: MySQL/MariaDB listens on 0.0.0.0 and the firewall allows port 3307 from everywhere"* ]]
 }

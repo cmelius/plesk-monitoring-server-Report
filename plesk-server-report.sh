@@ -3078,28 +3078,42 @@ check_sshusers() {
 # a rule's "from" holds the selected sources – none: the action applies to everyone; some: the action
 # applies to them, the opposite to everyone else. A firewall in front of the server (at the hosting
 # provider) is not visible from here. Read only.
-FW_SERVICES="mysql:3306:MySQL/MariaDB postgresql:5432:PostgreSQL"   # Plesk Firewall class:port:name
+# class:default port:name:processes – the port is taken from the running server (ss -p), so a database
+# on another port is checked on that one; the default only when ss shows no process names
+FW_SERVICES="mysql:3306:MySQL/MariaDB:mysqld|mariadbd postgresql:5432:PostgreSQL:postgres|postmaster"
 fw_listen() {   # fw_listen PORT – the local addresses with a TCP socket listening on PORT (ss on stdin)
   awk -v port="$1" '$1 == "LISTEN" { a = $4; p = a; sub(/.*:/, "", p); h = a; sub(/:[^:]*$/, "", h)
     if (p == port && !(h in seen)) { seen[h] = 1; print h } }'
 }
+fw_procports() {   # fw_procports REGEX – the TCP ports a process named REGEX listens on (ss -p on stdin)
+  awk -v re="^(${1})$" '$1 == "LISTEN" && match($0, /users:\(\("[^"]*"/) {
+    n = substr($0, RSTART + 9, RLENGTH - 10); if (n !~ re) next
+    p = $4; sub(/.*:/, "", p); if (!(p in seen)) { seen[p] = 1; print p } }' | sort -n
+}
 fw_loopback() { [[ $1 =~ ^(127\.|\[?::1\]?$|\[?::ffff:127\.) || $1 == *%lo ]]; }
-fw_rules() {   # Plesk Firewall rules (JSON on stdin) → "class TAB direction TAB action TAB from", one per rule
+fw_rules() {   # Plesk Firewall rules (JSON on stdin) → "class TAB direction TAB action TAB from TAB ports", one per rule
   tr '\n' ' ' | awk 'BEGIN { RS = "}" }
     function val(k,   v) { if (!match($0, "\"" k "\" *: *(\"[^\"]*\"|\\[[^]]*\\])")) return ""
       v = substr($0, RSTART, RLENGTH); sub(/^"[^"]*" *: */, "", v); gsub(/[]["]/, "", v); gsub(/\\\//, "/", v)
       gsub(/ *, */, ", ", v); sub(/^ +/, "", v); sub(/ +$/, "", v); return v }
-    { c = val("class"); if (c != "") print c "\t" val("direction") "\t" val("action") "\t" val("from") }'
+    { c = val("class"); if (c != "") print c "\t" val("direction") "\t" val("action") "\t" val("from") "\t" val("ports") }'
 }
-# fw_reach CLASS – "all", "none", "only: SOURCES" or "all except: SOURCES" from the rule of CLASS
-# (else the catch-all input rule) in $FW_RULES; nothing without a rule
+# fw_reach PORT – "all", "none", "only: SOURCES" or "all except: SOURCES" for TCP PORT: from the first
+# input rule in $FW_RULES whose ports cover it (single ports and ranges, e.g. 49152-65535/tcp), else
+# the catch-all input rule; nothing without a rule
 fw_reach() {
   local r act from
-  r=$(awk -F'\t' -v c="$1" '$1 == c && $2 == "input" { print; f = 1; exit }
+  r=$(awk -F'\t' -v port="$1" '$2 == "input" && $1 != "catchall" {
+      n = split($5, ps, / *, */)
+      for (i = 1; i <= n; i++) {
+        q = ps[i]; sub(/^ip[46]:/, "", q); if (q !~ /\/tcp$/) continue; sub(/\/tcp$/, "", q)
+        if (split(q, r2, "-") == 2) { if (port + 0 >= r2[1] + 0 && port + 0 <= r2[2] + 0) { print; f = 1; exit } }
+        else if (q == port) { print; f = 1; exit }
+      } }
     END { if (!f) exit 1 }' <<<"$FW_RULES") ||
     r=$(awk -F'\t' '$1 == "catchall" && $2 == "input" { print; exit }' <<<"$FW_RULES")
   [[ -n $r ]] || return 0
-  IFS=$'\t' read -r _ _ act from <<<"$r"
+  act=$(cut -f3 <<<"$r"); from=$(cut -f4 <<<"$r")   # not read: it would merge the empty fields between tabs
   case $act/${from:+list} in
     allow/)     echo all ;;
     deny/)      echo none ;;
@@ -3109,10 +3123,10 @@ fw_reach() {
 }
 fw_from() { if [[ $1 == all ]]; then echo everywhere; else echo "everywhere except ${1#all except: }"; fi; }
 check_firewall() {
-  local ss_out fw="" e svc cls port name addrs ext reach a loc
+  local ss_out fw="" e svc cls port def name procs ports addrs ext reach a loc
   echo ""
   if ! command -v ss >/dev/null; then echo "Reachable from outside: ss not found – not checked"; return 0; fi
-  ss_out=$(T "$CMD_TIMEOUT" ss -ltnH 2>/dev/null || T "$CMD_TIMEOUT" ss -ltn 2>/dev/null)
+  ss_out=$(T "$CMD_TIMEOUT" ss -ltnpH 2>/dev/null || T "$CMD_TIMEOUT" ss -ltnp 2>/dev/null || T "$CMD_TIMEOUT" ss -ltn 2>/dev/null)
   FW_RULES=""
   if command -v plesk >/dev/null; then
     e=$(T "$CMD_TIMEOUT" plesk ext firewall --is-enabled 2>/dev/null | tr -d '[:space:]')
@@ -3124,32 +3138,35 @@ check_firewall() {
   e="databases"; command -v plesk >/dev/null && e+=", Plesk installer"
   echo "Reachable from outside ($e)${fw:+ – rules of the $fw}:"
   for svc in $FW_SERVICES; do
-    IFS=: read -r cls port name <<<"$svc"
-    addrs=$(fw_listen "$port" <<<"$ss_out")
-    if [[ -z $addrs ]]; then echo "  $name ($port): not listening"; continue; fi
-    ext=""; loc=""
-    while IFS= read -r a; do if fw_loopback "$a"; then loc+="${loc:+, }$a"; else ext+="${ext:+, }$a"; fi; done <<<"$addrs"
-    if [[ -z $ext ]]; then echo "  $name ($port): listens only locally ($loc) – not reachable from outside"; continue; fi
-    reach=""; [[ -n $fw ]] && reach=$(fw_reach "$cls")
-    case $reach in
-      none)  echo "  $name ($port): listens on $ext, the firewall blocks it – Recommendation: let it listen only locally, if no application connects from outside" ;;
-      only:*) echo "  $name ($port): listens on $ext, the firewall allows it ${reach/only:/only from}" ;;
-      all|"all except:"*)
-        echo "  $name ($port): listens on $ext, the firewall allows it from $(fw_from "$reach") – reachable from the internet"
-        if [[ $cls == mysql ]]; then
-          echo "  Recommendation: if no application connects from outside, let it listen only locally (Plesk: Tools & Settings → Database Servers"
-          echo "  → Settings: untick \"Allow local MySQL server to accept external connections\"), else allow only the addresses that need it"
-        else echo "  Recommendation: if no application connects from outside, let it listen only locally, else allow only the addresses that need it"; fi
-        dalert "Database: $name listens on $ext and the firewall allows port $port from everywhere – reachable from the internet (password guessing, server bugs); let it listen only locally, or allow only the addresses that need it" ;;
-      *) if [[ -n $fw ]]; then e="no rule for it in the Plesk Firewall"; else e="firewall not checked (no Plesk Firewall)"; fi
-         echo "  $name ($port): listens on $ext – $e: make sure port $port is filtered, if no application connects from outside" ;;
-    esac
+    IFS=: read -r cls def name procs <<<"$svc"
+    ports=$(fw_procports "$procs" <<<"$ss_out"); [[ -n $ports ]] || ports=$def
+    for port in $ports; do
+      addrs=$(fw_listen "$port" <<<"$ss_out")
+      if [[ -z $addrs ]]; then echo "  $name ($port): not listening"; continue; fi
+      ext=""; loc=""
+      while IFS= read -r a; do if fw_loopback "$a"; then loc+="${loc:+, }$a"; else ext+="${ext:+, }$a"; fi; done <<<"$addrs"
+      if [[ -z $ext ]]; then echo "  $name ($port): listens only locally ($loc) – not reachable from outside"; continue; fi
+      reach=""; [[ -n $fw ]] && reach=$(fw_reach "$port")
+      case $reach in
+        none)  echo "  $name ($port): listens on $ext, the firewall blocks it – Recommendation: let it listen only locally, if no application connects from outside" ;;
+        only:*) echo "  $name ($port): listens on $ext, the firewall allows it ${reach/only:/only from}" ;;
+        all|"all except:"*)
+          echo "  $name ($port): listens on $ext, the firewall allows it from $(fw_from "$reach") – reachable from the internet"
+          if [[ $cls == mysql ]]; then
+            echo "  Recommendation: if no application connects from outside, let it listen only locally (Plesk: Tools & Settings → Database Servers"
+            echo "  → Settings: untick \"Allow local MySQL server to accept external connections\"), else allow only the addresses that need it"
+          else echo "  Recommendation: if no application connects from outside, let it listen only locally, else allow only the addresses that need it"; fi
+          dalert "Database: $name listens on $ext and the firewall allows port $port from everywhere – reachable from the internet (password guessing, server bugs); let it listen only locally, or allow only the addresses that need it" ;;
+        *) if [[ -n $fw ]]; then e="no rule for it in the Plesk Firewall"; else e="firewall not checked (no Plesk Firewall)"; fi
+           echo "  $name ($port): listens on $ext – $e: make sure port $port is filtered, if no application connects from outside" ;;
+      esac
+    done
   done
   if command -v plesk >/dev/null; then
     if [[ -z $fw ]]; then
       echo "  Plesk installer (8447, runs only while used): Plesk Firewall not enabled or not installed – not checked"
     else
-      reach=$(fw_reach autoinstaller)
+      reach=$(fw_reach 8447)
       case $reach in
         all|"all except:"*)
           echo "  Plesk installer (8447, runs only while used): the firewall allows it from $(fw_from "$reach")"
