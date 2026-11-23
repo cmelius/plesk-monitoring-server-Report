@@ -7,7 +7,7 @@ All notable changes to `plesk-server-report.sh`. The format follows [Keep a Chan
 After a lot of changes in the last weeks – added one by one, not always in the right place – it was time to clean up the structure of the reports.
 
 ### Changed
-- **The report is ordered by theme: MAIL, ACCESS, WEB, SYSTEM.** Each theme has the sections of the checks that read the logs since the last run, then `== THEME – daily checks (as of …) ==` with the newest results of its daily checks. The block *DAILY CHECKS* at the end is gone: the PHP versions are under SYSTEM, the firewall check under ACCESS, mailboxes and mail authentication under MAIL. The table in the README ("Example report") shows which check goes where.
+- **The report is ordered by theme: MAIL, ACCESS, WEB, SYSTEM.** Each theme starts with its name framed by lines of `#`, then come the sections of the checks that read the logs since the last run, then `== THEME – daily checks (as of …) ==` with the newest results of its daily checks. The block *DAILY CHECKS* at the end is gone: the PHP versions are under SYSTEM, the firewall check under ACCESS, mailboxes and mail authentication under MAIL. The table in the README ("Example report") shows which check goes where.
 - **The alerts at the top are grouped by theme** (`MAIL (3):`, `ACCESS (1):` …), the critical ones first in each theme. The JSON report lists them in the same order.
 - **The mail section has four parts:** delivery & spam filter, senders & logins, failed logins, webmail. The system section is called *LOAD, CPU, RAM, FILESYSTEMS* (the theme is SYSTEM).
 - **The Plesk panel log is split:** failed panel logins under ACCESS, failed Let's Encrypt renewals under WEB (*CERTIFICATE RENEWALS*). In the JSON report the renewals have the check `certrenew`.

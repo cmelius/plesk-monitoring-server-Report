@@ -3493,6 +3493,12 @@ check_enabled() {
 # checks that need dig are skipped silently without it (mailauth prints a note)
 check_needs_dig() { [[ $1 == serverdns || $1 == domaindns || $1 == https ]]; }
 
+# theme_heading THEME – the heading of a theme in the report and the summary: framed by a line
+# of # above and below, so the start of a theme stands out when scrolling
+theme_heading() {
+  local h="######## $1 ########"
+  printf '%s\n%s\n%s\n' "${h//?/#}" "$h" "${h//?/#}"
+}
 # theme_of CHECK – the theme of a check (THEME_*): MAIL, ACCESS, WEB or SYSTEM; SCRIPT for
 # alerts of the script itself (outside a check)
 theme_of() {
@@ -3590,7 +3596,7 @@ assemble_body() {
       [[ -s $PARTS/d.$c ]] && grep -q '[^[:space:]]' "$PARTS/d.$c" && dp+=("$c")
     done
     (( ${#hp[@]} + ${#dp[@]} )) || continue
-    printf '\n######## %s ########\n' "$t" >>"$BODY"
+    { echo; theme_heading "$t"; } >>"$BODY"
     for c in "${hp[@]}"; do
       s=$(fsize "$BODY"); cat "$PARTS/h.$c" >>"$BODY"
       jrec S "$c" 0 "$s" "$(fsize "$BODY")"
@@ -3938,7 +3944,7 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
     head && /^[A-Z]+ \([0-9]+\):$/ { grp = $1; next }
     /^ ! / { a = substr($0, 4); if (!(a in ac)) { ac[a] = 0; af[a] = tm; ao[++nao] = a }; ac[a]++; al[a] = tm; ath[a] = grp; next }
     /^ i / { a = substr($0, 4); if (!(a in nc)) { nc[a] = 0; nf[a] = tm; no[++nno] = a }; nc[a]++; nl[a] = tm; next }
-    /^######## / { head = 0; sec = ""; sub_ = ""; next }
+    /^######## / || /^#+$/ { head = 0; sec = ""; sub_ = ""; next }   # theme heading and its frame
     # the daily checks of a theme: kept from the newest report that has them
     /^== [A-Z]+ – daily checks/ { head = 0; sec = $0; dxt = $2; if (dxr[dxt] != nrun) { dxr[dxt] = nrun; dxn[dxt] = 0; dxh[dxt] = $0 }; next }
     /^== / { head = 0; sec = $0; sub_ = ""; next }
@@ -4167,7 +4173,7 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
       echo ""; echo "== SCRIPT NOTES (missing data sources, shortened logs; times seen, first – last) =="
       rec NOTE | awk -F'\t' '{printf "  %3d×  %s – %s  %s\n", $1, $2, $3, $4}'
     fi
-    echo ""; echo "######## MAIL ########"
+    echo ""; theme_heading MAIL
     echo ""; echo "== MAIL: delivery & spam filter (totals) =="
     rec MAILTOT | awk -F'\t' '{printf "Delivered: %d | deferred: %d | bounced: %d | highest queue: %d%s\nRejections mentioning blocklist/reputation/spam/rate limit: %d\n", $1, $2, $3, $4, ($5 != "" ? " (" $5 ")" : ""), $6}'
     rec BLX | awk -F'\t' '{printf "  example (%s): %s\n", $1, $2}'
@@ -4230,7 +4236,7 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
 
     summary_daily MAIL
 
-    echo ""; echo "######## ACCESS ########"
+    echo ""; theme_heading ACCESS
     echo ""; echo "== SUCCESSFUL LOGINS (SSH, Plesk panel; count, first – last) =="
     rec LOGIN | awk -F'\t' '{printf "  %4d×  %s – %s  %s\n", $1, $2, $3, $4}'
 
@@ -4258,7 +4264,7 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
     else echo "  no change, nothing suspicious"; fi
 
     summary_daily ACCESS
-    echo ""; echo "######## WEB ########"
+    echo ""; theme_heading WEB
     echo ""; echo "== WEB (totals) =="
     echo "requests | 5xx | login POSTs | domain"
     rec WEB | sort -t$'\t' -k1,1nr | head -10 | awk -F'\t' '{printf "  %7d %5d %6d  %s\n", $1, $2, $3, $4}'
@@ -4287,7 +4293,7 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
     if [[ -n $(rec CERT) ]]; then rec CERT | sort -t$'\t' -k1,1nr | awk -F'\t' '{printf "  %4d×  %s  %s – %s  %s\n", $1, $2, $3, $4, $5}'
     else echo "  none"; fi
     summary_daily WEB
-    echo ""; echo "######## SYSTEM ########"
+    echo ""; theme_heading SYSTEM
     echo ""; echo "== LOAD, CPU, RAM, FILESYSTEMS =="
     rec SYS | awk -F'\t' '{printf "Highest 5-min load: %s (%s) on %s cores | lowest available RAM: %s %% (%s)\n", $1, $2, $3, $4, $5}'
     echo "Highest CPU per system user (snapshots):"

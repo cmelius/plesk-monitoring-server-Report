@@ -3,7 +3,9 @@ STATUS: WARNING (1)
 ACCESS (1):
  ! fail2ban: jail plesk-courierimap bans 198.18.0.61 (DE, BITel Gesellschaft fuer Telekommunikatio), which had successful logins before (mail logins of user10@d35.example, user70@d35.example, user153@d35.example (last 2026-11-13)) – a device with an outdated password? Unban: fail2ban-client set plesk-courierimap unbanip 198.18.0.61
 
+######################
 ######## MAIL ########
+######################
 
 == MAIL: delivery & spam filter ==
 Source: /var/log/maillog, 3000 new lines
@@ -94,7 +96,9 @@ Mailboxes (fill level of the size limit; warning from WARN_MAILBOX_PCT=95 %, wit
    78 %  office@d21.example  (941 MB of 1.17 GB)
   89 mailbox(es) checked; 19 unlimited (no size limit set in Plesk; largest: info@d31.example 140 MB, all together 395 MB), 5 without maildirsize (not counted)
 
+########################
 ######## ACCESS ########
+########################
 
 == SUCCESSFUL LOGINS (SSH, Plesk panel) ==
 
@@ -123,7 +127,9 @@ Processes: 159 checked, 0 suspicious (program in /tmp, /dev/shm or a web folder,
 Listening TCP ports (not loopback): 21 xinetd, 22 sshd, 25 master, 53 named, 80 nginx, 106 xinetd, 110 couriertcpd, 143 couriertcpd, 443 nginx, 465 master, 993 couriertcpd, 995 couriertcpd, 5355 systemd-resolve, 6888 updater, 8443 sw-cp-serverd, 8880 sw-cp-serverd, 18018 updater
 IP addresses (global): 203.0.113.10 (ens6)
 
+#####################
 ######## WEB ########
+#####################
 
 == WEB (since last run) ==
 requests | 5xx | login POSTs | domain | busiest IP
@@ -202,7 +208,9 @@ Exposed files in document roots (.env, .git, dumps, backups, config copies, info
 Suspicious code in recently changed PHP files, .htaccess and .user.ini (typical webshell/backdoor patterns):
   37 document root(s) scanned, 0 suspicious file(s)
 
+########################
 ######## SYSTEM ########
+########################
 
 == LOAD, CPU, RAM, FILESYSTEMS ==
 Load: 0.06 / 0.13 / 0.09 (1/5/15 min) on 12 cores | up 2 days, 23 hours, 9 minutes

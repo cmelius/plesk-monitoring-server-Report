@@ -1,7 +1,9 @@
 Server report d1.example – 2026-11-11 20:05 UTC – plesk-server-report v1.10.0
 STATUS: OK
 
+######################
 ######## MAIL ########
+######################
 
 == MAIL: delivery & spam filter ==
 Source: /var/log/maillog, 6436 new lines
@@ -89,7 +91,9 @@ Mail authentication (SPF / DKIM / DMARC):
   a single missing/outdated record (SPF, DKIM or DMARC) is a recommendation (DMARC passes if SPF or DKIM passes).
   DNS queried via 198.18.1.132
 
+########################
 ######## ACCESS ########
+########################
 
 == SUCCESSFUL LOGINS (SSH, Plesk panel) ==
 
@@ -117,7 +121,9 @@ Processes: 191 checked, 0 suspicious (program in /tmp, /dev/shm or a web folder,
 Listening TCP ports (not loopback): 21 xinetd, 22 sshd, 25 master, 53 named, 80 nginx, 106 xinetd, 110 couriertcpd, 143 couriertcpd, 443 nginx, 465 smtpd, 993 couriertcpd, 995 couriertcpd, 5355 systemd-resolve, 6888 updater, 8443 sw-cp-serverd, 8880 sw-cp-serverd, 18018 updater
 IP addresses (global): 203.0.113.10 (ens6)
 
+#####################
 ######## WEB ########
+#####################
 
 == WEB (since last run) ==
 requests | 5xx | login POSTs | domain | busiest IP
@@ -188,7 +194,9 @@ Exposed files in document roots (.env, .git, dumps, backups, config copies, info
 Suspicious code in recently changed PHP files, .htaccess and .user.ini (typical webshell/backdoor patterns):
   37 document root(s) scanned, 0 suspicious file(s)
 
+########################
 ######## SYSTEM ########
+########################
 
 == LOAD, CPU, RAM, FILESYSTEMS ==
 Load: 0.11 / 0.07 / 0.08 (1/5/15 min) on 12 cores | up 1 day, 13 hours, 9 minutes

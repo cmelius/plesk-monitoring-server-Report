@@ -30,7 +30,9 @@ ACCESS (3):
     2×  2026-11-13 02:05 UTC – 2026-11-13 04:05 UTC  fail2ban: jail plesk-courierimap bans 198.18.2.87 (DE, BITel Gesellschaft fuer Telekommunikatio), which had successful logins before (mail logins of user10@d35.example, user70@d35.example, user153@d35.example (last 2026-11-13)) – a device with an outdated password? Unban: fail2ban-client set plesk-courierimap unbanip 198.18.2.87
     2×  2026-11-13 04:05 UTC – 2026-11-13 06:05 UTC  fail2ban: jail plesk-courierimap bans 198.18.0.61 (DE, BITel Gesellschaft fuer Telekommunikatio), which had successful logins before (mail logins of user10@d35.example, user70@d35.example, user153@d35.example (last 2026-11-13)) – a device with an outdated password? Unban: fail2ban-client set plesk-courierimap unbanip 198.18.0.61
 
+######################
 ######## MAIL ########
+######################
 
 == MAIL: delivery & spam filter (totals) ==
 Delivered: 923 | deferred: 1 | bounced: 0 | highest queue: 0
@@ -185,7 +187,9 @@ Mailboxes (fill level of the size limit; warning from WARN_MAILBOX_PCT=95 %, wit
    78 %  office@d21.example  (941 MB of 1.17 GB)
   89 mailbox(es) checked; 19 unlimited (no size limit set in Plesk; largest: info@d31.example 140 MB, all together 395 MB), 5 without maildirsize (not counted)
 
+########################
 ######## ACCESS ########
+########################
 
 == SUCCESSFUL LOGINS (SSH, Plesk panel; count, first – last) ==
      4×  2026-11-12 07:00 UTC – 2026-11-12 12:05 UTC  Plesk -              from 198.18.0.18   (panel, user not logged)  DE, Vodafone GmbH
@@ -213,7 +217,9 @@ Failed panel logins: 11 in total, most in one run: 4 (2026-11-12 20:05 UTC)
 == ACCESS & PERSISTENCE (changes + − ~ and findings !; count, first – last) ==
   no change, nothing suspicious
 
+#####################
 ######## WEB ########
+#####################
 
 == WEB (totals) ==
 requests | 5xx | login POSTs | domain
@@ -299,7 +305,9 @@ Exposed files in document roots (.env, .git, dumps, backups, config copies, info
 Suspicious code in recently changed PHP files, .htaccess and .user.ini (typical webshell/backdoor patterns):
   37 document root(s) scanned, 0 suspicious file(s)
 
+########################
 ######## SYSTEM ########
+########################
 
 == LOAD, CPU, RAM, FILESYSTEMS ==
 Highest 5-min load: 0.47 (2026-11-12 16:05 UTC) on 12 cores | lowest available RAM: 77 % (2026-11-12 12:36 UTC)

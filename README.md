@@ -143,7 +143,7 @@ Just as useful: the reports confirmed what is *fine*. Reverse DNS, HELO name and
 
 ### Example report (fictional data)
 
-The report is ordered by theme – **MAIL, ACCESS, WEB, SYSTEM** –, the alerts at the top too (grouped, the critical ones first in each theme). Each theme starts with `######## THEME ########`, then the sections of the checks that read the logs since the last run, then `== THEME – daily checks (as of …) ==` with the newest results of the daily checks of that theme. Which check goes where:
+The report is ordered by theme – **MAIL, ACCESS, WEB, SYSTEM** –, the alerts at the top too (grouped, the critical ones first in each theme). Each theme starts with `######## THEME ########` between two lines of `#`, then the sections of the checks that read the logs since the last run, then `== THEME – daily checks (as of …) ==` with the newest results of the daily checks of that theme. Which check goes where:
 
 | Theme | Every run | Daily checks |
 |---|---|---|
@@ -174,7 +174,9 @@ WEB (4):
 SYSTEM (1):
  ! Updates: 3 security update(s) pending
 
+######################
 ######## MAIL ########
+######################
 
 == MAIL: delivery & spam filter ==
 Source: /var/log/maillog, 5212 new lines
@@ -291,7 +293,9 @@ Mail forwarding to other providers (spam that is only marked is forwarded too):
   Spam filter size limit: 5242880 bytes (5.0 MB)
   DNS blocklist for incoming mail: zen.spamhaus.org
 
+########################
 ######## ACCESS ########
+########################
 
 == SUCCESSFUL LOGINS (SSH, Plesk panel) ==
      2× SSH   root           from 198.51.100.200   (publickey)  DE, Example Telekom AG
@@ -335,7 +339,9 @@ SSH access of Plesk system users (group psacln, 31 accounts):
   full shell: deputy (/bin/bash) – allowed (ALLOWED_FULL_SHELL_USERS)
   keys of deputy: /etc/ssh/authorized_keys/deputy – not changeable by deputy
 
+#####################
 ######## WEB ########
+#####################
 
 == WEB (since last run) ==
 requests | 5xx | login POSTs | domain | busiest IP
@@ -398,7 +404,9 @@ Exposed files in document roots (.env, .git, dumps, backups, config copies, info
 Suspicious code in recently changed PHP files, .htaccess and .user.ini (typical webshell/backdoor patterns):
   42 document root(s) scanned, 0 suspicious file(s)
 
+########################
 ######## SYSTEM ########
+########################
 
 == LOAD, CPU, RAM, FILESYSTEMS ==
 Load: 0.42 / 0.37 / 0.30 (1/5/15 min) on 8 cores | up 12 days, 4 hours, 10 minutes
@@ -487,7 +495,9 @@ WEB (4):
 SYSTEM (1):
    10×  2026-10-26 01:05 UTC – 2026-10-26 10:05 UTC  Updates: 3 security update(s) pending
 
+######################
 ######## MAIL ########
+######################
 
 == MAIL: delivery & spam filter (totals) ==
 Delivered: 2276 | deferred: 91 | bounced: 36 | highest queue: 4 (2026-10-26 10:05 UTC)
@@ -537,7 +547,9 @@ Mailboxes (fill level of the size limit; warning from WARN_MAILBOX_PCT=95 %, wit
    91 %  office@lawfirm.example  (2.75 GB of 3.00 GB)
    …
 
+########################
 ######## ACCESS ########
+########################
 
 == SUCCESSFUL LOGINS (SSH, Plesk panel; count, first – last) ==
      9×  2026-10-25 14:05 UTC – 2026-10-26 10:05 UTC  SSH   root           from 198.51.100.200   (publickey)  DE, Example Telekom AG
@@ -564,7 +576,9 @@ Reachable from outside (databases, Plesk installer) – rules of the Plesk Firew
   MySQL/MariaDB (3306): listens only locally (127.0.0.1) – not reachable from outside
   …
 
+#####################
 ######## WEB ########
+#####################
 
 == WEB (totals) ==
 …
@@ -582,7 +596,9 @@ Exposed files in document roots (.env, .git, dumps, backups, config copies, info
   shop.example/.env – PUBLICLY REACHABLE (HTTP 200)
   …
 
+########################
 ######## SYSTEM ########
+########################
 
 == LOAD, CPU, RAM, FILESYSTEMS ==
 Highest 5-min load: 2.84 (2026-10-26 03:05 UTC) on 8 cores | lowest available RAM: 61 % (2026-10-26 03:05 UTC)

@@ -1,7 +1,9 @@
 Server report d1.example – 2026-11-12 13:03 UTC – plesk-server-report v1.11.0
 STATUS: OK
 
+######################
 ######## MAIL ########
+######################
 
 == MAIL: delivery & spam filter ==
 Source: /var/log/maillog, 1303 new lines
@@ -90,7 +92,9 @@ Mailboxes (fill level of the size limit; warning from WARN_MAILBOX_PCT=95 %):
    77 %  user79@d26.example  (779 MB of 1000 MB)
   89 mailbox(es) checked; 19 unlimited (no size limit set in Plesk), 5 without maildirsize (not counted)
 
+########################
 ######## ACCESS ########
+########################
 
 == SUCCESSFUL LOGINS (SSH, Plesk panel) ==
      1× SSH   root           from 198.18.0.18   (publickey)  DE, Vodafone GmbH
@@ -116,7 +120,9 @@ Processes: 193 checked, 0 suspicious (program in /tmp, /dev/shm or a web folder,
 Listening TCP ports (not loopback): 21 xinetd, 22 sshd, 25 master, 53 named, 80 nginx, 106 xinetd, 110 couriertcpd, 143 couriertcpd, 443 nginx, 465 smtpd, 993 couriertcpd, 995 couriertcpd, 5355 systemd-resolve, 6888 updater, 8443 sw-cp-serverd, 8880 sw-cp-serverd, 18018 updater
 IP addresses (global): 203.0.113.10 (ens6)
 
+#####################
 ######## WEB ########
+#####################
 
 == WEB (since last run) ==
 requests | 5xx | login POSTs | domain | busiest IP
@@ -181,7 +187,9 @@ Exposed files in document roots (.env, .git, dumps, backups, config copies, info
 Suspicious code in recently changed PHP files, .htaccess and .user.ini (typical webshell/backdoor patterns):
   37 document root(s) scanned, 0 suspicious file(s)
 
+########################
 ######## SYSTEM ########
+########################
 
 == LOAD, CPU, RAM, FILESYSTEMS ==
 Load: 0.15 / 0.11 / 0.10 (1/5/15 min) on 12 cores | up 2 days, 6 hours, 8 minutes
