@@ -211,6 +211,10 @@ RARE_MODULES="sctp dccp tipc rds"   # "" = check off
 # listens on which address, and what the Plesk Firewall allows. A database open to everyone → warning
 FIREWALL_CHECK=1              # 0 = off
 WARN_INSTALLER_OPEN=1         # Plesk installer (port 8447) allowed from everywhere: 1 = recommendation, 0 = only the line
+# Daily: SSH access of the Plesk system users – a full shell instead of chrooted or Forbidden, and a
+# keys file the account can change itself (in its web space). Full shell → warning, unless listed here
+SSHUSERS_CHECK=1              # 0 = off
+ALLOWED_FULL_SHELL_USERS=""   # system users with a full shell on purpose, separated by spaces
 # Known legitimate PHP files inside wp-content/uploads (regex on the full path)
 UPLOADS_PHP_IGNORE='/uploads/mailchimp-for-wp/debug-log\.php$'
 
@@ -236,7 +240,7 @@ SYS_BIN_RE='^(/usr/local/sbin|/usr/local/bin|/usr/sbin|/usr/bin|/sbin|/bin)$'   
 # Check names in report order. Hourly checks analyse the log lines since the previous run,
 # daily checks run once a day and are cached in $STATE_DIR/daily.txt.
 HOURLY_CHECKS="mail webmail system fail2ban web uploads logins panel persistence services backups"
-DAILY_CHECKS="updates kmodules firewall certificates https serverdns mailtls domaindns exposed webshell mailauth mailboxes forwarding rclocal"
+DAILY_CHECKS="updates kmodules firewall sshusers certificates https serverdns mailtls domaindns exposed webshell mailauth mailboxes forwarding rclocal"
 
 # =============================================================================
 # Helper functions
@@ -1842,6 +1846,7 @@ persist_first_note() {   # persist_first_note FIRST – suffix of a summary line
 }
 # persist_finding SIGN TEXT [ALERT] – a report line under the section (+ new, - gone, ~ changed,
 # ! finding) and, with ALERT, an alert; findings matching PERSISTENCE_IGNORE are left out (return 1)
+PERSIST_BULK=5   # more accounts than this with the same new login shell in one run: one alert for them
 persist_finding() {
   [[ -n $PERSISTENCE_IGNORE && $2 =~ $PERSISTENCE_IGNORE ]] && return 1
   out "  $1 $2"
@@ -1849,12 +1854,49 @@ persist_finding() {
   return 0
 }
 
+# What sshd applies to one account (sshd -T -C, read only): the effective settings after all Match
+# blocks, e.g. AuthorizedKeysFile, ForceCommand, AllowUsers. Cached for the run; empty when sshd is
+# missing or its configuration has an error (sshd_cfg_ok says which).
+SSHD_BIN=""
+sshd_find() { [[ -n $SSHD_BIN ]] || SSHD_BIN=$(command -v sshd 2>/dev/null || { [[ -x /usr/sbin/sshd ]] && echo /usr/sbin/sshd; }); [[ -n $SSHD_BIN ]]; }
+sshd_cfg() {   # sshd_cfg USER – "keyword value" lines, lower-case keywords
+  local c="$TMP.sshd.$1"
+  [[ -f $c ]] || { sshd_find && T "$CMD_TIMEOUT" "$SSHD_BIN" -T -C "user=$1,host=test.invalid,addr=192.0.2.1" 2>/dev/null; } >"$c"
+  cat "$c"
+}
+sshd_has_match() {   # any Match block in the sshd configuration: settings can differ per account
+  local f
+  for f in /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf; do
+    [[ -f $f ]] && grep -qiE '^[[:space:]]*Match[[:space:]]' "$f" 2>/dev/null && return 0
+  done
+  return 1
+}
+# ssh_keyfiles USER HOME UID [SETTING] – the authorized_keys files sshd reads for the account
+# (AuthorizedKeysFile: %h home, %u name, %U uid, %% a %, relative = in the home folder). SETTING
+# instead of asking sshd for this account; without sshd the usual two files
+ssh_keyfiles() {
+  local u=$1 h=$2 id=$3 line=${4-} f
+  [[ -n $line ]] || line=$(sshd_cfg "$u" | awk '$1 == "authorizedkeysfile" { $1 = ""; print; exit }')
+  [[ -n $line ]] || line=".ssh/authorized_keys .ssh/authorized_keys2"
+  for f in $line; do
+    [[ $f == none ]] && continue
+    f=${f//%%/$'\x01'}; f=${f//%h/$h}; f=${f//%u/$u}; f=${f//%U/$id}; f=${f//$'\x01'/%}
+    [[ $f == /* ]] || f="$h/$f"
+    echo "$f"
+  done
+}
 persist_keys() {   # every authorized SSH key: account TAB fingerprint TAB comment
-  local user home f
+  local user home id shell f per=0 all=""
   local -A seen=()
-  while IFS=: read -r user _ _ _ _ home _; do
+  # where the keys are: the same for every account unless a Match block changes it for some
+  if sshd_find; then
+    all=$(sshd_cfg root | awk '$1 == "authorizedkeysfile" { $1 = ""; print; exit }')
+    sshd_has_match && per=1
+  fi
+  while IFS=: read -r user _ id _ _ home shell; do
     [[ -n $home && $home != / ]] || continue
-    for f in "$home/.ssh/authorized_keys" "$home/.ssh/authorized_keys2"; do
+    for f in $(if (( per )) && [[ $shell != *nologin && $shell != *false ]]; then ssh_keyfiles "$user" "$home" "$id"
+               else ssh_keyfiles "$user" "$home" "$id" "${all:-.ssh/authorized_keys .ssh/authorized_keys2}"; fi); do
       [[ -f $f && -z ${seen[$f]:-} ]] || continue
       seen[$f]=1
       if command -v ssh-keygen >/dev/null; then   # "256 SHA256:… comment (ED25519)"; skips options and bad lines
@@ -1983,9 +2025,26 @@ check_persistence() {   # SSH keys, accounts, sudo, cron/autostart, suspicious p
       "$( ((first)) && echo "Access: /etc/ld.so.preload loads $v – a classic rootkit technique, check it")"
   done <"$TMP.a"
   while IFS=$'\t' read -r w k v; do gone["$w"$'\t'"$k"]=$v; done <"$TMP.a.del"
+  # many accounts getting the same shell in one run is one change (e.g. a service plan, or the SSH
+  # setting of all subscriptions): one alert for them, each account still listed
+  local -A bulk=() bulkn=()
+  while IFS=$'\t' read -r w k v; do
+    [[ $w == account && $v == *", shell "* ]] || continue
+    [[ -n $PERSISTENCE_IGNORE && "account $k ($v)" =~ $PERSISTENCE_IGNORE ]] && continue
+    bulkn[${v##*, shell }]=$(( ${bulkn[${v##*, shell }]:-0} + 1 )); bulk[${v##*, shell }]+="${bulk[${v##*, shell }]:+, }$k"
+  done <"$TMP.a.add"
+  for key in "${!bulkn[@]}"; do
+    if (( bulkn[$key] > PERSIST_BULK )); then
+      w=${bulk[$key]}; (( bulkn[$key] > 5 )) && w="$(cut -d, -f1-5 <<<"$w"), …"
+      alert "Access: ${bulkn[$key]} accounts got the login shell $key in one run (new or changed: $w) – done by you?"
+    else unset 'bulk[$key]'; fi
+  done
   while IFS=$'\t' read -r w k v; do
     key="$w"$'\t'"$k"
-    if [[ -n ${gone[$key]+x} ]]; then
+    if [[ $w == account && -n ${bulk[${v##*, shell }]+x} ]]; then   # covered by the one alert above
+      if [[ -n ${gone[$key]+x} ]]; then persist_finding '~' "$w $k: ${gone[$key]} → $v"; unset 'gone[$key]'
+      else persist_finding + "new account with a login shell: $k ($v)"; fi
+    elif [[ -n ${gone[$key]+x} ]]; then
       persist_finding '~' "$w $k: ${gone[$key]} → $v" "Access: $w $k changed: $v – changed by you?"
       unset 'gone[$key]'
     else
@@ -2911,6 +2970,106 @@ check_rclocal() {
   (( WARN_RC_LOCAL )) && dalert "rc.local: $RC_LOCAL runs $n command line(s) at boot${f:+ (and failed)} – deprecated, and not the default on any current distribution: find out what added it (an old installer, an online guide?) and move the commands to a systemd unit (README: Notes); WARN_RC_LOCAL=0 keeps only the report line"
   return 0
 }
+# SSH access of the Plesk system users (group psacln): each subscription has one, its sites' PHP runs
+# under it. Plesk offers per subscription: Forbidden (/bin/false), /bin/bash (chrooted) – locked in its
+# web space – or a full shell such as /bin/bash. A full shell sees the whole server, and its keys file
+# usually lies in the web space, where a hacked site (PHP runs as the same user) can add an SSH key.
+# Reads passwd/group, the keys files' owners and modes, and what sshd applies (sshd -T). Read only.
+# path_writable UID GID PATH – the first part of PATH (the file or one of its folders) the account
+# can change: owner with write permission, its group with write permission, or writable by everyone
+path_writable() {
+  local uid=$1 gid=$2 p=$3 st o g m
+  while :; do
+    if [[ -e $p ]] && st=$(stat -c '%u %g %a' "$p" 2>/dev/null); then
+      read -r o g m <<<"$st"; m=$(( 8#$m ))
+      if { [[ $o == "$uid" ]] && (( m & 0200 )); } || { [[ $g == "$gid" ]] && (( m & 020 )); } ||
+         { (( m & 02 )) && ! { [[ -d $p ]] && (( m & 01000 )); }; }; then
+        echo "$p"; return 0
+      fi
+    fi
+    [[ $p == / || -z $p ]] && return 1
+    p=$(dirname "$p")
+  done
+}
+ssh_match() {   # ssh_match NAME PATTERN… – NAME matches one of sshd's patterns (* and ?, user@host: the user)
+  local n=$1 p; shift
+  # shellcheck disable=SC2053   # the patterns are globs on purpose, like sshd's
+  for p; do [[ $n == ${p%%@*} ]] && return 0; done
+  return 1
+}
+ssh_denied() {   # ssh_denied USER – sshd refuses the account (AllowUsers/DenyUsers/AllowGroups/DenyGroups)
+  local u=$1 cfg g du dg au ag
+  cfg=$(sshd_cfg "$u")
+  du=$(awk '$1 == "denyusers" { $1 = ""; print }' <<<"$cfg");  dg=$(awk '$1 == "denygroups" { $1 = ""; print }' <<<"$cfg")
+  au=$(awk '$1 == "allowusers" { $1 = ""; print }' <<<"$cfg"); ag=$(awk '$1 == "allowgroups" { $1 = ""; print }' <<<"$cfg")
+  # shellcheck disable=SC2086   # pattern lists, split on purpose
+  {
+    [[ -n $du ]] && ssh_match "$u" $du && return 0
+    for g in $(id -nG "$u" 2>/dev/null); do [[ -n $dg ]] && ssh_match "$g" $dg && return 0; done
+    [[ -n $au ]] && ! ssh_match "$u" $au && return 0
+    if [[ -n $ag ]]; then
+      for g in $(id -nG "$u" 2>/dev/null); do ssh_match "$g" $ag && return 1; done
+      return 0
+    fi
+  }
+  return 1
+}
+check_sshusers() {
+  local gid members u id g home shell n=0 nnone=0 nchroot=0 nfull=0 ndenied=0 nsftp=0 nshell=0 fc f kf w keys sshd_ok=1
+  local -a full=()
+  echo ""
+  IFS=: read -r _ _ gid members < <(getent group psacln 2>/dev/null)
+  [[ -n $gid ]] || { echo "SSH access of Plesk system users: no group psacln – not a Plesk server, not checked"; return 0; }
+  sshd_find && [[ -n $(sshd_cfg root) ]] || sshd_ok=0
+  while IFS=: read -r u _ id g _ home shell; do
+    [[ $g == "$gid" || ,$members, == *,"$u",* ]] || continue
+    n=$((n + 1))
+    case $shell in
+      *nologin|*false|"") nnone=$((nnone + 1)); continue ;;
+      */chrootsh)         nchroot=$((nchroot + 1)) ;;
+      *)                  nfull=$((nfull + 1)); full+=("$u:$id:$g:$home:$shell") ;;
+    esac
+    (( sshd_ok )) || continue
+    if ssh_denied "$u"; then ndenied=$((ndenied + 1)); continue; fi
+    nshell=$((nshell + 1))
+    fc=$(sshd_cfg "$u" | awk '$1 == "forcecommand" { print $2; exit }')
+    [[ $fc == internal-sftp || $fc == */sftp-server ]] && nsftp=$((nsftp + 1))
+  done < <(getent passwd 2>/dev/null)
+  echo "SSH access of Plesk system users (group psacln, $n accounts):"
+  echo "  locked in their web space (chrooted): $nchroot | full shell: $nfull | no SSH (Forbidden, /bin/false, nologin): $nnone"
+  if (( sshd_ok )); then
+    if (( nchroot + nfull )); then
+      w=""; (( ndenied )) && w=" | refused by sshd (AllowUsers/DenyUsers…): $ndenied"
+      echo "  of the $((nchroot + nfull)) with a shell: SFTP only (ForceCommand): $nsftp$w"
+    fi
+  else echo "  sshd -T gave no answer (sshd missing, or an error in sshd_config – then sshd won't start after the next restart: sshd -t shows it) – settings of sshd not checked"; fi
+  for f in "${full[@]}"; do
+    IFS=: read -r u id g home shell <<<"$f"
+    if (( sshd_ok )) && ssh_denied "$u"; then echo "  full shell: $u ($shell) – sshd refuses it (AllowUsers/DenyUsers…), no SSH login"; continue; fi
+    keys=""; w=""
+    while IFS= read -r kf; do   # the first keys file the account can change, else the first one
+      [[ -z $keys ]] && keys=$kf
+      if w=$(path_writable "$id" "$g" "$kf"); then keys=$kf; break; fi
+    done < <(ssh_keyfiles "$u" "$home" "$id")
+    if [[ " $ALLOWED_FULL_SHELL_USERS " == *" $u "* ]]; then
+      echo "  full shell: $u ($shell) – allowed (ALLOWED_FULL_SHELL_USERS)"
+    else
+      echo "  full shell: $u ($shell) – not locked in its web space, sees the whole server; the PHP of its sites runs as this user"
+      echo "  Recommendation: Plesk → the subscription → Hosting & DNS → Hosting → SSH access: /bin/bash (chrooted) or Forbidden;"
+      echo "  if intended: ALLOWED_FULL_SHELL_USERS=\"$u\""
+      dalert "SSH: Plesk system user $u has a full shell ($shell), not locked in its web space – intended? Else set SSH access to chrooted or Forbidden in Plesk (intended: ALLOWED_FULL_SHELL_USERS)"
+    fi
+    if [[ -n $w ]]; then
+      echo "  keys of $u: $keys – $w can be changed by $u itself: a hacked site (PHP runs as $u) can add an SSH key"
+      echo "  Recommendation: keep the keys outside the web space, owned by root, e.g. in sshd_config: Match User $u /"
+      echo "  AuthorizedKeysFile /etc/ssh/authorized_keys/%u"
+      dalert "SSH: the keys file of $u ($keys) can be changed by $u itself – a hacked site of the subscription can add an SSH key for a full shell; keep the keys outside the web space, owned by root"
+    else
+      echo "  keys of $u: $keys – not changeable by $u"
+    fi
+  done
+  return 0
+}
 # Reachable from outside: database servers and the Plesk installer. A database that listens on all
 # addresses and is not filtered can be attacked directly (password guessing, bugs of the server);
 # Plesk only opens it with "Allow local MySQL server to accept external connections". The Plesk
@@ -3145,6 +3304,7 @@ check_enabled() {
     persistence) (( PERSISTENCE_CHECK )) ;;
     kmodules)  [[ -n ${RARE_MODULES// /} ]] ;;
     firewall)  (( FIREWALL_CHECK )) ;;
+    sshusers)  (( SSHUSERS_CHECK )) ;;
     *) return 0 ;;
   esac
 }
@@ -4067,7 +4227,7 @@ is always reported). Processes are not stored – they are checked live in every
 
 | File | Content (one entry per line) | Used for |
 |---|---|---|
-| `baseline/keys` | `account key-type fingerprint comment` | the SSH keys in the `~/.ssh/authorized_keys` of all accounts. A new key raises "Access: new SSH key for …". |
+| `baseline/keys` | `account key-type fingerprint comment` | the SSH keys of all accounts, from the files sshd reads for them (`AuthorizedKeysFile`, by default `~/.ssh/authorized_keys`; also e.g. `/etc/ssh/authorized_keys/%u`). A new key raises "Access: new SSH key for …". |
 | `baseline/access` | `kind name details` | accounts with a login shell or UID 0, members of the groups `sudo`, `wheel` and `admin`, the sudoers files with a checksum, and – only if the file exists, which it normally doesn't – what `/etc/ld.so.preload` loads. New or changed entries raise an alert. |
 | `baseline/cron` | `line where cron-line` or `file path checksum` | the cron jobs of all accounts and of the system (passwords in them masked), and checksums of the autostart files (`/etc/cron.hourly` … `monthly`, `rc.local`, systemd units in `/etc/systemd/system`). New entries are listed; suspicious ones and new entries of root or the system raise an alert. |
 | `baseline/addrs` | `address interface` | the server's global IPv4 and IPv6 addresses. A new public address raises "Network: new public address …" – e.g. IPv6 switched on by the hosting provider; private addresses are listed without alert. |

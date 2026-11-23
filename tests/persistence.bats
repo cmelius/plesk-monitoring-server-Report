@@ -241,3 +241,27 @@ base() {
   run alerts
   [[ $output == *"Ports: new listening TCP port 8447 (nc) – started by you?"* ]]
 }
+
+@test "persistence: many accounts getting the same shell in one run – one alert, each account listed" {
+  psetup; base
+  check_persistence; newrun
+  for i in 1 2 3 4 5 6 7; do acc account "web$i" "uid 1000$i, shell /opt/psa/bin/chrootsh"; done
+  sed -i 's|^account\tchristian\tuid 1000, shell /bin/bash|account\tchristian\tuid 1000, shell /opt/psa/bin/chrootsh|' "$P/access"
+  check_persistence
+  run report
+  [[ $output == *"  + new account with a login shell: web1 (uid 10001, shell /opt/psa/bin/chrootsh)"* ]]
+  [[ $output == *"  ~ account christian: uid 1000, shell /bin/bash → uid 1000, shell /opt/psa/bin/chrootsh"* ]]
+  run alerts
+  [[ $output == *"Access: 8 accounts got the login shell /opt/psa/bin/chrootsh in one run"* ]]
+  [ "$(grep -c 'Access:' <<<"$output")" -eq 1 ]
+}
+
+@test "persistence: a few accounts with a new shell – one alert each, as before" {
+  psetup; base
+  check_persistence; newrun
+  acc account web1 "uid 10001, shell /opt/psa/bin/chrootsh"
+  acc account web2 "uid 10002, shell /opt/psa/bin/chrootsh"
+  check_persistence
+  run alerts
+  [ "$(grep -c 'Access: new account with a login shell' <<<"$output")" -eq 2 ]
+}
