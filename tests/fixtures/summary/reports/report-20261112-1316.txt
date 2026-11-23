@@ -1,7 +1,9 @@
 Server report d1.example – 2026-11-12 13:16 UTC – plesk-server-report v1.11.0
 STATUS: OK
 
-== MAIL ==
+######## MAIL ########
+
+== MAIL: delivery & spam filter ==
 Source: /var/log/maillog, 817 new lines
 Delivered: 20 | deferred: 0 | bounced: 0 | queue: 0
 Rejections mentioning blocklist/reputation/spam/rate limit: 0
@@ -12,6 +14,7 @@ Spam filter: all mails scanned – none above the size limit (limit 3.0 MB = 314
 Spam filter: blocklist lookups answered (18 mail(s) scanned)
 DNS blocklists for 203.0.113.10: zen.spamhaus.org:clean bl.spamcop.net:clean b.barracudacentral.org:clean psbl.surriel.com:clean
 
+== MAIL: senders & logins ==
 Top senders (total recipients):
        4  user104@gmx.de
        2  user197@d160.example
@@ -34,6 +37,7 @@ Mailboxes sending with a foreign sender domain (login ≠ from):
 Mails sent by scripts (system user = subscription):
        1  uid 30  popuser  /var/qmail/popuser
 
+== MAIL: failed logins ==
 Failed mail logins: SMTP 17 | IMAP/POP3 6 – top IPs:
        1  198.18.2.37 (US, Cox Communications Inc.)
        1  198.18.2.38 (NL, UNMANAGED LTD)
@@ -48,32 +52,45 @@ Most attacked mailboxes (failed SMTP/IMAP/POP3 logins):
        2  info
   Login names that don't exist: 4 (4 attempts) – guessed by attackers, or a device of a deleted mailbox
 
+== MAIL: webmail (Roundcube) ==
 Webmail (Roundcube) – mails sent (mails, recipients, IPs):
 Failed webmail logins: 0 – top IPs:
 Most attacked mailboxes (failed webmail logins):
 
-== SYSTEM ==
-Load: 0.49 / 0.23 / 0.15 (1/5/15 min) on 12 cores | up 2 days, 6 hours, 20 minutes
-%Cpu(s):  0.1 us,  0.2 sy,  0.0 ni, 99.6 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+== MAIL – daily checks (as of 2026-11-12 13:16 UTC) ==
+Server DNS (reverse DNS / HELO):
+  203.0.113.10 → d1.example: ok (forward-confirmed)
+  Postfix HELO name: d1.example (resolves to this server, matches PTR)
+  IPv6: not used for mail (CHECK_IPV6=auto)
 
-CPU per system user (snapshot):
-     4.2 %  root
+Mail server certificates for d1.example:
+  port 25: name ok, valid 61 more days
+  port 465: name ok, valid 61 more days
+  port 587: no TLS certificate (port closed or no TLS)
+  port 993: name ok, valid 61 more days
+  port 995: name ok, valid 61 more days
 
-Top processes:
-    1.3 %  root         aakore
-    0.7 %  agent360     agent360
-    0.7 %  grafana      grafana
-    0.7 %  root         cyber-desktop-s
-    0.7 %  root         top
-    0.3 %  root         cred-store
-    0.3 %  root         adp-agent
-    0.3 %  root         task-manager
+Mail authentication (SPF / DKIM / DMARC):
+  d29.example                 SPF pass      | DKIM ok       | DMARC missing      | MX here | DNS sub.d81.example
+  d30.example          SPF pass      | DKIM ok       | DMARC missing      | MX here | DNS sub.d81.example
+  33 domain(s) OK, 2 with findings. Alert only if SPF and DKIM both fail and the MX points here;
+  a single missing/outdated record (SPF, DKIM or DMARC) is a recommendation (DMARC passes if SPF or DKIM passes).
+  DNS queried via 198.18.1.132
 
-RAM: 18847 of 24001 MB available (78 %) | swap used: 0/0 MB
+Mailboxes (fill level of the size limit; warning from WARN_MAILBOX_PCT=95 %, without a limit from WARN_MAILBOX_UNLIMITED_GB=5 GB):
+   91 %  info@d20.example  (2.76 GB of 3.00 GB)
+   88 %  info@d34.example  (265 MB of 300 MB)
+   84 %  user78@d4.example  (423 MB of 500 MB)
+   80 %  info@d14.example  (824 MB of 1.00 GB)
+   77 %  user79@d26.example  (779 MB of 1000 MB)
+  89 mailbox(es) checked; 19 unlimited (no size limit set in Plesk; largest: info@d31.example 140 MB, all together 395 MB), 5 without maildirsize (not counted)
 
-Filesystems (space used, inodes used):
-    8%  /  (inodes 2%)
-    8%  /boot/efi
+######## ACCESS ########
+
+== SUCCESSFUL LOGINS (SSH, Plesk panel) ==
+
+== PLESK PANEL: failed logins ==
+Failed panel logins: 0
 
 == FAIL2BAN ==
   plesk-apache                 banned:   0 (total 0), currently failed: 2
@@ -84,6 +101,16 @@ Filesystems (space used, inodes used):
   recidive                     banned: 211 (total 242), currently failed: 371
   ssh                          banned:  40 (total 576), currently failed: 63
   (jails without bans/failures hidden)
+
+== ACCESS & PERSISTENCE (SSH keys, accounts, sudo, cron, autostart, processes, ports, addresses) ==
+SSH keys (authorized_keys): 4 key(s) of 3 account(s)
+Accounts with a login shell: 5 | sudo group members: 0 | sudoers files: 3
+Cron jobs: 102 entr(y/ies) | autostart files (cron.hourly…monthly, rc.local, systemd units in /etc): 26
+Processes: 214 checked, 0 suspicious (program in /tmp, /dev/shm or a web folder, deleted, memory only, fake kernel thread)
+Listening TCP ports (not loopback): 21 xinetd, 22 sshd, 25 smtpd, 53 named, 80 nginx, 106 xinetd, 110 couriertcpd, 143 couriertcpd, 443 nginx, 465 master, 993 couriertcpd, 995 couriertcpd, 5355 systemd-resolve, 6888 updater, 8443 sw-cp-serverd, 8880 sw-cp-serverd, 18018 updater
+IP addresses (global): 203.0.113.10 (ens6)
+
+######## WEB ########
 
 == WEB (since last run) ==
 requests | 5xx | login POSTs | domain | busiest IP
@@ -121,52 +148,17 @@ ModSecurity (hits, of which blocked; top rules):
 == WEBROOTS: PHP files in upload folders ==
 New since last run: 0
 
-== SUCCESSFUL LOGINS (SSH, Plesk panel) ==
-
-== PLESK PANEL LOG ==
-Failed panel logins: 0
+== CERTIFICATE RENEWALS (Let's Encrypt, from the Plesk panel log) ==
 Failed automatic certificate renewals (Let's Encrypt):
   none
 
-== ACCESS & PERSISTENCE (SSH keys, accounts, sudo, cron, autostart, processes, ports, addresses) ==
-SSH keys (authorized_keys): 4 key(s) of 3 account(s)
-Accounts with a login shell: 5 | sudo group members: 0 | sudoers files: 3
-Cron jobs: 102 entr(y/ies) | autostart files (cron.hourly…monthly, rc.local, systemd units in /etc): 26
-Processes: 214 checked, 0 suspicious (program in /tmp, /dev/shm or a web folder, deleted, memory only, fake kernel thread)
-Listening TCP ports (not loopback): 21 xinetd, 22 sshd, 25 smtpd, 53 named, 80 nginx, 106 xinetd, 110 couriertcpd, 143 couriertcpd, 443 nginx, 465 master, 993 couriertcpd, 995 couriertcpd, 5355 systemd-resolve, 6888 updater, 8443 sw-cp-serverd, 8880 sw-cp-serverd, 18018 updater
-IP addresses (global): 203.0.113.10 (ens6)
-
-== SERVICES ==
-Failed units: none
-OOM killer: none
-
-== BACKUPS ==
-Plesk backup: last run 2026-11-12 03:23 UTC (9 h ago, TOKEN), status: OK (exit code 0)
-Acronis agent: running
-
-== DAILY CHECKS ==
-As of: 2026-11-12 13:16 UTC
-Updates available: 0, security updates: 0
-Script version: 1.11.0 (newer than the latest release 1.10.0 – development version from main)
-
+== WEB – daily checks (as of 2026-11-12 13:16 UTC) ==
 TLS certificates:
   all valid certificates are good for at least 14 more days
   no matching certificate (e.g. no SSL, mail-only, redirect): d37.example d9.example d43.example d41.example d4.example d8.example
 
 HTTPS (HSTS and http→https redirect; domains with a valid certificate that point here):
   40 domain(s) checked, all send HSTS and redirect http to https
-
-Server DNS (reverse DNS / HELO):
-  203.0.113.10 → d1.example: ok (forward-confirmed)
-  Postfix HELO name: d1.example (resolves to this server, matches PTR)
-  IPv6: not used for mail (CHECK_IPV6=auto)
-
-Mail server certificates for d1.example:
-  port 25: name ok, valid 61 more days
-  port 465: name ok, valid 61 more days
-  port 587: no TLS certificate (port closed or no TLS)
-  port 993: name ok, valid 61 more days
-  port 995: name ok, valid 61 more days
 
 Domain DNS (points here? CAA, DNSSEC, domain blocklists):
   d37.example: website points elsewhere (198.18.1.131, US, d80.example Ltd.) – moved? CDN?
@@ -183,19 +175,41 @@ Exposed files in document roots (.env, .git, dumps, backups, config copies, info
 Suspicious code in recently changed PHP files, .htaccess and .user.ini (typical webshell/backdoor patterns):
   37 document root(s) scanned, 0 suspicious file(s)
 
-Mail authentication (SPF / DKIM / DMARC):
-  d29.example                 SPF pass      | DKIM ok       | DMARC missing      | MX here | DNS sub.d81.example
-  d30.example          SPF pass      | DKIM ok       | DMARC missing      | MX here | DNS sub.d81.example
-  33 domain(s) OK, 2 with findings. Alert only if SPF and DKIM both fail and the MX points here;
-  a single missing/outdated record (SPF, DKIM or DMARC) is a recommendation (DMARC passes if SPF or DKIM passes).
-  DNS queried via 198.18.1.132
+######## SYSTEM ########
 
-Mailboxes (fill level of the size limit; warning from WARN_MAILBOX_PCT=95 %, without a limit from WARN_MAILBOX_UNLIMITED_GB=5 GB):
-   91 %  info@d20.example  (2.76 GB of 3.00 GB)
-   88 %  info@d34.example  (265 MB of 300 MB)
-   84 %  user78@d4.example  (423 MB of 500 MB)
-   80 %  info@d14.example  (824 MB of 1.00 GB)
-   77 %  user79@d26.example  (779 MB of 1000 MB)
-  89 mailbox(es) checked; 19 unlimited (no size limit set in Plesk; largest: info@d31.example 140 MB, all together 395 MB), 5 without maildirsize (not counted)
+== LOAD, CPU, RAM, FILESYSTEMS ==
+Load: 0.49 / 0.23 / 0.15 (1/5/15 min) on 12 cores | up 2 days, 6 hours, 20 minutes
+%Cpu(s):  0.1 us,  0.2 sy,  0.0 ni, 99.6 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+
+CPU per system user (snapshot):
+     4.2 %  root
+
+Top processes:
+    1.3 %  root         aakore
+    0.7 %  agent360     agent360
+    0.7 %  grafana      grafana
+    0.7 %  root         cyber-desktop-s
+    0.7 %  root         top
+    0.3 %  root         cred-store
+    0.3 %  root         adp-agent
+    0.3 %  root         task-manager
+
+RAM: 18847 of 24001 MB available (78 %) | swap used: 0/0 MB
+
+Filesystems (space used, inodes used):
+    8%  /  (inodes 2%)
+    8%  /boot/efi
+
+== SERVICES ==
+Failed units: none
+OOM killer: none
+
+== BACKUPS ==
+Plesk backup: last run 2026-11-12 03:23 UTC (9 h ago, TOKEN), status: OK (exit code 0)
+Acronis agent: running
+
+== SYSTEM – daily checks (as of 2026-11-12 13:16 UTC) ==
+Updates available: 0, security updates: 0
+Script version: 1.11.0 (newer than the latest release 1.10.0 – development version from main)
 
 IP geolocation: DB-IP.com Lite databases (CC BY 4.0)

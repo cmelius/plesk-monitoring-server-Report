@@ -2,6 +2,21 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
+## [1.20.1] – not yet released (on `main`)
+
+After a lot of changes in the last weeks – added one by one, not always in the right place – it was time to clean up the structure of the reports.
+
+### Changed
+- **The report is ordered by theme: MAIL, ACCESS, WEB, SYSTEM.** Each theme has the sections of the checks that read the logs since the last run, then `== THEME – daily checks (as of …) ==` with the newest results of its daily checks. The block *DAILY CHECKS* at the end is gone: the PHP versions are under SYSTEM, the firewall check under ACCESS, mailboxes and mail authentication under MAIL. The table in the README ("Example report") shows which check goes where.
+- **The alerts at the top are grouped by theme** (`MAIL (3):`, `ACCESS (1):` …), the critical ones first in each theme. The JSON report lists them in the same order.
+- **The mail section has four parts:** delivery & spam filter, senders & logins, failed logins, webmail. The system section is called *LOAD, CPU, RAM, FILESYSTEMS* (the theme is SYSTEM).
+- **The Plesk panel log is split:** failed panel logins under ACCESS, failed Let's Encrypt renewals under WEB (*CERTIFICATE RENEWALS*). In the JSON report the renewals have the check `certrenew`.
+- **`summary.txt` is enough for a review.** It has the same themes, the alerts grouped and sorted the same way, failed panel logins, fail2ban per jail (newest report, most banned at once, banned IPs with earlier logins), failed certificate renewals, and at the end of each theme the newest daily checks. `latest.txt` is no longer needed for the daily review – the example prompt in the README reads only `summary.txt`, goes through the themes in their order and reports daily checks older than 26 hours (they did not run).
+- **The daily checks keep an index of their text in every run** (`daily_index.txt`, before only with `JSON_REPORT=1` as `daily_json.txt`), to put each check under its theme. The old file is removed.
+- **JSON report:** a check with several headings (`mail`) gives one section per heading; the theme headings are not sections. Schema stays 1.
+
+**After the update, `summary.txt` is mixed up for a day:** it reads the reports of the last 24 hours, and the reports from before the update have the old layout. Alerts seen only in those reports are listed under `OTHER` instead of under their theme, and their daily checks are not shown (only those of the new reports). The totals, fail2ban and the panel logins are read from both layouts. After 24 hours all reports have the new layout. To start clean right away, delete the old reports in `/var/lib/plesk-server-report/out` (`report-*.txt`) – the state (offsets, known IPs, baselines) stays as it is.
+
 ## [1.20.0] – not yet released (on `main`)
 
 ### Added

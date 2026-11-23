@@ -1,7 +1,9 @@
 #!/usr/bin/env bats
 # write_summary from the hourly reports of a real server (anonymized): 21 reports, of which 19
-# are within the 24 hours before the newest (one of the others exactly 24 hours before). summary-real.txt is the summary the server wrote
-# (anonymized); summary-expected.txt is what this version writes from the same reports.
+# are within the 24 hours before the newest (one of the others exactly 24 hours before). The
+# reports were written by 1.11.0 and converted to the theme layout of 1.20.1 (sections moved, not
+# changed). summary-real.txt is the summary the server wrote (anonymized, layout of 1.11.0);
+# summary-expected.txt is what this version writes from the same reports.
 
 load helper
 
@@ -24,7 +26,9 @@ section() { sed -n "/^== $1/,/^\$/p" "$2"; }
 
 @test "runs and alerts are the same as in the summary the server wrote" {
   [ "$(section RUNS "$BATS_TEST_TMPDIR/summary.txt")" = "$(section RUNS "$FIX/summary/summary-real.txt")" ]
-  [ "$(section ALERTS "$BATS_TEST_TMPDIR/summary.txt")" = "$(section ALERTS "$FIX/summary/summary-real.txt")" ]
+  # the same alert lines – now grouped by theme, so in another order
+  alines() { section ALERTS "$1" | grep '^  ' | sort; }
+  [ "$(alines "$BATS_TEST_TMPDIR/summary.txt")" = "$(alines "$FIX/summary/summary-real.txt")" ]
 }
 
 @test "only the reports of the last 24 hours" {

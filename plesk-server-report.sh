@@ -84,7 +84,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.20.0
+VERSION=1.20.1
 
 set -uo pipefail
 export LC_ALL=C
@@ -242,10 +242,23 @@ STATE_DIR_DEFAULT=/var/lib/plesk-server-report
 STATE_MARK=.plesk-server-report-state         # marks STATE_DIR as this script's own folder
 SYS_BIN_RE='^(/usr/local/sbin|/usr/local/bin|/usr/sbin|/usr/bin|/sbin|/bin)$'   # no files written next to the script there
 
-# Check names in report order. Hourly checks analyse the log lines since the previous run,
-# daily checks run once a day and are cached in $STATE_DIR/daily.txt.
+# Check names. Hourly checks analyse the log lines since the previous run, daily checks run once
+# a day and are cached in $STATE_DIR/daily.txt.
 HOURLY_CHECKS="mail webmail system fail2ban web uploads logins panel persistence services backups"
 DAILY_CHECKS="updates kmodules firewall sshusers php certificates https serverdns mailtls domaindns exposed webshell mailauth mailboxes forwarding rclocal"
+# The report is ordered by theme, not by check: each theme has the sections of its hourly checks
+# (in this order), then one block with the newest results of its daily checks. The alerts at the
+# top are grouped the same way. "certrenew" is the part of the panel check about Let's Encrypt.
+# A check not listed here (none so far) goes to SYSTEM.
+THEMES="MAIL ACCESS WEB SYSTEM"
+# shellcheck disable=SC2034  # read by name: ${!v} with v=THEME_<theme>
+THEME_MAIL="mail webmail serverdns mailtls mailauth mailboxes forwarding"
+# shellcheck disable=SC2034
+THEME_ACCESS="logins panel fail2ban persistence firewall sshusers"
+# shellcheck disable=SC2034
+THEME_WEB="web uploads certrenew certificates https domaindns exposed webshell"
+# shellcheck disable=SC2034
+THEME_SYSTEM="system services backups updates kmodules php rclocal"
 
 # =============================================================================
 # Helper functions
@@ -255,7 +268,7 @@ DAILY_CHECKS="updates kmodules firewall sshusers php certificates https serverdn
 alert() { ALERTS+=("$*"); ALERT_CHK+=("$CUR_CHECK $ALERT_DAILY"); }   # hourly alert → STATUS line
 dalert() {                                        # daily alert, cached with the daily checks
   echo "$*" >>"${PAR_DALERTS:-$DALERTS}"            # (a job of par_map: its own file first)
-  json_on && [[ -n ${DJSON:-} ]] && jline A "$CUR_CHECK" >>"${PAR_DJSON:-$DJSON}"
+  [[ -n ${DJSON:-} ]] && jline A "$CUR_CHECK" >>"${PAR_DJSON:-$DJSON}"
   return 0
 }
 section() { printf '\n== %s ==\n' "$1" >>"$BODY"; }
@@ -280,8 +293,8 @@ note() {
 # Records in $TMPD/json, one per line, fields separated by tabs:
 #   N check text                  a note
 #   M name value                  a figure
-#   S check daily start end       a section: bytes start..end of the report body, or with
-#                                 daily = 1 of the daily checks' text ($DAILY_TEXT)
+#   S check daily start end       a section: bytes start..end of the report body (assemble_body);
+#                                 daily = 1: the text of a daily check
 CUR_CHECK=script; ALERT_DAILY=0; ALERT_CHK=()   # the check that is running; alerts and notes outside a check: "script"
 json_on() { (( ${JSON_REPORT:-0} )) && [[ -n ${TMPD:-} ]]; }
 # jline FIELD… – one record; tabs and line breaks inside a field become spaces
@@ -656,7 +669,7 @@ rej_hint() {
 
 check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed logins, DNS blocklists
   local MAILLOG f last MAILSTATS SENT DEF BOU BL SF DF QUEUE REV BLRES bl r t SAIP n nip who line k c ip ex uid user home
-  section "MAIL"
+  section "MAIL: delivery & spam filter"
   MAILLOG=""
   for f in ${MAIL_LOG:-/var/log/maillog /var/log/mail.log}; do [[ -r $f ]] && { MAILLOG=$f; break; }; done
 
@@ -1026,7 +1039,8 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
     out "DNS blocklists for $PUBIP (all queried via $BL_VIA):$BLRES"
   fi
 
-  out ""; out "Top senders (total recipients):"
+  section "MAIL: senders & logins"
+  out "Top senders (total recipients):"
   grep '^RCPT' <<<"$MAILSTATS" | sort -t$'\t' -k2,2nr | head -10 |
     awk -F'\t' '{printf "  %6d  %s\n", $2, $3}' >>"$BODY"
   # alert only on mail sent FROM this server (login or script) – the list above also
@@ -1155,7 +1169,8 @@ check_mail() {   # delivery, senders, mailboxes, login ≠ from, scripts, failed
   read -r _ n c <<<"$(grep '^IMAPCHK' <<<"$MAILSTATS")"
   (( ${n:-0} > 0 && ${c:-0} == 0 )) &&
     note "mail: $n log lines of the IMAP/POP3 server, but no login recognized – log format unknown (supported: Dovecot, Courier), IMAP/POP3 figures are 0"
-  out ""; out "Failed mail logins: SMTP $SF | IMAP/POP3 $DF – top IPs:"
+  section "MAIL: failed logins"
+  out "Failed mail logins: SMTP $SF | IMAP/POP3 $DF – top IPs:"
   (( SF + DF > WARN_AUTH_FAIL )) && alert "Mail: $((SF + DF)) failed mail logins (brute force?)"
   metric mail_failed_logins_smtp "$SF"; metric mail_failed_logins_imap "$DF"
   while IFS=$'\t' read -r c ip; do
@@ -1242,7 +1257,8 @@ check_webmail() {   # Roundcube: mails sent per mailbox with real client IP, fai
   if [[ -z $RC_DIR ]]; then
     for d in /var/log/plesk-roundcube /usr/share/psa-roundcube/logs; do [[ -d $d ]] && { RC_DIR=$d; break; }; done
   fi
-  out ""; out "Webmail (Roundcube) – mails sent (mails, recipients, IPs):"
+  section "MAIL: webmail (Roundcube)"
+  out "Webmail (Roundcube) – mails sent (mails, recipients, IPs):"
   if [[ -n $RC_DIR && -d $RC_DIR ]]; then
     WEBMAIL=$( { new_lines "$RC_DIR/sendmail" | sed 's/^/S /'; new_lines "$RC_DIR/errors" | sed 's/^/E /'; } | awk '
       $1 == "S" && / User [^ ]+ \[[0-9a-fA-F:.]+\]; Message / {
@@ -1303,7 +1319,7 @@ check_webmail() {   # Roundcube: mails sent per mailbox with real client IP, fai
 
 check_system() {   # load, CPU per system user, top processes, RAM, filesystems
   local CORES L1 L5 L15 LIMIT pct user MEM MT MA MP SWAP mnt p ip
-  section "SYSTEM"
+  section "LOAD, CPU, RAM, FILESYSTEMS"
   CORES=$(nproc)
   read -r L1 L5 L15 _ </proc/loadavg
   out "Load: $L1 / $L5 / $L15 (1/5/15 min) on $CORES cores | $(uptime -p)"
@@ -1758,7 +1774,7 @@ check_logins() {   # successful SSH and Plesk panel logins, alert for previously
 # check warns – usually a domain whose DNS points elsewhere, or a blocked challenge URL.
 check_panel() {
   local PL n who ip d r line="" k
-  section "PLESK PANEL LOG"
+  section "PLESK PANEL: failed logins"
   PL=$PLESK_ERROR_LOG
   if [[ -z $PL || ! -r $PL ]]; then out "Plesk log PLESK_ERROR_LOG=\"$PL\" not found (no Plesk?) – skipped"; return 0; fi
   new_lines "$PL" | awk -v apo="'" '
@@ -1788,6 +1804,9 @@ check_panel() {
     done < <(grep '^PIP' "$TMP.panel" | sort -t$'\t' -k2,2nr | head -5)
     out "  top IPs: $line"
   fi
+  # the renewals belong to the web theme: their own part of the report (see run_hourly)
+  part certrenew
+  section "CERTIFICATE RENEWALS (Let's Encrypt, from the Plesk panel log)"
   out "Failed automatic certificate renewals (Let's Encrypt):"
   k=0
   while IFS=$'\t' read -r _ n d r; do
@@ -2739,7 +2758,7 @@ check_exposed() {   # .env, .git, dumps, backups, config copies in document root
   done < <(docroots)
   [[ -n $out ]] && printf '%s' "$out"
   echo "  $n document root(s) scanned, $found finding(s); only publicly reachable ones raise an alert"
-  (( pub )) && echo "  This list is from the daily check (see \"As of\") and repeats until the next one. After fixing a file, check again right away: $(basename "$0") --only exposed – or rm $STATE_DIR/daily_date to refresh the daily checks in the next run"
+  (( pub )) && echo "  This list is from the daily check (see \"as of\" in the heading) and repeats until the next one. After fixing a file, check again right away: $(basename "$0") --only exposed – or rm $STATE_DIR/daily_date to refresh the daily checks in the next run"
   return 0
 }
 # "Recently changed" = by file date (mtime) or by inode change time (ctime): a backdated file
@@ -3473,37 +3492,52 @@ check_enabled() {
 # checks that need dig are skipped silently without it (mailauth prints a note)
 check_needs_dig() { [[ $1 == serverdns || $1 == domaindns || $1 == https ]]; }
 
-run_hourly() {   # run_hourly NAME… – checks write directly into the report body
-  local c s=0
+# theme_of CHECK – the theme of a check (THEME_*): MAIL, ACCESS, WEB or SYSTEM; SCRIPT for
+# alerts of the script itself (outside a check)
+theme_of() {
+  local t v
+  [[ $1 == script ]] && { echo SCRIPT; return 0; }
+  for t in $THEMES; do v=THEME_$t; [[ " ${!v} " == *" $1 "* ]] && { echo "$t"; return 0; }; done
+  echo SYSTEM
+}
+# part NAME – the rest of the running hourly check's output goes to a part of its own, with its
+# alerts counted for NAME: for a check whose findings belong to two themes (panel → certrenew)
+part() {
+  CUR_CHECK=$1
+  [[ -n ${PARTS:-} ]] && BODY=$PARTS/h.$1
+  return 0
+}
+run_hourly() {   # run_hourly NAME… – each check writes its part of the report: $PARTS/h.NAME
+  local c body=$BODY
+  PARTS=$TMPD/parts; mkdir -p "$PARTS"
   for c in "$@"; do
     check_enabled "$c" || continue
-    step "$c"; CUR_CHECK=$c
-    json_on && s=$(fsize "$BODY")
+    step "$c"; CUR_CHECK=$c; BODY=$PARTS/h.$c
     "check_$c"
-    json_on && jrec S "$c" 0 "$s" "$(fsize "$BODY")"
+    BODY=$body
   done
   CUR_CHECK=script
   return 0
 }
-# run_daily NAME… – section text to stdout, alerts to $DALERTS; with JSON_REPORT=1 the check of
-# each alert and the byte range of each check's text in $DAILY_OUT (the file stdout goes to) go
-# to $DJSON, cached like the text
+# run_daily NAME… – section text to stdout, alerts to $DALERTS; the check of each alert and the
+# byte range of each check's text in $DAILY_OUT (the file stdout goes to) go to $DJSON, cached
+# like the text (daily_parts splits the text by it)
 run_daily() {
   local c s=0 t0 t1 dt=() d
   t0=$SECONDS
   : >"$DALERTS"
-  json_on && [[ -n ${DJSON:-} ]] && : >"$DJSON"
+  [[ -n ${DJSON:-} ]] && : >"$DJSON"
   echo "As of: $(date '+%Y-%m-%d %H:%M %Z')"
   detect_pubip6
   for c in "$@"; do
     check_enabled "$c" || continue
     check_needs_dig "$c" && ! command -v dig >/dev/null && continue
     step "daily: $c"; CUR_CHECK=$c
-    json_on && s=$(fsize "${DAILY_OUT:-}")
+    [[ -n ${DJSON:-} ]] && s=$(fsize "${DAILY_OUT:-}")
     t1=$SECONDS
     "check_$c"
     dt+=("$(( SECONDS - t1 )) $c")
-    json_on && [[ -n ${DJSON:-} ]] && jline S "$c" 1 "$s" "$(fsize "${DAILY_OUT:-}")" >>"$DJSON"
+    [[ -n ${DJSON:-} ]] && jline S "$c" 1 "$s" "$(fsize "${DAILY_OUT:-}")" >>"$DJSON"
   done
   # how long they took, with the slowest checks (5 s and more) – they wait for DNS and web servers
   d=$(printf '%s\n' "${dt[@]}" | sort -rn | awk '$1 >= 5 && n < 3 {printf "%s%s %s", (n++ ? ", " : ""), $2, $1 " s"}')
@@ -3512,19 +3546,97 @@ run_daily() {
   CUR_CHECK=script
   return 0
 }
+# daily_parts TEXT INDEX – the daily text split into one part per check ($PARTS/d.NAME), plus
+# its time (d._asof) and how long the checks took (d._took). Without an index: one part "daily"
+daily_parts() {
+  local text=$1 idx=$2 typ c d s e last=0
+  PARTS=$TMPD/parts; mkdir -p "$PARTS"
+  [[ -s $text ]] || return 0
+  sed -n '1s/^As of: //p' "$text" >"$PARTS/d._asof"
+  if [[ -s $idx ]] && grep -q '^S' "$idx"; then
+    while IFS=$'\t' read -r typ c d s e; do
+      [[ $typ == S && $c =~ ^[a-z0-9_]+$ && $s =~ ^[0-9]+$ && $e =~ ^[0-9]+$ ]] || continue
+      (( e > s )) || continue
+      tail -c +"$(( s + 1 ))" "$text" | head -c "$(( e - s ))" >>"$PARTS/d.$c"
+      (( e > last )) && last=$e
+    done <"$idx"
+    tail -c +"$(( last + 1 ))" "$text" | grep -m1 '^Daily checks took ' >"$PARTS/d._took"
+  else
+    sed '1{/^As of: /d}' "$text" >"$PARTS/d.daily"
+  fi
+  return 0
+}
+# assemble_body – the parts of the checks into the report body, theme by theme: a heading, the
+# sections of the hourly checks, then "THEME – daily checks" with the texts of the daily checks.
+# A theme without any part (--only) is left out. With JSON_REPORT=1 each part becomes a section.
+assemble_body() {
+  [[ -d ${PARTS:-} ]] || return 0
+  local t v c f s asof="" took="" known=" " list=() hp=() dp=() first
+  [[ -s $PARTS/d._asof ]] && asof=$(<"$PARTS/d._asof")
+  [[ -s $PARTS/d._took ]] && took=$(<"$PARTS/d._took")
+  for t in $THEMES; do v=THEME_$t; known+="${!v} "; done
+  for t in $THEMES; do
+    v=THEME_$t; read -ra list <<<"${!v}"
+    if [[ $t == SYSTEM ]]; then   # parts of checks no theme lists
+      for f in "$PARTS"/[hd].*; do
+        c=${f##*/}; c=${c#?.}
+        [[ -e $f && $c != _* && $known != *" $c "* && " ${list[*]} " != *" $c "* ]] && list+=("$c")
+      done
+    fi
+    hp=(); dp=()
+    for c in "${list[@]}"; do
+      [[ -s $PARTS/h.$c ]] && hp+=("$c")
+      [[ -s $PARTS/d.$c ]] && grep -q '[^[:space:]]' "$PARTS/d.$c" && dp+=("$c")
+    done
+    (( ${#hp[@]} + ${#dp[@]} )) || continue
+    printf '\n######## %s ########\n' "$t" >>"$BODY"
+    for c in "${hp[@]}"; do
+      s=$(fsize "$BODY"); cat "$PARTS/h.$c" >>"$BODY"
+      jrec S "$c" 0 "$s" "$(fsize "$BODY")"
+    done
+    (( ${#dp[@]} )) || continue
+    section "$t – daily checks${asof:+ (as of $asof)}"
+    first=1
+    for c in "${dp[@]}"; do
+      (( first )) || echo >>"$BODY"; first=0
+      s=$(fsize "$BODY")
+      # without the blank lines around it: one blank line between two checks
+      awk 'NF { for (; b > 0; b--) print ""; started = 1; print; next } started { b++ }' "$PARTS/d.$c" >>"$BODY"
+      jrec S "$c" 1 "$s" "$(fsize "$BODY")"
+    done
+    [[ $t == SYSTEM && -n $took ]] && { echo; echo "$took"; } >>"$BODY"
+  done
+  rm -rf "$PARTS"
+  return 0
+}
+# sort_alerts – the alerts by theme (MAIL, ACCESS, WEB, SYSTEM, then those of the script), the
+# critical ones first within a theme, otherwise in the order they were raised; ALERT_THEME: the
+# theme of each
+sort_alerts() {
+  local i t sv a=() c=() th=() o
+  local -A rank=([MAIL]=1 [ACCESS]=2 [WEB]=3 [SYSTEM]=4 [SCRIPT]=5)
+  ALERT_THEME=()
+  (( ${#ALERTS[@]} )) || return 0
+  for i in "${!ALERTS[@]}"; do
+    t=$(theme_of "${ALERT_CHK[i]%% *}"); th[i]=$t
+    sv=1; [[ $(alert_severity "${ALERTS[i]}") == critical ]] && sv=0
+    printf '%d %d %d\n' "${rank[$t]:-4}" "$sv" "$i"
+  done >"$TMPD/alert_order"
+  while read -r _ _ o; do
+    a+=("${ALERTS[o]}"); c+=("${ALERT_CHK[o]}"); ALERT_THEME+=("${th[o]}")
+  done < <(sort -n -k1,1 -k2,2 -k3,3 "$TMPD/alert_order")
+  ALERTS=("${a[@]}"); ALERT_CHK=("${c[@]}")
+  return 0
+}
 # fmt_dur SECONDS – "42 s" or "3 min 12 s"
 fmt_dur() { if (( $1 < 60 )); then echo "$1 s"; else echo "$(( $1 / 60 )) min $(( $1 % 60 )) s"; fi; }
-# replay_daily_alerts – the cached daily alerts become alerts of this report; with JSON_REPORT=1
-# each keeps the name of its check (from $DJSON), and the sections of the daily checks are added
+# replay_daily_alerts – the cached daily alerts become alerts of this report, each with the name
+# of its check (from $DJSON) – for the theme it is shown under, and for the JSON report
 replay_daily_alerts() {
   local a i=0 chk=()
-  if json_on && [[ -s ${DJSON:-} ]]; then
+  if [[ -s ${DJSON:-} ]]; then
     mapfile -t chk < <(awk -F'\t' '$1 == "A" { print $2 }' "$DJSON")
     (( ${#chk[@]} == $(grep -c '' "$DALERTS" 2>/dev/null) )) || chk=()
-    awk -F'\t' '$1 == "S"' "$DJSON" >>"$TMPD/json"
-  elif json_on && [[ -s ${DAILY_TEXT:-} ]]; then
-    # cached without JSON_REPORT (switched on by --json): the daily text as one section
-    jrec S daily 1 0 "$(fsize "$DAILY_TEXT")"
   fi
   ALERT_DAILY=1
   [[ -f $DALERTS ]] && while IFS= read -r a; do
@@ -3557,29 +3669,38 @@ self_sum() {   # self_sum – short checksum of this script and its configuratio
 }
 daily_checks() {
   local daily="$STATE_DIR/daily.txt" stamp
-  DALERTS="$STATE_DIR/daily_alerts.txt"; DAILY_TEXT=$daily; DJSON="$STATE_DIR/daily_json.txt"
-  json_on || { rm -f "$DJSON"; DJSON=""; }
+  DALERTS="$STATE_DIR/daily_alerts.txt"; DAILY_TEXT=$daily; DJSON="$STATE_DIR/daily_index.txt"
+  rm -f "$STATE_DIR/daily_json.txt"   # its name up to 1.20.0, written only with JSON_REPORT=1
   stamp="$(date +%F) $VERSION $(self_sum) $(pkgdb_stamp) $(boot_stamp)"
   if [[ $(cat "$STATE_DIR/daily_date" 2>/dev/null) != "$stamp" ]]; then
     # mark the day first: if a daily check makes the run abort, the next runs still report hourly
     echo "$stamp" >"$STATE_DIR/daily_date"
-    [[ -n $DJSON ]] && DJSON+=.new         # text and JSON index of the same run, both or neither
+    DJSON+=.new                            # text and index of the same run, both or neither
     # shellcheck disable=SC2086  # a list of check names, one argument each – split on purpose
     DAILY_OUT=$daily.new run_daily $DAILY_CHECKS >"$daily.new" 2>/dev/null; mv "$daily.new" "$daily"
-    [[ -n $DJSON ]] && { DJSON=${DJSON%.new}; mv "$DJSON.new" "$DJSON" 2>/dev/null; }
+    DJSON=${DJSON%.new}
+    if [[ -f $DJSON.new ]]; then mv "$DJSON.new" "$DJSON"; else rm -f "$DJSON"; fi
   fi
-  section "DAILY CHECKS"
-  cat "$daily" >>"$BODY" 2>/dev/null
+  daily_parts "$daily" "$DJSON"
   replay_daily_alerts
   return 0
 }
 
 write_report() {
+  assemble_body
+  sort_alerts
   {
     echo "Server report $HOST – $NOW${ONLY:+ (only: $ONLY)} – plesk-server-report v$VERSION"
     if (( ${#ALERTS[@]} )); then
       echo "STATUS: WARNING (${#ALERTS[@]})"
-      printf ' ! %s\n' "${ALERTS[@]}"
+      local i g=""
+      for i in "${!ALERTS[@]}"; do   # grouped by theme, the theme with its number of alerts
+        if [[ ${ALERT_THEME[i]} != "$g" ]]; then
+          g=${ALERT_THEME[i]}
+          printf '%s (%d):\n' "$g" "$(printf '%s\n' "${ALERT_THEME[@]}" | grep -cx "$g")"
+        fi
+        printf ' ! %s\n' "${ALERTS[i]}"
+      done
     else
       echo "STATUS: OK"
     fi
@@ -3645,7 +3766,7 @@ write_json() {
       typ=${line%%$'\t'*}
       if [[ $typ == S ]]; then
         IFS=$'\t' read -r _ chk d s e <<<"$line"
-        if (( d )); then src=${DAILY_TEXT:-}; else src=$BODY; fi
+        src=$BODY
         [[ -r $src && $s =~ ^[0-9]+$ && $e =~ ^[0-9]+$ ]] || continue
         (( e > s )) || continue
         printf 'S\t%s\t%s\n' "$chk" "$d"
@@ -3669,6 +3790,8 @@ write_json() {
       $1 == "L" && ns { l = after($0, 1)
         # title: the "== … ==" heading of a section, or for a daily check its first line when it ends with ":"
         if (sd[ns] == 0 && st[ns] == "" && sl[ns] == 0 && l ~ /^== .* ==$/) { st[ns] = substr(l, 4, length(l) - 6); next }
+        # a further heading in the part of an hourly check (mail): a section of its own
+        if (sd[ns] == 0 && l ~ /^== .* ==$/) { ns++; sc[ns] = sc[ns - 1]; sd[ns] = 0; st[ns] = substr(l, 4, length(l) - 6); sl[ns] = 0; next }
         if (sd[ns] == 1 && st[ns] == "" && sl[ns] == 0 && l ~ /^[^ ].*:$/) { st[ns] = substr(l, 1, length(l) - 1); next }
         if (sl[ns] == 0 && l ~ /^ *$/) next
         sx[ns, ++sl[ns]] = l; next }
@@ -3727,8 +3850,8 @@ write_json() {
 # Condenses the local reports of the last SUMMARY_HOURS into one file (summary.txt):
 # every alert with count and first/last time, totals and peaks per section, and every
 # line of the rarely filled sections (logins, new PHP files, login ≠ from, webmail, …).
-# A reviewer (human or AI) reads this file plus latest.txt (daily checks, fail2ban)
-# instead of every single report. Built from the report files, so nothing is lost
+# A reviewer (human or AI) reads only this file – it has the themes of the reports, fail2ban and
+# the newest daily checks – instead of every single report. Built from the report files, so nothing is lost
 # that a report contains; the per-run reports stay as they are.
 # write_summary_json OUTFILE – summary.json (JSON_REPORT=1): the JSON reports of the last
 # SUMMARY_HOURS condensed – every run with status, level, number of alerts and its figures, every
@@ -3807,15 +3930,22 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
     function t(s) { gsub(/\t/, " ", s); return s }
     FNR == 1 {
       tm = "?"; if (match($0, /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]( [A-Z]+)?/)) tm = substr($0, RSTART, RLENGTH)
-      sec = ""; sub_ = ""; cur = ""; nrun++; next
+      sec = ""; sub_ = ""; cur = ""; grp = ""; head = 1; nrun++; next
     }
     FNR == 2 { print "RUN\t" tm "\t" $0; next }
-    /^ ! / { a = substr($0, 4); if (!(a in ac)) { ac[a] = 0; af[a] = tm; ao[++nao] = a }; ac[a]++; al[a] = tm; next }
+    # the alerts at the top, grouped by theme: "MAIL (2):", then the " ! " lines
+    head && /^[A-Z]+ \([0-9]+\):$/ { grp = $1; next }
+    /^ ! / { a = substr($0, 4); if (!(a in ac)) { ac[a] = 0; af[a] = tm; ao[++nao] = a }; ac[a]++; al[a] = tm; ath[a] = grp; next }
     /^ i / { a = substr($0, 4); if (!(a in nc)) { nc[a] = 0; nf[a] = tm; no[++nno] = a }; nc[a]++; nl[a] = tm; next }
-    /^== / { sec = $0; sub_ = ""; next }
-    sec ~ /DAILY CHECKS/ { next }
+    /^######## / { head = 0; sec = ""; sub_ = ""; next }
+    # the daily checks of a theme: kept from the newest report that has them
+    /^== [A-Z]+ – daily checks/ { head = 0; sec = $0; dxt = $2; if (dxr[dxt] != nrun) { dxr[dxt] = nrun; dxn[dxt] = 0; dxh[dxt] = $0 }; next }
+    /^== / { head = 0; sec = $0; sub_ = ""; next }
+    # the lines below the last section: run time, GeoIP source
+    /^(Run time: |IP geolocation: |GeoIP: )/ { sec = ""; next }
+    sec ~ / – daily checks/ { dxl[dxt, ++dxn[dxt]] = $0; next }
     # ---------------- MAIL
-    sec ~ /== MAIL ==/ {
+    sec ~ /^== MAIL( ==|:)/ {
       if ($0 ~ /^Delivered: /) { n = split($0, x, /[^0-9]+/); dl += x[2]; df += x[3]; bo += x[4]; if (x[5] + 0 > mq) { mq = x[5] + 0; mqt = tm }; next }
       if ($0 ~ /^Rejections mentioning/) { r = $0; sub(/.*: /, "", r); rj += r; next }
       if ($0 ~ /^  example: /) { if (nbx < 5) { l = $0; sub(/^  example: /, "", l); print "BLX\t" tm "\t" t(substr(l, 1, 260)); nbx++ }; next }
@@ -3872,7 +4002,7 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       next
     }
     # ---------------- SYSTEM
-    sec ~ /== SYSTEM ==/ {
+    sec ~ /^== (SYSTEM ==|LOAD, CPU)/ {
       if ($0 ~ /^Load: /) { if ($4 + 0 > ml || mlt == "") { ml = $4 + 0; mlt = tm }; c = $0; sub(/.* on /, "", c); sub(/ cores.*/, "", c); cores = c; next }
       if ($0 ~ /^CPU per system user/) { sub_ = "cpu"; next }
       if ($0 ~ /^Top processes/) { sub_ = ""; next }
@@ -3883,7 +4013,7 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       next
     }
     # ---------------- WEB
-    sec ~ /== WEB / {
+    sec ~ /^== WEB \(/ {
       if ($0 ~ /^requests \|/) { sub_ = "table"; next }
       if ($0 ~ /^WordPress login attacks/) { sub_ = "wp"; next }
       if ($0 ~ /^PHP fatal errors/) { sub_ = "fatal"; next }
@@ -3904,6 +4034,33 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       next
     }
     # ---------------- WEBROOTS, LOGINS, SERVICES
+    # ---------------- PANEL, CERTIFICATE RENEWALS, FAIL2BAN
+    sec ~ /^== (PLESK PANEL|CERTIFICATE RENEWALS)/ && /^  [^ ]+: [0-9]+× – / {   # a failed renewal: domain, count, reason
+      d = $1; sub(/:$/, "", d); n = $2; sub(/×/, "", n); r = $0; sub(/^[^–]*– /, "", r)
+      crt[d] += n; crw[d] = r; if (!(d in crf)) crf[d] = tm; crl[d] = tm; next
+    }
+    sec ~ /^== PLESK PANEL/ {
+      if ($0 ~ /^Failed panel logins: /) { n = $4 + 0; pft += n; if (n > pfm) { pfm = n; pfmt = tm }; next }
+      if ($0 ~ /^  login names: / || $0 ~ /^  top IPs: /) {
+        k = ($0 ~ /login names/) ? "PNAME" : "PIP"; l = $0; sub(/^  [^:]*: /, "", l)
+        rx = (k == "PIP") ? "[0-9a-fA-F:.]+( [(][^)]*[)])? ×[0-9]+" : "[^ ,]+ ×[0-9]+"
+        while (match(l, rx)) {
+          e = substr(l, RSTART, RLENGTH); l = substr(l, RSTART + RLENGTH)
+          n = e; sub(/.*×/, "", n); e = substr(e, 1, length(e) - length(n) - 3); sub(/^ +/, "", e)   # × is 2 bytes
+          pnc[k SUBSEP e] += n
+        }
+      }
+      next
+    }
+    sec ~ /^== FAIL2BAN/ {
+      if (f2run != nrun) { f2run = nrun; delete f2b; delete f2t; delete f2c; nf2x = 0 }
+      if ($0 ~ /^  [^ ]+ +banned: +[0-9]+ \(total [0-9]+\), currently failed: [0-9]+$/) {
+        j = $1; b = $3 + 0; tt = $5; gsub(/[^0-9]/, "", tt); cf = $NF + 0
+        f2b[j] = b; f2t[j] = tt; f2c[j] = cf; if (!(j in f2m) || b > f2m[j]) { f2m[j] = b; f2mt[j] = tm }; next }
+      if ($0 ~ /^    [^ ]+: /) { l = substr($0, 5); if (!(l in fbc)) { fbc[l] = 0; fbf[l] = tm; fbo[++nfbo] = l }; fbc[l]++; fbl[l] = tm; next }
+      if ($0 ~ /^ *fail2ban / || $0 ~ /jail\(s\) active|no jail is active/) { l = $0; sub(/^ +/, "", l); f2x[++nf2x] = l }
+      next
+    }
     sec ~ /WEBROOTS/ {
       if ($0 ~ /^(New since last run|First run)/) { n = $0; sub(/.*: /, "", n); up += n; next }
       if ($0 ~ /^  \//) { l = $0; sub(/^  /, "", l); print "UPLOAD\t" tm "\t" t(l) }
@@ -3930,7 +4087,7 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       bk[++nbk] = $0; next
     }
     END {
-      for (i = 1; i <= nao; i++) { a = ao[i]; print "ALERT\t" ac[a] "\t" af[a] "\t" al[a] "\t" t(a) }
+      for (i = 1; i <= nao; i++) { a = ao[i]; print "ALERT\t" ac[a] "\t" af[a] "\t" al[a] "\t" (ath[a] == "" ? "OTHER" : ath[a]) "\t" t(a) }
       for (i = 1; i <= nno; i++) { a = no[i]; print "NOTE\t" nc[a] "\t" nf[a] "\t" nl[a] "\t" t(a) }
       for (i = 1; i <= nbk; i++) print "BKP\t" t(bk[i])
       printf "MAILTOT\t%d\t%d\t%d\t%d\t%s\t%d\n", dl, df, bo, mq, mqt, rj
@@ -3958,10 +4115,18 @@ summary_records() {   # summary_records FILE… – one tab-separated record per
       print "UPTOT\t" up
       for (i = 1; i <= nlo; i++) { l = lo[i]; print "LOGIN\t" lc[l] "\t" lf[l] "\t" ll[l] "\t" t(l) }
       for (i = 1; i <= npo; i++) { l = po[i]; print "PERS\t" pc[l] "\t" pf[l] "\t" pl[l] "\t" t(l) }
+      printf "PANELTOT\t%d\t%d\t%s\n", pft, pfm, pfmt
+      for (k in pnc) { split(k, kk, SUBSEP); print kk[1] "\t" pnc[k] "\t" t(kk[2]) }
+      for (d in crt) print "CERT\t" crt[d] "\t" d "\t" crf[d] "\t" crl[d] "\t" t(crw[d])
+      for (j in f2m) print "F2B\t" j "\t" (j in f2b ? f2b[j] : "-") "\t" (j in f2t ? f2t[j] : "-") "\t" (j in f2c ? f2c[j] : "-") "\t" f2m[j] "\t" f2mt[j]
+      for (i = 1; i <= nf2x; i++) print "F2X\t" t(f2x[i])
+      for (i = 1; i <= nfbo; i++) { l = fbo[i]; print "F2BAN\t" fbc[l] "\t" fbf[l] "\t" fbl[l] "\t" t(l) }
+      for (d in dxh) { print "DHEAD\t" d "\t" t(dxh[d]); for (i = 1; i <= dxn[d]; i++) print "DAILY\t" d "\t" i "\t" t(dxl[d, i]) }
       print "NRUN\t" nrun
     }' "$@"
 }
 
+summary_theme_rank() { case $1 in MAIL) echo 1 ;; ACCESS) echo 2 ;; WEB) echo 3 ;; SYSTEM) echo 4 ;; SCRIPT) echo 5 ;; *) echo 6 ;; esac; }
 write_summary() {   # write_summary OUTFILE – from the local reports of the last SUMMARY_HOURS
   local outf=$1 recs files newest n
   write_summary_json "${outf%.txt}.json"
@@ -3971,25 +4136,38 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
   # shellcheck disable=SC2086  # a list of report files (names without spaces, made by the script) – split on purpose
   recs=$(summary_records $files)
   rec() { grep "^$1"$'\t' <<<"$recs" | cut -f2-; }
+  summary_daily() {   # summary_daily THEME – the daily checks of the theme, from the newest report that has them
+    local h
+    h=$(rec DHEAD | awk -F'\t' -v t="$1" '$1 == t { print $2 }')
+    [[ -n $h ]] || return 0
+    echo ""; echo "$h"
+    rec DAILY | awk -F'\t' -v t="$1" '$1 == t' | sort -t$'\t' -k2,2n | cut -f3- |
+      awk 'NF { for (; b > 0; b--) print ""; print; next } { b++ }'   # without blank lines at the end
+  }
   n=$(rec NRUN)
   SUM_NALERTS=$(rec ALERT | grep -c .)   # for the subject of the summary mail
   {
     echo "Server summary $HOST – last $SUMMARY_HOURS h: $n report(s), $(rec RUN | head -1 | cut -f1) to $(rec RUN | tail -1 | cut -f1) – plesk-server-report v$VERSION"
-    echo "Built from the reports of this period. Daily checks and fail2ban: see latest.txt. Details of a run: report-<date>-<time>.txt"
+    echo "Built from the reports of this period, in their themes: MAIL, ACCESS, WEB, SYSTEM – totals and peaks of the hourly checks, and the newest results of the daily checks. Details of a run: report-<date>-<time>.txt"
     echo ""
     echo "== RUNS (time, status) =="
     rec RUN | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
     echo ""
-    echo "== ALERTS (times seen, first – last, text) =="
+    echo "== ALERTS (by theme, the critical ones first; times seen, first – last, text) =="
     if [[ -n $(rec ALERT) ]]; then
-      rec ALERT | awk -F'\t' '{printf "  %3d×  %s – %s  %s\n", $1, $2, $3, $4}'
+      rec ALERT | while IFS=$'\t' read -r c f l th a; do
+        sv=1; [[ $(alert_severity "$a") == critical ]] && sv=0
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(summary_theme_rank "$th")" "$sv" "$c" "$f" "$l" "$th" "$a"
+      done | sort -s -t$'\t' -k1,1n -k2,2n |
+        awk -F'\t' '{ n++; th[n] = $6; x[n] = sprintf("  %3d×  %s – %s  %s", $3, $4, $5, $7); cnt[$6]++ }
+          END { for (i = 1; i <= n; i++) { if (th[i] != g) { g = th[i]; printf "%s (%d):\n", g, cnt[g] }; print x[i] } }'
     else echo "  none"; fi
     if [[ -n $(rec NOTE) ]]; then
       echo ""; echo "== SCRIPT NOTES (missing data sources, shortened logs; times seen, first – last) =="
       rec NOTE | awk -F'\t' '{printf "  %3d×  %s – %s  %s\n", $1, $2, $3, $4}'
     fi
-
-    echo ""; echo "== MAIL =="
+    echo ""; echo "######## MAIL ########"
+    echo ""; echo "== MAIL: delivery & spam filter (totals) =="
     rec MAILTOT | awk -F'\t' '{printf "Delivered: %d | deferred: %d | bounced: %d | highest queue: %d%s\nRejections mentioning blocklist/reputation/spam/rate limit: %d\n", $1, $2, $3, $4, ($5 != "" ? " (" $5 ")" : ""), $6}'
     rec BLX | awk -F'\t' '{printf "  example (%s): %s\n", $1, $2}'
     rec FWTOT | awk -F'\t' '{printf "Rejections of forwarded mail: %d (forwarding here, sender rewritten with SRS – not sent by a customer, but counts against this server IP)\n", $1}'
@@ -4018,7 +4196,8 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
       $1 == 0 {printf "Spam filter: all mails scanned%s\n", (lim != "" ? " (" lim ")" : "")}'
     if [[ -n $(rec BL) ]]; then echo "Server IP LISTED on a DNS blocklist:"; rec BL | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
     else echo "DNS blocklists for the server IP: not listed in any run"; fi
-    echo ""; echo "Top senders (total recipients; incoming mail included):"
+    echo ""; echo "== MAIL: senders & logins (totals) =="
+    echo "Top senders (total recipients; incoming mail included):"
     rec TOPS | sort -t$'\t' -k1,1nr | head -10 | awk -F'\t' '{printf "  %6d  %s\n", $1, $2}'
     echo ""; echo "Authenticated mailboxes (mails in total; every client IP seen):"
     rec AUTH | sort -t$'\t' -k1,1nr | head -15 | while IFS=$'\t' read -r m u; do
@@ -4033,13 +4212,14 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
     rec MISM | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
     echo ""; echo "Mails sent by scripts (total per system user):"
     rec SCRIPT | sort -t$'\t' -k1,1nr | head -10 | awk -F'\t' '{printf "  %6d  %s\n", $1, $2}'
-    echo ""
+    echo ""; echo "== MAIL: failed logins (totals) =="
     rec FAILTOT | awk -F'\t' '{printf "Failed mail logins: SMTP %d | IMAP/POP3 %d in total, most in one run: %d%s\n", $1, $2, $3, ($4 != "" ? " (" $4 ")" : "")}'
     echo "Top IPs (failed mail logins, total; only IPs that were among the top 5 of a run):"
     rec FIP | sort -t$'\t' -k1,1nr | head -10 | awk -F'\t' '{printf "  %6d  %s\n", $1, $2}'
     echo "Most attacked mailboxes (failed SMTP/IMAP/POP3 logins, total):"
     rec FUSR | sort -t$'\t' -k1,1nr | head -8 | awk -F'\t' '{printf "  %6d  %s\n", $1, $2}'
-    echo ""; echo "Webmail (Roundcube) – mails sent (time; mails, recipients, IPs):"
+    echo ""; echo "== MAIL: webmail (Roundcube) =="
+    echo "Mails sent (time; mails, recipients, IPs):"
     rec WSEND | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
     rec FAILTOT | awk -F'\t' '{printf "Failed webmail logins: %d in total\n", $5}'
     if [[ -n $(rec WFUSR) ]]; then
@@ -4047,16 +4227,37 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
       rec WFUSR | sort -t$'\t' -k1,1nr | head -5 | awk -F'\t' '{printf "  %6d  %s\n", $1, $2}'
     fi
 
-    echo ""; echo "== SYSTEM =="
-    rec SYS | awk -F'\t' '{printf "Highest 5-min load: %s (%s) on %s cores | lowest available RAM: %s %% (%s)\n", $1, $2, $3, $4, $5}'
-    echo "Highest CPU per system user (snapshots):"
-    rec CPU | sort -t$'\t' -k1,1nr | head -5 | awk -F'\t' '{printf "  %6s %%  %s (%s)\n", $1, $2, $3}'
-    echo "Filesystems (highest usage):"
-    rec DISK | sort -t$'\t' -k1,1nr | awk -F'\t' '{printf "  %4s%%  %s\n", $1, $2}'
-    if [[ -n $(rec SVC) ]]; then echo "Failed services / OOM killer / crashes:"; rec SVC | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
-    else echo "Failed services / OOM killer / crashes: none in any run"; fi
-    if [[ -n $(rec BKP) ]]; then echo "Backups (newest report):"; rec BKP | sed 's/^/  /'; fi
+    summary_daily MAIL
 
+    echo ""; echo "######## ACCESS ########"
+    echo ""; echo "== SUCCESSFUL LOGINS (SSH, Plesk panel; count, first – last) =="
+    rec LOGIN | awk -F'\t' '{printf "  %4d×  %s – %s  %s\n", $1, $2, $3, $4}'
+
+
+    echo ""; echo "== PLESK PANEL: failed logins (totals) =="
+    rec PANELTOT | awk -F'\t' '{printf "Failed panel logins: %d in total, most in one run: %d%s\n", $1, $2, ($3 != "" ? " (" $3 ")" : "")}'
+    if [[ -n $(rec PNAME) ]]; then
+      echo "  login names: $(rec PNAME | sort -t$'\t' -k1,1nr | head -8 | awk -F'\t' '{printf "%s%s ×%d", (NR > 1 ? ", " : ""), $2, $1}')"
+      echo "  top IPs: $(rec PIP | sort -t$'\t' -k1,1nr | head -8 | awk -F'\t' '{printf "%s%s ×%d", (NR > 1 ? ", " : ""), $2, $1}')"
+    fi
+
+    echo ""; echo "== FAIL2BAN (per jail: banned now, total, failed now – newest report; most banned at once) =="
+    if [[ -n $(rec F2B) ]]; then
+      rec F2B | sort -t$'\t' -k1,1 | awk -F'\t' '$2 == "-" {printf "  %-28s not in the newest report | most banned: %d (%s)\n", $1, $5, $6; next}
+        {printf "  %-28s banned: %3s (total %s), currently failed: %s | most banned: %d (%s)\n", $1, $2, $3, $4, $5, $6}'
+    fi
+    rec F2X | sed 's/^/  /'
+    [[ -n $(rec F2B)$(rec F2X) ]] || echo "  not in the reports of this period"
+    if [[ -n $(rec F2BAN) ]]; then
+      echo "  Banned IPs with earlier successful logins (count, first – last):"
+      rec F2BAN | awk -F'\t' '{printf "  %4d×  %s – %s  %s\n", $1, $2, $3, $4}'
+    fi
+    echo ""; echo "== ACCESS & PERSISTENCE (changes + − ~ and findings !; count, first – last) =="
+    if [[ -n $(rec PERS) ]]; then rec PERS | awk -F'\t' '{printf "  %4d×  %s – %s  %s\n", $1, $2, $3, $4}'
+    else echo "  no change, nothing suspicious"; fi
+
+    summary_daily ACCESS
+    echo ""; echo "######## WEB ########"
     echo ""; echo "== WEB (totals) =="
     echo "requests | 5xx | login POSTs | domain"
     rec WEB | sort -t$'\t' -k1,1nr | head -10 | awk -F'\t' '{printf "  %7d %5d %6d  %s\n", $1, $2, $3, $4}'
@@ -4080,12 +4281,25 @@ write_summary() {   # write_summary OUTFILE – from the local reports of the la
     echo "New in this period: $(rec UPTOT)"
     rec UPLOAD | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
 
-    echo ""; echo "== SUCCESSFUL LOGINS (SSH, Plesk panel; count, first – last) =="
-    rec LOGIN | awk -F'\t' '{printf "  %4d×  %s – %s  %s\n", $1, $2, $3, $4}'
 
-    echo ""; echo "== ACCESS & PERSISTENCE (changes + − ~ and findings !; count, first – last) =="
-    if [[ -n $(rec PERS) ]]; then rec PERS | awk -F'\t' '{printf "  %4d×  %s – %s  %s\n", $1, $2, $3, $4}'
-    else echo "  no change, nothing suspicious"; fi
+    echo ""; echo "== CERTIFICATE RENEWALS (failed Let's Encrypt renewals: count, domain, first – last, reason) =="
+    if [[ -n $(rec CERT) ]]; then rec CERT | sort -t$'\t' -k1,1nr | awk -F'\t' '{printf "  %4d×  %s  %s – %s  %s\n", $1, $2, $3, $4, $5}'
+    else echo "  none"; fi
+    summary_daily WEB
+    echo ""; echo "######## SYSTEM ########"
+    echo ""; echo "== LOAD, CPU, RAM, FILESYSTEMS =="
+    rec SYS | awk -F'\t' '{printf "Highest 5-min load: %s (%s) on %s cores | lowest available RAM: %s %% (%s)\n", $1, $2, $3, $4, $5}'
+    echo "Highest CPU per system user (snapshots):"
+    rec CPU | sort -t$'\t' -k1,1nr | head -5 | awk -F'\t' '{printf "  %6s %%  %s (%s)\n", $1, $2, $3}'
+    echo "Filesystems (highest usage):"
+    rec DISK | sort -t$'\t' -k1,1nr | awk -F'\t' '{printf "  %4s%%  %s\n", $1, $2}'
+    echo ""; echo "== SERVICES =="
+    if [[ -n $(rec SVC) ]]; then echo "Failed services / OOM killer / crashes:"; rec SVC | awk -F'\t' '{printf "  %s  %s\n", $1, $2}'
+    else echo "Failed services / OOM killer / crashes: none in any run"; fi
+    echo ""; echo "== BACKUPS (newest report) =="
+    if [[ -n $(rec BKP) ]]; then rec BKP | sed 's/^/  /'; else echo "  not in the reports of this period"; fi
+
+    summary_daily SYSTEM
 
     echo ""; echo "Newest report: $(basename "$newest")"
   } >"$outf"
@@ -4427,9 +4641,9 @@ is always reported). Processes are not stored – they are checked live in every
 | File | Content |
 |---|---|
 | `daily_date` | the day (YYYY-MM-DD), the script version, a checksum of the script and its configuration file, the time of the package database and the boot ID of the last daily checks – they run in the first run of a new day, and right after the script or the configuration file changed, packages were installed or the server was rebooted (so an installed update, and "reboot required" after the reboot, leave the report at once). Delete it to run them again in the next run. |
-| `daily.txt` | their output, repeated in every report of that day under DAILY CHECKS. |
+| `daily.txt` | their output, repeated in every report of that day – each check's text at the end of its theme (MAIL, ACCESS, WEB, SYSTEM). |
 | `daily_alerts.txt` | their alerts, repeated in every report of that day. |
-| `daily_json.txt` | only with `JSON_REPORT=1`: the check of each daily alert and where each check's text is in `daily.txt`, for the JSON report. |
+| `daily_index.txt` | the check of each daily alert and where each check's text is in `daily.txt`: for the theme they are shown under (and for the JSON report). Up to 1.20.0 `daily_json.txt`, only with `JSON_REPORT=1`. |
 | `php_domains` | `domain version state` | daily check of PHP versions: each domain's PHP version and whether it had security support (`ok`, `soon`, `eol`) at the last check. A domain that is `eol` now and wasn't before raises "PHP: … now use a PHP version without security support". Deleted: the first check after that names every domain without support once. |
 | `php_eol` | `version=date` | the end of security support of each PHP version, from php.net's list of branches, fetched at most once a day (`PHP_EOL_ONLINE=0`: never). Kept when php.net can't be reached; deleted: fetched again. |
 
@@ -5164,10 +5378,10 @@ main() {
     # shellcheck disable=SC2086  # a list of check names, one argument each – split on purpose
     [[ -n $hourly ]] && run_hourly $hourly
     if [[ -n $daily ]]; then
-      DALERTS=$TMPD/daily_alerts; DAILY_TEXT=$BODY; DJSON=$TMPD/daily_json
-      section "DAILY CHECKS"
+      DALERTS=$TMPD/daily_alerts; DAILY_TEXT=""; DJSON=$TMPD/daily_index
       # shellcheck disable=SC2086  # a list of check names, one argument each – split on purpose
-      DAILY_OUT=$BODY run_daily $daily >>"$BODY" 2>/dev/null
+      DAILY_OUT=$TMPD/daily.txt run_daily $daily >"$TMPD/daily.txt" 2>/dev/null
+      daily_parts "$TMPD/daily.txt" "$DJSON"
       replay_daily_alerts
     fi
     timeout_alerts

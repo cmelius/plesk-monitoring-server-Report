@@ -13,9 +13,10 @@ setup() {
 }
 
 @test "second run of the day: the cached daily checks" {
-  daily_checks; : >"$BODY"; daily_checks
+  daily_checks; rm -rf "$TMPD/parts"; daily_checks; assemble_body
   [ "$(wc -l <"$RUNS")" -eq 1 ]
   grep -q 'Updates available: 1' "$BODY"
+  grep -q '^== SYSTEM – daily checks' "$BODY"
 }
 
 @test "after apt upgrade (package database changed): the daily checks run again" {

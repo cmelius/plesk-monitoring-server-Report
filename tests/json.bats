@@ -28,8 +28,8 @@ jq_py() { python3 -c "import json, sys; d = json.load(open(sys.argv[1])); print(
   # the same state directory for both runs: the report names it
   JSON_REPORT=0; one_run "$BATS_TEST_TMPDIR/s"; mv "$BATS_TEST_TMPDIR/s" "$BATS_TEST_TMPDIR/a"
   JSON_REPORT=1; one_run "$BATS_TEST_TMPDIR/s"
-  # the daily checks print the time they ran ("As of:"), which may differ by a minute
-  diff <(grep -Ev '^(As of:|Run time:|Daily checks took )' "$BATS_TEST_TMPDIR/a/out/report.txt") <(grep -Ev '^(As of:|Run time:|Daily checks took )' "$BATS_TEST_TMPDIR/s/out/report.txt")
+  # the daily checks show the time they ran ("as of"), which may differ by a minute
+  diff <(grep -Ev '^(As of:|Run time:|Daily checks took |== .* – daily checks)' "$BATS_TEST_TMPDIR/a/out/report.txt") <(grep -Ev '^(As of:|Run time:|Daily checks took |== .* – daily checks)' "$BATS_TEST_TMPDIR/s/out/report.txt")
   [ ! -e "$BATS_TEST_TMPDIR/a/out/report.json" ]
   [ -s "$BATS_TEST_TMPDIR/s/out/report.json" ]
 }
@@ -51,7 +51,9 @@ jq_py() { python3 -c "import json, sys; d = json.load(open(sys.argv[1])); print(
   run jq_py "$f" '[(a["check"], a["daily"]) for a in d["alerts"] if a["text"] == "Dummy: something daily"]'
   [ "$output" = "[('dummy', True)]" ]
   run jq_py "$f" '[(s["check"], s["title"]) for s in d["sections"]][:2]'
-  [ "$output" = "[('mail', 'MAIL'), ('web', 'WEB')]" ] || [[ $output == "[('mail', 'MAIL'), ('web', 'WEB "* ]]
+  [ "$output" = "[('mail', 'MAIL: delivery & spam filter'), ('mail', 'MAIL: senders & logins')]" ]
+  run jq_py "$f" '[s["title"] for s in d["sections"] if s["check"] == "web"]'
+  [[ $output == "['WEB "* ]]
   run jq_py "$f" '[s["lines"] for s in d["sections"] if s["check"] == "dummy"]'
   [ "$output" = "[['Dummy daily: 2 things']]" ]
   # the newest JSON report is also out/latest.json
@@ -84,15 +86,15 @@ jq_py() { python3 -c "import json, sys; d = json.load(open(sys.argv[1])); print(
   [ ! -e "$BATS_TEST_TMPDIR/b/out/latest.json" ]
 }
 
-@test "daily checks cached without JSON (switched on by --json): one section 'daily'" {
+@test "daily checks cached without JSON (switched on by --json): each keeps its check" {
   JSON_REPORT=0; one_run "$BATS_TEST_TMPDIR/b"
   JSON_REPORT=1; one_run "$BATS_TEST_TMPDIR/b"
   f=$BATS_TEST_TMPDIR/b/out/report.json
   json_ok "$f"
   run jq_py "$f" '[(a["check"], a["daily"]) for a in d["alerts"] if a["text"] == "Dummy: something daily"]'
-  [ "$output" = "[('daily', True)]" ]
+  [ "$output" = "[('dummy', True)]" ]
   run jq_py "$f" '[s["check"] for s in d["sections"] if s["daily"]]'
-  [ "$output" = "['daily']" ]
+  [ "$output" = "['dummy']" ]
 }
 
 @test "hostile text (quotes, backslashes, tabs, control characters, broken UTF-8) stays valid JSON" {
