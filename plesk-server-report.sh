@@ -2089,7 +2089,10 @@ check_persistence() {   # SSH keys, accounts, sudo, cron/autostart, suspicious p
       out "Listening TCP ports (not loopback): ${ports:-none}$(persist_first_note "$first")"
       while IFS=$'\t' read -r k v; do
         if (( ! first )) && [[ -z ${oldp[$k]+x} ]]; then
-          persist_finding + "listening port $k ($v)" "Ports: new listening TCP port $k ($v) – started by you?"
+          if [[ $k == 8447 && $v == autoinstaller ]]; then
+            # the Plesk installer listens only while Updates is open in the panel – back every time
+            persist_finding + "listening port $k ($v) – the Plesk installer, runs while it is used (no alert)"
+          else persist_finding + "listening port $k ($v)" "Ports: new listening TCP port $k ($v) – started by you?"; fi
         fi
         unset 'oldp[$k]'
       done <"$TMP.o"
@@ -2947,7 +2950,7 @@ fw_reach() {
 }
 fw_from() { if [[ $1 == all ]]; then echo everywhere; else echo "everywhere except ${1#all except: }"; fi; }
 check_firewall() {
-  local ss_out fw="" e svc cls port name addrs ext reach now a loc
+  local ss_out fw="" e svc cls port name addrs ext reach a loc
   echo ""
   if ! command -v ss >/dev/null; then echo "Reachable from outside: ss not found – not checked"; return 0; fi
   ss_out=$(T "$CMD_TIMEOUT" ss -ltnH 2>/dev/null || T "$CMD_TIMEOUT" ss -ltn 2>/dev/null)
@@ -2984,20 +2987,19 @@ check_firewall() {
     esac
   done
   if command -v plesk >/dev/null; then
-    now="not running right now"; [[ -n $(fw_listen 8447 <<<"$ss_out") ]] && now="running right now"
     if [[ -z $fw ]]; then
-      echo "  Plesk installer (8447, $now): Plesk Firewall not enabled or not installed – not checked"
+      echo "  Plesk installer (8447, runs only while used): Plesk Firewall not enabled or not installed – not checked"
     else
       reach=$(fw_reach autoinstaller)
       case $reach in
         all|"all except:"*)
-          echo "  Plesk installer (8447, $now): the firewall allows it from $(fw_from "$reach")"
+          echo "  Plesk installer (8447, runs only while used): the firewall allows it from $(fw_from "$reach")"
           (( WARN_INSTALLER_OPEN )) && {
             echo "  Recommendation: allow it only from your own addresses (Tools & Settings → Firewall → Plesk installer), or update"
             echo "  over SSH with plesk installer and block the port – it runs only while used, but then anyone can reach its login"; } ;;
-        none)   echo "  Plesk installer (8447, $now): the firewall blocks it (updates over SSH: plesk installer)" ;;
-        only:*) echo "  Plesk installer (8447, $now): the firewall allows it ${reach/only:/only from}" ;;
-        *)      echo "  Plesk installer (8447, $now): no firewall rule found" ;;
+        none)   echo "  Plesk installer (8447, runs only while used): the firewall blocks it (updates over SSH: plesk installer)" ;;
+        only:*) echo "  Plesk installer (8447, runs only while used): the firewall allows it ${reach/only:/only from}" ;;
+        *)      echo "  Plesk installer (8447, runs only while used): no firewall rule found" ;;
       esac
     fi
   fi
@@ -4069,7 +4071,7 @@ is always reported). Processes are not stored – they are checked live in every
 | `baseline/access` | `kind name details` | accounts with a login shell or UID 0, members of the groups `sudo`, `wheel` and `admin`, the sudoers files with a checksum, and – only if the file exists, which it normally doesn't – what `/etc/ld.so.preload` loads. New or changed entries raise an alert. |
 | `baseline/cron` | `line where cron-line` or `file path checksum` | the cron jobs of all accounts and of the system (passwords in them masked), and checksums of the autostart files (`/etc/cron.hourly` … `monthly`, `rc.local`, systemd units in `/etc/systemd/system`). New entries are listed; suspicious ones and new entries of root or the system raise an alert. |
 | `baseline/addrs` | `address interface` | the server's global IPv4 and IPv6 addresses. A new public address raises "Network: new public address …" – e.g. IPv6 switched on by the hosting provider; private addresses are listed without alert. |
-| `baseline/ports` | `port process` | TCP ports listening on an address other than loopback. A new port number raises "Ports: new listening TCP port …"; the process name is information only (processes sharing a socket take turns, e.g. Postfix `master` and `smtpd`). |
+| `baseline/ports` | `port process` | TCP ports listening on an address other than loopback. A new port number raises "Ports: new listening TCP port …" – except 8447 of the Plesk installer (`autoinstaller`), which listens only while it is used; the process name is information only otherwise (processes sharing a socket take turns, e.g. Postfix `master` and `smtpd`). |
 
 ## Pseudonyms (only with `MASK_MAILBOXES=1`)
 

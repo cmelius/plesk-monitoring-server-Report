@@ -224,3 +224,20 @@ base() {
   [[ $output != *999904* ]]
   [ "$(cat "$TMPD/procs_readable")" -eq 4 ]
 }
+
+@test "persistence: the Plesk installer on 8447 is listed without alert, another program on 8447 is not" {
+  psetup; base
+  check_persistence; newrun
+  listen 0.0.0.0:8447 autoinstaller
+  check_persistence
+  run report
+  [[ $output == *"  + listening port 8447 (autoinstaller) – the Plesk installer, runs while it is used (no alert)"* ]]
+  run alerts
+  [[ $output != *"8447"* ]]
+  psetup; base
+  check_persistence; newrun
+  listen 0.0.0.0:8447 nc
+  check_persistence
+  run alerts
+  [[ $output == *"Ports: new listening TCP port 8447 (nc) – started by you?"* ]]
+}

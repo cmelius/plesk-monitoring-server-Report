@@ -63,7 +63,7 @@ listen() {   # listen ADDRESS:PORT … – ss output with these listening socket
   [[ $output == *"Reachable from outside (databases, Plesk installer) – rules of the Plesk Firewall:"* ]]
   [[ $output == *"MySQL/MariaDB (3306): listens only locally (127.0.0.1) – not reachable from outside"* ]]
   [[ $output == *"PostgreSQL (5432): not listening"* ]]
-  [[ $output == *"Plesk installer (8447, not running right now): the firewall allows it from everywhere"* ]]
+  [[ $output == *"Plesk installer (8447, runs only while used): the firewall allows it from everywhere"* ]]
   [[ $output == *"Recommendation: allow it only from your own addresses"* ]]
   [[ $output == *"not visible from here"* ]]
   run alerts
@@ -75,7 +75,7 @@ listen() {   # listen ADDRESS:PORT … – ss output with these listening socket
   listen 0.0.0.0:8447
   check_firewall >"$BODY"
   run report
-  [[ $output == *"Plesk installer (8447, running right now): the firewall allows it from everywhere"* ]]
+  [[ $output == *"Plesk installer (8447, runs only while used): the firewall allows it from everywhere"* ]]
   [[ $output != *"Recommendation"* ]]
 }
 
@@ -83,7 +83,7 @@ listen() {   # listen ADDRESS:PORT … – ss output with these listening socket
   rule autoinstaller allow 198.51.100.7
   check_firewall >"$BODY"
   run report
-  [[ $output == *"Plesk installer (8447, not running right now): the firewall allows it only from 198.51.100.7"* ]]
+  [[ $output == *"Plesk installer (8447, runs only while used): the firewall allows it only from 198.51.100.7"* ]]
   [[ $output != *"Recommendation"* ]]
   rule autoinstaller deny ""
   : >"$BODY"; check_firewall >"$BODY"
@@ -143,7 +143,7 @@ listen() {   # listen ADDRESS:PORT … – ss output with these listening socket
   run report
   [[ $output == *"Reachable from outside (databases, Plesk installer):"* ]]
   [[ $output == *"listens on 0.0.0.0 – firewall not checked (no Plesk Firewall): make sure port 3306 is filtered"* ]]
-  [[ $output == *"Plesk installer (8447, not running right now): Plesk Firewall not enabled or not installed – not checked"* ]]
+  [[ $output == *"Plesk installer (8447, runs only while used): Plesk Firewall not enabled or not installed – not checked"* ]]
   run alerts
   [ -z "$output" ]
 }
