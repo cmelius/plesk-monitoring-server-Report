@@ -39,7 +39,8 @@ setup() { load_script; }
   check_slowb() { SECONDS=$(( SECONDS + 7 )); echo b; }
   check_quick() { echo q; }
   run run_daily slowa quick slowb
-  [[ $output == *"Daily checks took 1 min 42 s (slowest: slowa 95 s, slowb 7 s)"* ]]
+  # real time passes too: a second boundary crossed during the run adds one
+  [[ $output =~ "Daily checks took 1 min 4"[23]" s (slowest: slowa 95 s, slowb 7 s)" ]]
   run fmt_dur 42
   [[ $output == "42 s" ]]
 }
