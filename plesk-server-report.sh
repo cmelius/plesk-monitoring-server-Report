@@ -249,7 +249,8 @@ DAILY_CHECKS="updates kmodules firewall sshusers php certificates https serverdn
 # The report is ordered by theme, not by check: each theme has the sections of its hourly checks
 # (in this order), then one block with the newest results of its daily checks. The alerts at the
 # top are grouped the same way. "certrenew" is the part of the panel check about Let's Encrypt.
-# A check not listed here (none so far) goes to SYSTEM.
+# A NEW CHECK MUST BE ADDED TO ONE OF THESE LISTS – tests/themes.bats fails otherwise (at run time
+# an unlisted check would land under SYSTEM).
 THEMES="MAIL ACCESS WEB SYSTEM"
 # shellcheck disable=SC2034  # read by name: ${!v} with v=THEME_<theme>
 THEME_MAIL="mail webmail serverdns mailtls mailauth mailboxes forwarding"

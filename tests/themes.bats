@@ -84,3 +84,18 @@ headings() { grep -E '^(######## |== )' "$REPORT"; }
   sed -n '/^== ALERTS/,/^$/p' "$f" | grep -qx 'ACCESS (1):'
   ! grep -q 'latest.txt' "$f"
 }
+
+@test "every check has exactly one theme (a new check must be added to a THEME_* list)" {
+  local c t v n parts="certrenew"
+  # the lists as in the script (setup() replaces DAILY_CHECKS)
+  eval "$(grep -E '^(HOURLY|DAILY)_CHECKS=' "$BATS_TEST_DIRNAME/../plesk-server-report.sh")"
+  for c in $HOURLY_CHECKS $DAILY_CHECKS $parts; do
+    n=0
+    for t in $THEMES; do v=THEME_$t; [[ " ${!v} " == *" $c "* ]] && n=$((n + 1)); done
+    [ "$n" -eq 1 ] || { echo "check $c is in $n theme lists"; return 1; }
+  done
+  # and no theme lists a check that doesn't exist
+  for t in $THEMES; do v=THEME_$t
+    for c in ${!v}; do [[ " $HOURLY_CHECKS $DAILY_CHECKS $parts " == *" $c "* ]] || { echo "THEME_$t lists unknown check $c"; return 1; }; done
+  done
+}
