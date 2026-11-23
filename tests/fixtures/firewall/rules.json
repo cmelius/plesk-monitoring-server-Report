@@ -1,0 +1,75 @@
+[
+    {
+        "type": "service",
+        "class": "ftp_passive",
+        "direction": "input",
+        "ports": "49152-65535\/tcp",
+        "action": "deny",
+        "originalId": 64,
+        "from": "",
+        "id": 94
+    },
+    {
+        "type": "service",
+        "class": "autoinstaller",
+        "direction": "input",
+        "ports": "8447\/tcp",
+        "action": "allow",
+        "originalId": 61,
+        "id": 95
+    },
+    {
+        "type": "service",
+        "class": "plesk",
+        "direction": "input",
+        "ports": "8443\/tcp,8880\/tcp",
+        "action": "allow",
+        "originalId": 60,
+        "id": 96
+    },
+    {
+        "type": "service",
+        "class": "ssh",
+        "direction": "input",
+        "ports": "22\/tcp",
+        "action": "allow",
+        "originalId": 57,
+        "id": 99
+    },
+    {
+        "type": "service",
+        "class": "mysql",
+        "direction": "input",
+        "ports": "3306\/tcp",
+        "action": "deny",
+        "originalId": 51,
+        "from": "",
+        "id": 105
+    },
+    {
+        "type": "service",
+        "class": "postgresql",
+        "direction": "input",
+        "ports": "5432\/tcp",
+        "action": "deny",
+        "from": "",
+        "originalId": 50,
+        "id": 106
+    },
+    {
+        "type": "catchall",
+        "class": "catchall",
+        "direction": "input",
+        "action": "deny",
+        "originalId": 45,
+        "id": 111
+    },
+    {
+        "type": "catchall",
+        "class": "catchall",
+        "direction": "output",
+        "action": "allow",
+        "originalId": 65,
+        "id": 112
+    }
+]

@@ -207,6 +207,10 @@ IGNORE_CRASHES=""             # space-separated programs (nginx, plesk-panel, ap
 # Daily: kernel modules of rarely used network protocols – any process can load them by opening a
 # socket, and their bugs were the way to root more than once. Loaded → warning, loadable → recommendation
 RARE_MODULES="sctp dccp tipc rds"   # "" = check off
+# Daily: databases (MySQL/MariaDB, PostgreSQL) and the Plesk installer reachable from outside – what
+# listens on which address, and what the Plesk Firewall allows. A database open to everyone → warning
+FIREWALL_CHECK=1              # 0 = off
+WARN_INSTALLER_OPEN=1         # Plesk installer (port 8447) allowed from everywhere: 1 = recommendation, 0 = only the line
 # Known legitimate PHP files inside wp-content/uploads (regex on the full path)
 UPLOADS_PHP_IGNORE='/uploads/mailchimp-for-wp/debug-log\.php$'
 
@@ -232,7 +236,7 @@ SYS_BIN_RE='^(/usr/local/sbin|/usr/local/bin|/usr/sbin|/usr/bin|/sbin|/bin)$'   
 # Check names in report order. Hourly checks analyse the log lines since the previous run,
 # daily checks run once a day and are cached in $STATE_DIR/daily.txt.
 HOURLY_CHECKS="mail webmail system fail2ban web uploads logins panel persistence services backups"
-DAILY_CHECKS="updates kmodules certificates https serverdns mailtls domaindns exposed webshell mailauth mailboxes forwarding rclocal"
+DAILY_CHECKS="updates kmodules firewall certificates https serverdns mailtls domaindns exposed webshell mailauth mailboxes forwarding rclocal"
 
 # =============================================================================
 # Helper functions
@@ -2904,6 +2908,102 @@ check_rclocal() {
   (( WARN_RC_LOCAL )) && dalert "rc.local: $RC_LOCAL runs $n command line(s) at boot${f:+ (and failed)} – deprecated, and not the default on any current distribution: find out what added it (an old installer, an online guide?) and move the commands to a systemd unit (README: Notes); WARN_RC_LOCAL=0 keeps only the report line"
   return 0
 }
+# Reachable from outside: database servers and the Plesk installer. A database that listens on all
+# addresses and is not filtered can be attacked directly (password guessing, bugs of the server);
+# Plesk only opens it with "Allow local MySQL server to accept external connections". The Plesk
+# installer (port 8447) runs only while it is used, but Plesk's firewall allows it from everywhere by
+# default. Reads what listens (ss) and the rules of the Plesk Firewall (plesk ext firewall --list-json):
+# a rule's "from" holds the selected sources – none: the action applies to everyone; some: the action
+# applies to them, the opposite to everyone else. A firewall in front of the server (at the hosting
+# provider) is not visible from here. Read only.
+FW_SERVICES="mysql:3306:MySQL/MariaDB postgresql:5432:PostgreSQL"   # Plesk Firewall class:port:name
+fw_listen() {   # fw_listen PORT – the local addresses with a TCP socket listening on PORT (ss on stdin)
+  awk -v port="$1" '$1 == "LISTEN" { a = $4; p = a; sub(/.*:/, "", p); h = a; sub(/:[^:]*$/, "", h)
+    if (p == port && !(h in seen)) { seen[h] = 1; print h } }'
+}
+fw_loopback() { [[ $1 =~ ^(127\.|\[?::1\]?$|\[?::ffff:127\.) || $1 == *%lo ]]; }
+fw_rules() {   # Plesk Firewall rules (JSON on stdin) → "class TAB direction TAB action TAB from", one per rule
+  tr '\n' ' ' | awk 'BEGIN { RS = "}" }
+    function val(k,   v) { if (!match($0, "\"" k "\" *: *(\"[^\"]*\"|\\[[^]]*\\])")) return ""
+      v = substr($0, RSTART, RLENGTH); sub(/^"[^"]*" *: */, "", v); gsub(/[]["]/, "", v); gsub(/\\\//, "/", v)
+      gsub(/ *, */, ", ", v); sub(/^ +/, "", v); sub(/ +$/, "", v); return v }
+    { c = val("class"); if (c != "") print c "\t" val("direction") "\t" val("action") "\t" val("from") }'
+}
+# fw_reach CLASS – "all", "none", "only: SOURCES" or "all except: SOURCES" from the rule of CLASS
+# (else the catch-all input rule) in $FW_RULES; nothing without a rule
+fw_reach() {
+  local r act from
+  r=$(awk -F'\t' -v c="$1" '$1 == c && $2 == "input" { print; f = 1; exit }
+    END { if (!f) exit 1 }' <<<"$FW_RULES") ||
+    r=$(awk -F'\t' '$1 == "catchall" && $2 == "input" { print; exit }' <<<"$FW_RULES")
+  [[ -n $r ]] || return 0
+  IFS=$'\t' read -r _ _ act from <<<"$r"
+  case $act/${from:+list} in
+    allow/)     echo all ;;
+    deny/)      echo none ;;
+    allow/list) echo "only: $from" ;;
+    deny/list)  echo "all except: $from" ;;
+  esac
+}
+fw_from() { if [[ $1 == all ]]; then echo everywhere; else echo "everywhere except ${1#all except: }"; fi; }
+check_firewall() {
+  local ss_out fw="" e svc cls port name addrs ext reach now a loc
+  echo ""
+  if ! command -v ss >/dev/null; then echo "Reachable from outside: ss not found – not checked"; return 0; fi
+  ss_out=$(T "$CMD_TIMEOUT" ss -ltnH 2>/dev/null || T "$CMD_TIMEOUT" ss -ltn 2>/dev/null)
+  FW_RULES=""
+  if command -v plesk >/dev/null; then
+    e=$(T "$CMD_TIMEOUT" plesk ext firewall --is-enabled 2>/dev/null | tr -d '[:space:]')
+    if [[ $e == enabled ]]; then
+      FW_RULES=$(T "$CMD_TIMEOUT" plesk ext firewall --list-json 2>/dev/null | fw_rules)
+      [[ -n $FW_RULES ]] && fw="Plesk Firewall"
+    fi
+  fi
+  e="databases"; command -v plesk >/dev/null && e+=", Plesk installer"
+  echo "Reachable from outside ($e)${fw:+ – rules of the $fw}:"
+  for svc in $FW_SERVICES; do
+    IFS=: read -r cls port name <<<"$svc"
+    addrs=$(fw_listen "$port" <<<"$ss_out")
+    if [[ -z $addrs ]]; then echo "  $name ($port): not listening"; continue; fi
+    ext=""; loc=""
+    while IFS= read -r a; do if fw_loopback "$a"; then loc+="${loc:+, }$a"; else ext+="${ext:+, }$a"; fi; done <<<"$addrs"
+    if [[ -z $ext ]]; then echo "  $name ($port): listens only locally ($loc) – not reachable from outside"; continue; fi
+    reach=""; [[ -n $fw ]] && reach=$(fw_reach "$cls")
+    case $reach in
+      none)  echo "  $name ($port): listens on $ext, the firewall blocks it – Recommendation: let it listen only locally, if no application connects from outside" ;;
+      only:*) echo "  $name ($port): listens on $ext, the firewall allows it ${reach/only:/only from}" ;;
+      all|"all except:"*)
+        echo "  $name ($port): listens on $ext, the firewall allows it from $(fw_from "$reach") – reachable from the internet"
+        if [[ $cls == mysql ]]; then
+          echo "  Recommendation: if no application connects from outside, let it listen only locally (Plesk: Tools & Settings → Database Servers"
+          echo "  → Settings: untick \"Allow local MySQL server to accept external connections\"), else allow only the addresses that need it"
+        else echo "  Recommendation: if no application connects from outside, let it listen only locally, else allow only the addresses that need it"; fi
+        dalert "Database: $name listens on $ext and the firewall allows port $port from everywhere – reachable from the internet (password guessing, server bugs); let it listen only locally, or allow only the addresses that need it" ;;
+      *) if [[ -n $fw ]]; then e="no rule for it in the Plesk Firewall"; else e="firewall not checked (no Plesk Firewall)"; fi
+         echo "  $name ($port): listens on $ext – $e: make sure port $port is filtered, if no application connects from outside" ;;
+    esac
+  done
+  if command -v plesk >/dev/null; then
+    now="not running right now"; [[ -n $(fw_listen 8447 <<<"$ss_out") ]] && now="running right now"
+    if [[ -z $fw ]]; then
+      echo "  Plesk installer (8447, $now): Plesk Firewall not enabled or not installed – not checked"
+    else
+      reach=$(fw_reach autoinstaller)
+      case $reach in
+        all|"all except:"*)
+          echo "  Plesk installer (8447, $now): the firewall allows it from $(fw_from "$reach")"
+          (( WARN_INSTALLER_OPEN )) && {
+            echo "  Recommendation: allow it only from your own addresses (Tools & Settings → Firewall → Plesk installer), or update"
+            echo "  over SSH with plesk installer and block the port – it runs only while used, but then anyone can reach its login"; } ;;
+        none)   echo "  Plesk installer (8447, $now): the firewall blocks it (updates over SSH: plesk installer)" ;;
+        only:*) echo "  Plesk installer (8447, $now): the firewall allows it ${reach/only:/only from}" ;;
+        *)      echo "  Plesk installer (8447, $now): no firewall rule found" ;;
+      esac
+    fi
+  fi
+  echo "  (a firewall in front of the server, e.g. at the hosting provider, is not visible from here)"
+  return 0
+}
 # Mail forwarding to other providers (Plesk). A forwarded spam mail leaves from this server: Gmail,
 # Microsoft & co. rate this server's IP for it and throttle or reject its mail – for every customer.
 # Plesk runs the spam filter before forwarding (tested with a blocklisted sender): spam that is deleted
@@ -3042,6 +3142,7 @@ check_enabled() {
     https)     (( HTTPS_CHECK )) ;;
     persistence) (( PERSISTENCE_CHECK )) ;;
     kmodules)  [[ -n ${RARE_MODULES// /} ]] ;;
+    firewall)  (( FIREWALL_CHECK )) ;;
     *) return 0 ;;
   esac
 }

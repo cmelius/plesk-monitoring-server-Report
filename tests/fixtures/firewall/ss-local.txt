@@ -1,0 +1,4 @@
+State  Recv-Q Send-Q Local Address:Port  Peer Address:Port Process
+LISTEN 0      80         127.0.0.1:3306       0.0.0.0:*    users:(("mariadbd",pid=824,fd=127))
+LISTEN 0      64                 *:21               *:*    users:(("xinetd",pid=1077,fd=5))
+LISTEN 0      511          0.0.0.0:443        0.0.0.0:*    users:(("nginx",pid=900,fd=8))
