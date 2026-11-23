@@ -351,9 +351,9 @@ SSH access of Plesk system users (group psacln, 31 accounts):
   keys of deputy: /etc/ssh/authorized_keys/deputy – not changeable by deputy
 
 PHP versions (security support per https://www.php.net; domains with PHP: 36):
-  8.3 – no domain, but the default of 2 service plan(s): Unlimited (reseller reseller1), Default Domain (reseller reseller2) – supported until 2027-12-31 (php.net)
-  8.4 – 35 domain(s), supported until 2028-12-31 (php.net)
-  8.5 – 1 domain(s), supported until 2029-12-31 (php.net)
+  8.3 (8.3.37) – no domain, but the default of 2 service plan(s): Unlimited (reseller reseller1), Default Domain (reseller reseller2) – supported until 2027-12-31 (php.net)
+  8.4 (8.4.28) – 35 domain(s), supported until 2028-12-31 (php.net)
+  8.5 (8.5.13) – 1 domain(s), supported until 2029-12-31 (php.net)
 
 TLS certificates:
   all valid certificates are good for at least 14 more days

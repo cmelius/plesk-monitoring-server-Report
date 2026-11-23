@@ -31,10 +31,10 @@ setup() {
   check_php >"$BODY"
   run report
   [[ $output == *"PHP versions (security support per https://www.php.net; domains with PHP: 3):"* ]]
-  [[ $output == *"8.4 – 2 domain(s), supported until 2028-12-31 (php.net)"* ]]
-  [[ $output == *"8.5 – 1 domain(s), supported until 2029-12-31 (php.net)"* ]]
-  [[ $output == *"8.3 – no domain, but the default of 2 service plan(s): Unlimited (reseller reseller1), Default Domain (reseller reseller2) – supported until 2027-12-31 (php.net)"* ]]
-  [[ $output == *"7.4 – installed, used by no domain and no service plan – WITHOUT security support since 2022-11-28 (php.net)"* ]]
+  [[ $output == *"8.4 (8.4.28) – 2 domain(s), supported until 2028-12-31 (php.net)"* ]]
+  [[ $output == *"8.5 (8.5.13) – 1 domain(s), supported until 2029-12-31 (php.net)"* ]]
+  [[ $output == *"8.3 (8.3.37) – no domain, but the default of 2 service plan(s): Unlimited (reseller reseller1), Default Domain (reseller reseller2) – supported until 2027-12-31 (php.net)"* ]]
+  [[ $output == *"7.4 (7.4.33) – installed, used by no domain and no service plan – WITHOUT security support since 2022-11-28 (php.net)"* ]]
   [[ $output == *"Recommendation: remove it"* ]]
   run alerts
   [[ $output != *"PHP:"* ]]
@@ -44,7 +44,7 @@ setup() {
   printf 'a.example\tplesk-php84-fpm-dedicated\nold.example\tfpm\n' >"$BATS_TEST_TMPDIR/d.txt"; DOMS="$BATS_TEST_TMPDIR/d.txt"
   check_php >"$BODY"
   run report
-  [[ $output == *"7.4 – 1 domain(s), WITHOUT security support since 2022-11-28 (php.net): old.example"* ]]
+  [[ $output == *"7.4 (7.4.33) – 1 domain(s), WITHOUT security support since 2022-11-28 (php.net): old.example"* ]]
   run alerts
   [[ $output == *"PHP: 1 domain(s) now use a PHP version without security support: old.example (7.4)"* ]]
   : >"$BODY"; rm -f "$DALERTS"
@@ -78,7 +78,7 @@ setup() {
   printf 'a.example\tplesk-php85-fpm\nb.example\tplesk-php87-fpm\nc.example\tplesk-php90-fpm\n' >"$BATS_TEST_TMPDIR/d.txt"; DOMS="$BATS_TEST_TMPDIR/d.txt"
   check_php >"$BODY"
   run report
-  [[ $output == *"8.5 – 1 domain(s), supported until 2030-06-30 (PHP_EOL)"* ]]
+  [[ $output == *"8.5 (8.5.13) – 1 domain(s), supported until 2030-06-30 (PHP_EOL)"* ]]
   [[ $output == *"8.7 – 1 domain(s), supported until 2031-12-31 (estimated)"* ]]
   [[ $output == *"9.0 – 1 domain(s), support end unknown"* ]]
   [[ $output == *'add it to PHP_EOL, e.g. PHP_EOL="9.0=YYYY-12-31"'* ]]
@@ -96,7 +96,7 @@ setup() {
   curl() { echo called >"$BATS_TEST_TMPDIR/called"; }
   run check_php
   [ ! -e "$BATS_TEST_TMPDIR/called" ]
-  [[ $output == *"8.4 – 2 domain(s), supported until 2028-12-31 (built-in)"* ]]
+  [[ $output == *"8.4 (8.4.28) – 2 domain(s), supported until 2028-12-31 (built-in)"* ]]
 }
 
 @test "a broken answer from php.net is not used" {

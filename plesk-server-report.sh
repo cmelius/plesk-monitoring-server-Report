@@ -3135,7 +3135,8 @@ php_join() {   # php_join MAX – stdin lines joined with ", ", the first MAX an
 }
 check_php() {
   local today handlers doms plans v st e src f="$STATE_DIR/php_domains" d h n line out=""
-  local -A hver=() dcount=() dlist=() plan=() installed=() now=() prev=()
+  local -A hver=() hfull=() dcount=() dlist=() plan=() installed=() now=() prev=()
+  local vv fv
   today=$(date +%F)
   php_eol_load
   echo ""
@@ -3149,9 +3150,13 @@ check_php() {
   fi
   # handler id → version, installed handlers (enabled ones count as installed)
   handlers=$(T "$CMD_TIMEOUT" plesk bin php_handler --list 2>/dev/null)
-  while read -r h v; do   # the id, then the first column that is only "major.minor" (the display name may have spaces)
-    hver[$h]=$v; installed[$v]=1
-  done < <(awk '{ for (i = 2; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+$/) { print $1, $i; break } }' <<<"$handlers")
+  # the id, the first column that is only "major.minor" (the display name may have spaces) and the
+  # full version (first "major.minor.patch")
+  while read -r h v fv; do
+    hver[$h]=$v; installed[$v]=1; [[ -n $fv && -z ${hfull[$v]:-} ]] && hfull[$v]=$fv
+  done < <(awk '{ v = ""; f = ""
+      for (i = 2; i <= NF; i++) { if (v == "" && $i ~ /^[0-9]+\.[0-9]+$/) v = $i; if (f == "" && $i ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) f = $i }
+      if (v != "") print $1, v, f }' <<<"$handlers")
   doms=$(T "$CMD_TIMEOUT" plesk db -Ne "SELECT d.name, h.php_handler_id FROM domains d JOIN hosting h ON h.dom_id = d.id WHERE h.php = 'true'" 2>/dev/null)
   plans=$(T "$CMD_TIMEOUT" plesk db -Ne "SELECT t.name, c.type, c.login, td.value FROM Templates t JOIN TmplData td ON td.tmpl_id = t.id LEFT JOIN clients c ON c.id = t.owner_id WHERE td.element = 'php_handler_id' AND t.type = 'domain'" 2>/dev/null)
   while IFS=$'\t' read -r d h; do
@@ -3168,16 +3173,16 @@ check_php() {
   done <<<"$plans"
   echo "PHP versions (security support per ${PHP_EOL_URL%%/releases*}; domains with PHP: ${#now[@]}):"
   for v in $(printf '%s\n' "${!dcount[@]}" "${!installed[@]}" "${!plan[@]}" | sort -uV); do
-    e=$(php_eol "$v"); st=$(php_state "$v" "$today")
+    e=$(php_eol "$v"); st=$(php_state "$v" "$today"); vv=$v; [[ -n ${hfull[$v]:-} ]] && vv="$v (${hfull[$v]})"
     if [[ -n ${dcount[$v]:-} ]]; then
-      line="  $v – ${dcount[$v]} domain(s), $(php_say "$st" "$e")"
+      line="  $vv – ${dcount[$v]} domain(s), $(php_say "$st" "$e")"
       [[ $st == eol || $st == soon ]] && line+=": $(sed '/^$/d' <<<"${dlist[$v]}" | sort | php_join 8)"
       echo "$line"
     elif [[ -n ${plan[$v]:-} ]]; then
-      echo "  $v – no domain, but the default of $(grep -c . <<<"${plan[$v]}") service plan(s): $(sed '/^$/d' <<<"${plan[$v]}" | php_join 6) – $(php_say "$st" "$e")"
+      echo "  $vv – no domain, but the default of $(grep -c . <<<"${plan[$v]}") service plan(s): $(sed '/^$/d' <<<"${plan[$v]}" | php_join 6) – $(php_say "$st" "$e")"
       [[ $st == eol || $st == soon ]] && echo "  Recommendation: set a newer PHP version in these plans – new subscriptions get this one"
     else
-      echo "  $v – installed, used by no domain and no service plan – $(php_say "$st" "$e")"
+      echo "  $vv – installed, used by no domain and no service plan – $(php_say "$st" "$e")"
       [[ $st == eol ]] && echo "  Recommendation: remove it (Tools & Settings → Updates → Add/Remove Components)"
     fi
     [[ $st == unknown ]] && echo "  (support end of $v unknown – add it to PHP_EOL, e.g. PHP_EOL=\"$v=YYYY-12-31\")"
