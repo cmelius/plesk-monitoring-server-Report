@@ -66,6 +66,7 @@ listen() {   # listen ADDRESS:PORT … – ss output with these listening socket
   [[ $output == *"PostgreSQL (5432): not listening"* ]]
   [[ $output == *"Plesk installer (8447, runs only while used): the firewall allows it from everywhere"* ]]
   [[ $output == *"Recommendation: allow it only from your own addresses"* ]]
+  [[ $output == *"update over SSH as root: plesk installer --select-release-latest --upgrade-installed-components"* ]]
   [[ $output == *"not visible from here"* ]]
   run alerts
   [ -z "$output" ]
@@ -89,7 +90,7 @@ listen() {   # listen ADDRESS:PORT … – ss output with these listening socket
   rule autoinstaller deny ""
   : >"$BODY"; check_firewall >"$BODY"
   run report
-  [[ $output == *"the firewall blocks it (updates over SSH: plesk installer)"* ]]
+  [[ $output == *"the firewall blocks it (updates over SSH: plesk installer --select-release-latest --upgrade-installed-components)"* ]]
 }
 
 @test "MySQL on all addresses, firewall open to everyone: warning with the Plesk setting" {

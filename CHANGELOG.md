@@ -2,6 +2,11 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
+## [Unreleased]
+
+### Changed
+- **Plesk installer reachable from outside:** the recommendation, the report line for a blocked port and the README now give the full command for updates over SSH, Plesk's own: `plesk installer --select-release-latest --upgrade-installed-components` (instead of only `plesk installer`).
+
 ## [1.21.0] – 2026-11-24
 
 New checks suggested on the Plesk forum – databases and the installer reachable from outside, SSH access of the Plesk system users, PHP versions without security support. And after a lot of changes in the last weeks – added one by one, not always in the right place – it was time to clean up the structure of the reports: they are now ordered by theme, and `summary.txt` alone is enough for a daily review. 1.20.0 and 1.20.1 were never released; their changes are all in here.

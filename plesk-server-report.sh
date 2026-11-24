@@ -3335,9 +3335,10 @@ check_firewall() {
         all|"all except:"*)
           echo "  Plesk installer (8447, runs only while used): the firewall allows it from $(fw_from "$reach")"
           (( WARN_INSTALLER_OPEN )) && {
-            echo "  Recommendation: allow it only from your own addresses (Tools & Settings → Firewall → Plesk installer), or update"
-            echo "  over SSH with plesk installer and block the port – it runs only while used, but then anyone can reach its login"; } ;;
-        none)   echo "  Plesk installer (8447, runs only while used): the firewall blocks it (updates over SSH: plesk installer)" ;;
+            echo "  Recommendation: allow it only from your own addresses (Tools & Settings → Firewall → Plesk installer), or block it"
+            echo "  and update over SSH as root: plesk installer --select-release-latest --upgrade-installed-components"
+            echo "  (it runs only while used, but then anyone can reach its login)"; } ;;
+        none)   echo "  Plesk installer (8447, runs only while used): the firewall blocks it (updates over SSH: plesk installer --select-release-latest --upgrade-installed-components)" ;;
         only:*) echo "  Plesk installer (8447, runs only while used): the firewall allows it ${reach/only:/only from}" ;;
         *)      echo "  Plesk installer (8447, runs only while used): no firewall rule found" ;;
       esac
