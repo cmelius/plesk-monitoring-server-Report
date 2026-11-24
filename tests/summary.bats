@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # write_summary from the hourly reports of a real server (anonymized): 21 reports, of which 19
 # are within the 24 hours before the newest (one of the others exactly 24 hours before). The
-# reports were written by 1.11.0 and converted to the theme layout of 1.20.1 (sections moved, not
+# reports were written by 1.11.0 and converted to the theme layout of 1.21.0 (sections moved, not
 # changed). summary-real.txt is the summary the server wrote (anonymized, layout of 1.11.0);
 # summary-expected.txt is what this version writes from the same reports.
 

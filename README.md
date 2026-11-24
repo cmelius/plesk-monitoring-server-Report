@@ -4,7 +4,7 @@
 
 A single bash script that writes an **hourly health and security report** for a Plesk server on Linux and (optionally) uploads it to cloud storage with [rclone](https://rclone.org/) or mails it to you – to a mailbox on the same server, if you like, so the reports never leave it.
 
-It is built around the most common way a shared Plesk server gets into trouble: **a compromised mailbox or a hacked website starts sending spam**, the server IP ends up on a blocklist, and every customer's mail bounces. It also catches the quieter trouble that customers notice before you do: a full mailbox rejecting mail, a certificate renewal failing, a phone with an outdated password about to get the whole office banned. The report is short plain text you can read yourself – but where it really shines is a daily review by an AI assistant: it reads the latest report and a 24-hour summary every morning and tells you in a few lines whether anything needs your attention. The reports are written for exactly that; see [Reading the reports](#reading-the-reports) for an example prompt. If you host for customers, mind data protection: an AI review means handing personal data to the AI and storage provider – see [Privacy](#privacy-gdpr) for the options, from a local-only setup to pseudonymised uploads.
+It is built around the most common way a shared Plesk server gets into trouble: **a compromised mailbox or a hacked website starts sending spam**, the server IP ends up on a blocklist, and every customer's mail bounces. It also catches the quieter trouble that customers notice before you do: a full mailbox rejecting mail, a certificate renewal failing, a phone with an outdated password about to get the whole office banned. The report is short plain text you can read yourself – but where it really shines is a daily review by an AI assistant: it reads a 24-hour summary every morning and tells you in a few lines whether anything needs your attention. The reports are written for exactly that; see [Reading the reports](#reading-the-reports) for an example prompt. If you host for customers, mind data protection: an AI review means handing personal data to the AI and storage provider – see [Privacy](#privacy-gdpr) for the options, from a local-only setup to pseudonymised uploads.
 
 The script only **reads** logs and system state. It never changes the server configuration, mail queue or websites.
 
@@ -153,7 +153,7 @@ The report is ordered by theme – **MAIL, ACCESS, WEB, SYSTEM** –, the alerts
 | SYSTEM | load, CPU, RAM, filesystems, services, backups | updates and script version, kernel modules, PHP versions, rc.local |
 
 ```
-Server report host.example.com – 2026-10-26 10:05 UTC – plesk-server-report v1.20.1
+Server report host.example.com – 2026-10-26 10:05 UTC – plesk-server-report v1.21.0
 STATUS: WARNING (14)
 MAIL (7):
  ! Mail: mailbox info@shop.example submitted 140 mails after logins from outside DE AT CH: 192.0.2.15 (BR, Example Cloud Ltd [datacenter]) 203.0.113.99 (VN, Example Telecom) – password compromised?
@@ -443,7 +443,7 @@ Updates available: 11, security updates: 3
   libssl3t64
   openssl
   openssh-server
-Script version: 1.20.1 (latest release)
+Script version: 1.21.0 (latest release)
 
 Kernel modules of rarely used network protocols: sctp blocked, dccp blocked, tipc blocked, rds not installed
 
@@ -465,7 +465,7 @@ The report above is what a hijacked mailbox and a hacked WordPress site look lik
 <summary><b>Example <code>summary.txt</code></b> (the same day, condensed from all reports of the last 24 hours – 24 with the hourly cron job, 12 if it runs every 2 hours; fictional data, shortened)</summary>
 
 ```
-Server summary host.example.com – last 24 h: 24 report(s), 2026-10-25 11:05 UTC to 2026-10-26 10:05 UTC – plesk-server-report v1.20.1
+Server summary host.example.com – last 24 h: 24 report(s), 2026-10-25 11:05 UTC to 2026-10-26 10:05 UTC – plesk-server-report v1.21.0
 Built from the reports of this period, in their themes: MAIL, ACCESS, WEB, SYSTEM – totals and peaks of the hourly checks, and the newest results of the daily checks. Details of a run: report-<date>-<time>.txt
 
 == RUNS (time, status) ==
@@ -1164,6 +1164,20 @@ The test run matters: if something keeps the script from running – since 1.9.0
 There is no version 2 yet – 1.x is the maintained version. `--self-update` (also with `--edge`) always stays within the installed major version; should a version 2 ever come, `--self-update` would only tell you about it, and switching would be a deliberate `--self-update --major`, described here.
 
 Watch the repository (*Watch → Custom → Releases* or *All activity*) to get notified about changes. Issues and pull requests with your own findings are welcome.
+
+### Updating to 1.21.0: the reports are ordered by theme
+
+Version 1.21.0 changes the layout of the text report and of `summary.txt` – the content stays the same, it is only sorted differently:
+
+- **Four themes instead of one list of checks:** MAIL, ACCESS, WEB, SYSTEM, each with its daily checks at the end. The block *DAILY CHECKS* is gone; the daily checks of a theme are under `== THEME – daily checks (as of …) ==`. The table under [Example report](#example-report-fictional-data) shows which check is where.
+- **The alerts at the top are grouped by theme**, the critical ones first.
+- **`summary.txt` alone is enough for a review** – it now also has fail2ban, failed panel logins and the newest daily checks. **If an AI reads your reports with a prompt from an earlier README** (one that reads `latest.txt` for the daily checks and fail2ban), switch to the [current example prompt](#reading-the-reports); the old one still works, but reads a file it no longer needs.
+- **Scripts that read the text report** should look for the new headings (e.g. `== MAIL: delivery & spam filter ==` instead of `== MAIL ==`) – or better use the [JSON report](#json-report-optional-json_report1): its schema stays 1, the mail check now gives one section per heading, and the failed Let's Encrypt renewals have the check `certrenew`.
+- **For one day after the update, `summary.txt` is mixed:** it covers the last 24 hours, and the reports from before the update have the old layout. Alerts seen only in those are listed under `OTHER`. To start clean right away, delete the old reports – the state (offsets, known IPs, baselines) is not touched:
+
+  ```bash
+  rm /var/lib/plesk-server-report/out/report-*.txt     # in a one-folder installation: its out/ folder
+  ```
 
 ### Changelog
 
