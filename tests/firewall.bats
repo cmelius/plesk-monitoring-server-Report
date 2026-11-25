@@ -14,6 +14,17 @@ setup() {
       "ext firewall --list-json") cat "$RULES" ;;
     esac
   }
+  IPT=""; IPT6=""; SETS=""; V6=""; NFT=""     # no kernel rules unless a test sets them
+  iptables-save() { [[ -n $IPT ]] && grep -v '^#' "$IPT"; return 0; }
+  ip6tables-save() { [[ -n $IPT6 ]] && cat "$IPT6"; return 0; }
+  ipset() { [[ -n $SETS ]] && printf '%s\n' "$SETS"; return 0; }
+  nft() { [[ -n $NFT ]] && printf '%s\n' "$NFT"; return 0; }
+  ip() { [[ -n $V6 ]] && echo "2: eth0    inet6 $V6/64 scope global"; return 0; }
+}
+# the real kernel rules with LINE inserted at the top of INPUT (or appended to chain CHAIN: "CHAIN LINE")
+ipt() {
+  IPT="$BATS_TEST_TMPDIR/iptables.txt"; cp "$FIX/firewall/iptables-save.txt" "$IPT"
+  local l; for l in "$@"; do sed -i "0,/^-A INPUT /s||$l\n-A INPUT |" "$IPT"; done
 }
 
 # rules.json with the rule of CLASS set to ACTION and FROM ("" = key present but empty, - = no key)
@@ -205,4 +216,81 @@ PY
   [[ $output == *"MySQL/MariaDB (3307): listens on 0.0.0.0, the firewall allows it from everywhere – reachable from the internet"* ]]
   run alerts
   [[ $output == *"Database: MySQL/MariaDB listens on 0.0.0.0 and the firewall allows port 3307 from everywhere"* ]]
+}
+
+@test "kfw_reach: the kernel's rules – catch-all DROP, a port allowed, fail2ban bans, loopback and state rules don't count" {
+  KFW_SETS=""
+  [ "$(kfw_reach 3306 <"$FIX/firewall/iptables-save.txt")" = none ]
+  [ "$(kfw_reach 8447 <"$FIX/firewall/iptables-save.txt")" = all ]
+  [ "$(kfw_reach 22 <"$FIX/firewall/iptables-save.txt")" = "all except: 192.0.2.66, 192.0.2.67" ]
+  [ "$(kfw_reach 8443 <"$FIX/firewall/iptables-save.txt")" = all ]     # through f2b-plesk-panel and its RETURN
+  [ "$(kfw_reach 4000 <"$FIX/firewall/iptables-save.txt")" = none ]    # no rule: the last DROP
+}
+
+@test "kfw_reach: sources and ipsets decide only for themselves, a range, policy ACCEPT without rules" {
+  ipt "-A INPUT -s 198.51.100.7/32 -p tcp -m tcp --dport 3306 -j ACCEPT" \
+      "-A INPUT -p tcp -m multiport --dports 5000:5500,3306 -m set --match-set trusted src -j ACCEPT"
+  KFW_SETS="trusted 2"
+  [ "$(kfw_reach 3306 <"$IPT")" = "only: ipset trusted (2 entries), 198.51.100.7" ]
+  [ "$(kfw_reach 5432 <"$IPT")" = "only: ipset trusted (2 entries)" ]
+  [ "$(kfw_reach 5432 <<<$'*filter\n:INPUT ACCEPT [0:0]\nCOMMIT')" = all ]
+  # rate limits can't be judged: an ACCEPT counts, a DROP doesn't
+  ipt "-A INPUT -p tcp --dport 3306 -m limit --limit 5/min -j ACCEPT"
+  [ "$(kfw_reach 3306 <"$IPT")" = all ]
+  ipt "-A INPUT -p tcp --dport 8447 -m recent --rcheck -j DROP"
+  [ "$(kfw_reach 8447 <"$IPT")" = all ]
+}
+
+@test "kernel rules win: the Plesk Firewall blocks MySQL, but a rule added by hand lets everyone in – warning and a note" {
+  listen 0.0.0.0:3306
+  ipt "-A INPUT -p tcp -m tcp --dport 3306 -j ACCEPT"
+  check_firewall >"$BODY"
+  run report
+  [[ $output == *"Reachable from outside (databases, Plesk installer) – firewall rules in the kernel (iptables):"* ]]
+  [[ $output == *"MySQL/MariaDB (3306): listens on 0.0.0.0, the firewall allows it from everywhere – reachable from the internet"* ]]
+  [[ $output == *"note: the Plesk Firewall's rule blocks port 3306, but the kernel's rules let everyone in"* ]]
+  run alerts
+  [[ $output == *"Database: MySQL/MariaDB listens on 0.0.0.0 and the firewall allows port 3306 from everywhere"* ]]
+}
+
+@test "kernel rules: the real server – same answers as the Plesk Firewall, no note" {
+  ipt
+  check_firewall >"$BODY"
+  run report
+  [[ $output == *"firewall rules in the kernel (iptables)"* ]]
+  [[ $output == *"MySQL/MariaDB (3306): listens only locally (127.0.0.1)"* ]]
+  [[ $output == *"Plesk installer (8447, runs only while used): the firewall allows it from everywhere"* ]]
+  [[ $output != *"note:"* ]]
+  run alerts
+  [ -z "$output" ]
+}
+
+@test "kernel rules: the Plesk Firewall allows the installer, the kernel blocks it – a note" {
+  ipt "-A INPUT -p tcp -m tcp --dport 8447 -j DROP"
+  check_firewall >"$BODY"
+  run report
+  [[ $output == *"Plesk installer (8447, runs only while used): the firewall blocks it"* ]]
+  [[ $output == *"note: the Plesk Firewall's rule allows port 8447 from everywhere, but the kernel's rules don't"* ]]
+}
+
+@test "kernel rules: listening on IPv6 without ip6tables rules, with a global IPv6 address – open over IPv6" {
+  listen 0.0.0.0:3306 '[::]:3306'
+  ipt; V6=2001:db8::10
+  check_firewall >"$BODY"
+  run report
+  [[ $output == *"the firewall allows it over IPv4 for nobody, over IPv6 from everywhere: from everywhere – reachable from the internet"* ]]
+  run alerts
+  [[ $output == *"Database: MySQL/MariaDB listens on 0.0.0.0, [::]"* ]]
+  # no global IPv6 address: IPv6 doesn't count
+  V6=""; ALERTS=(); : >"$DALERTS"; : >"$BODY"
+  check_firewall >"$BODY"
+  run report
+  [[ $output == *"listens on 0.0.0.0, [::], the firewall blocks it"* ]]
+}
+
+@test "kernel rules: other nftables tables (firewalld) are named, not read" {
+  ipt; NFT=$'table ip filter\ntable inet firewalld\ntable ip6 filter'
+  check_firewall >"$BODY"
+  run report
+  [[ $output == *"(nftables has more tables: inet firewalld – their rules are not read here; nft list ruleset shows them)"* ]]
 }

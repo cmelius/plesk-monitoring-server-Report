@@ -54,3 +54,49 @@ setup() { load_script; AUTH_LOG="$FIX/auth.log"; PLESK_PANEL_LOG=/nonexistent; }
   run report
   [[ $output == *"1× Plesk -              from 198.18.0.18"*"user not logged"* ]]
 }
+
+# an auth.log with one accepted SSH login per user
+ssh_logins() {
+  AUTH_LOG="$BATS_TEST_TMPDIR/auth.log"; : >"$AUTH_LOG"
+  local u; for u in "$@"; do
+    echo "Nov 25 10:00:00 host sshd[100]: Accepted publickey for $u from 198.18.1.163 port 50000 ssh2: ED25519 SHA256:x" >>"$AUTH_LOG"
+  done
+}
+passwd_stub() {
+  LOGIN_DEFS="$BATS_TEST_TMPDIR/login.defs"; echo "UID_MIN 1000" >"$LOGIN_DEFS"
+  getent() {
+    case "$1 $2" in
+      "passwd www-data") echo "www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin" ;;
+      "passwd psaadm")   echo "psaadm:x:998:998::/opt/psa/admin:/bin/bash" ;;
+      "passwd cust01")   echo "cust01:x:10001:1002::/var/www/vhosts/example.com:/usr/local/psa/bin/chrootsh" ;;
+      "passwd cust02")   echo "cust02:x:10002:1002::/var/www/vhosts/example.org:/bin/false" ;;
+      "passwd backup01") echo "backup01:x:10003:1002::/var/www/vhosts/example.net:/bin/bash" ;;
+      "passwd admin1")   echo "admin1:x:1000:1000::/home/admin1:/bin/bash" ;;
+      "group psacln")    echo "psacln:x:1002:" ;;
+      *) return 2 ;;
+    esac
+  }
+}
+
+@test "SSH login of an account not meant for SSH: its own alert, also from a known IP" {
+  passwd_stub
+  ssh_logins root admin1 cust01 cust02 www-data psaadm backup01
+  check_logins || true                       # first run: IP stored as known, no "unknown IP" alerts
+  run alerts
+  [[ $output == *"Login: SSH login as cust02 from 198.18.1.163 – not meant for SSH: its login shell /bin/false refuses logins"* ]]
+  [[ $output == *"Login: SSH login as www-data from 198.18.1.163 – not meant for SSH: its login shell /usr/sbin/nologin refuses logins"* ]]
+  [[ $output == *"Login: SSH login as psaadm from 198.18.1.163 – not meant for SSH: a system account (UID 998)"* ]]
+  [[ $output == *"Login: SSH login as backup01 from 198.18.1.163 – not meant for SSH: a Plesk system user with a full shell (/bin/bash), not in ALLOWED_FULL_SHELL_USERS"* ]]
+  [[ $output != *"as root "* && $output != *"as admin1 "* && $output != *"as cust01 "* ]]
+  [ "$(alert_severity "Login: SSH login as cust02 from 198.18.1.163 – not meant for SSH: x")" = critical ]
+  run report
+  [[ $output == *"↳ cust02 is not meant to log in over SSH: its login shell /bin/false refuses logins"* ]]
+}
+
+@test "SSH login of a Plesk system user with a full shell in ALLOWED_FULL_SHELL_USERS: no alert" {
+  passwd_stub; ALLOWED_FULL_SHELL_USERS="backup01"
+  ssh_logins backup01
+  check_logins || true
+  run alerts
+  [ -z "$output" ]
+}

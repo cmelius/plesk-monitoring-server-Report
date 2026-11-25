@@ -134,6 +134,7 @@ jq_py() { python3 -c "import json, sys; d = json.load(open(sys.argv[1])); print(
     "Web: suspicious code in recently changed file /var/www/x.php – check it (webshell/backdoor?)" \
     "Web: example.com served the sensitive file /.env (HTTP 200, file exists)" \
     "Web: example.com exposes /.git/config publicly (HTTP 200) – remove it" \
+    "Login: SSH login as www-data from 192.0.2.1 – not meant for SSH: its login shell /usr/sbin/nologin refuses logins" \
     "Access: new SSH key for root: SHA256:abc (x) – added by you?" \
     "Access: account toor has UID 0 (root rights under another name)" \
     "Access: /etc/ld.so.preload loads /lib/x.so – a classic rootkit technique, check it" \

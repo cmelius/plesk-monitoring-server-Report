@@ -84,7 +84,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.21.0
+VERSION=1.22.0
 
 set -uo pipefail
 export LC_ALL=C
@@ -208,7 +208,8 @@ IGNORE_CRASHES=""             # space-separated programs (nginx, plesk-panel, ap
 # socket, and their bugs were the way to root more than once. Loaded → warning, loadable → recommendation
 RARE_MODULES="sctp dccp tipc rds"   # "" = check off
 # Daily: databases (MySQL/MariaDB, PostgreSQL) and the Plesk installer reachable from outside – what
-# listens on which address, and what the Plesk Firewall allows. A database open to everyone → warning
+# listens on which address, and what the firewall rules in the kernel allow (iptables, whoever set them;
+# without any: the Plesk Firewall's rules). A database open to everyone → warning
 FIREWALL_CHECK=1              # 0 = off
 WARN_INSTALLER_OPEN=1         # Plesk installer (port 8447) allowed from everywhere: 1 = recommendation, 0 = only the line
 # Daily: SSH access of the Plesk system users – a full shell instead of chrooted or Forbidden, and a
@@ -1701,11 +1702,36 @@ compact_login_ips() {
     mv "$f.new" "$f"
 }
 
+# ssh_login_misfit USER – why USER is not meant to log in over SSH; nothing if it may. A login
+# that succeeds for such an account is its own finding, also from a known IP: a system account
+# (UID below UID_MIN of /etc/login.defs, except root), a login shell that refuses logins (nologin,
+# false – sshd still accepts the key, and a tunnel with ssh -N works without a shell), or a Plesk
+# system user (group psacln) with a full shell not in ALLOWED_FULL_SHELL_USERS
+LOGIN_DEFS=/etc/login.defs
+ssh_login_misfit() {
+  local u=$1 ent uid gid shell min pgid pmem
+  [[ $u == root ]] && return 0
+  ent=$(getent passwd "$u" 2>/dev/null) || return 0
+  IFS=: read -r _ _ uid gid _ _ shell <<<"$ent"
+  [[ $uid =~ ^[0-9]+$ ]] || return 0
+  case $shell in
+    *nologin|*false|"") echo "its login shell ${shell:-(none)} refuses logins"; return 0 ;;
+  esac
+  min=$(awk '$1 == "UID_MIN" { print $2; exit }' "$LOGIN_DEFS" 2>/dev/null)
+  [[ $min =~ ^[0-9]+$ ]] || min=1000
+  if (( uid < min )); then echo "a system account (UID $uid)"; return 0; fi
+  IFS=: read -r _ _ pgid pmem < <(getent group psacln 2>/dev/null)
+  if [[ -n $pgid ]] && [[ $gid == "$pgid" || ,$pmem, == *,"$u",* ]] && [[ $shell != */chrootsh ]] &&
+     [[ " $ALLOWED_FULL_SHELL_USERS " != *" $u "* ]]; then
+    echo "a Plesk system user with a full shell ($shell), not in ALLOWED_FULL_SHELL_USERS"
+  fi
+  return 0
+}
 check_logins() {   # successful SSH and Plesk panel logins, alert for previously unknown IPs
-  local KNOWN NEWLOGINS FIRST_LOGIN_RUN cnt rest kind user ip meth fnote a who
+  local KNOWN NEWLOGINS FIRST_LOGIN_RUN cnt rest kind user ip meth fnote a who why
   section "SUCCESSFUL LOGINS (SSH, Plesk panel)"
   KNOWN="$STATE_DIR/known_login_ips"
-  NEWLOGINS=$TMPD/new_login_alerts
+  NEWLOGINS=$TMPD/new_login_alerts; : >"$NEWLOGINS.misfit"
   [[ -n $PLESK_PANEL_LOG && -r $PLESK_PANEL_LOG ]] ||
     note "logins: Plesk panel log PLESK_PANEL_LOG=\"$PLESK_PANEL_LOG\" not found – panel logins not checked"
   FIRST_LOGIN_RUN=0; [[ -f $KNOWN ]] || { FIRST_LOGIN_RUN=1; can_write_state && : >"$KNOWN"; }
@@ -1743,6 +1769,10 @@ check_logins() {   # successful SSH and Plesk panel logins, alert for previously
     IFS=$'\t' read -r kind user ip meth <<<"$rest"
     geo "$ip"
     printf '  %4d× %-5s %-14s from %-16s (%s)%s\n' "$cnt" "$kind" "$user" "$ip" "$meth" "${GEO_LABEL:+  $GEO_LABEL}" >>"$BODY"
+    if [[ $kind == SSH ]] && why=$(ssh_login_misfit "$user") && [[ -n $why ]]; then
+      echo "        ↳ $user is not meant to log in over SSH: $why" >>"$BODY"
+      echo "SSH login as $user from $ip${GEO_LABEL:+ ($GEO_LABEL)} – not meant for SSH: $why" >>"$NEWLOGINS.misfit"
+    fi
     if known_login_ip "$ip" "$KNOWN"; then
       can_write_state && echo "$ip $(date +%s)" >>"$KNOWN"      # last seen; compacted below
     else
@@ -1754,6 +1784,9 @@ check_logins() {   # successful SSH and Plesk panel logins, alert for previously
     fi
   done
   compact_login_ips "$KNOWN"
+  if [[ -s $NEWLOGINS.misfit ]]; then
+    while IFS= read -r a; do alert "Login: $a"; done <"$NEWLOGINS.misfit"
+  fi
   if [[ -s $NEWLOGINS ]]; then
     while IFS= read -r a; do alert "Login: $a"; done <"$NEWLOGINS"
   fi
@@ -2399,6 +2432,8 @@ check_updates() {   # pending (security) updates, reboot required
     echo "Updates available: $(grep -c . <<<"$upg" || true), security updates: $sec"
     grep -i security <<<"$upg" | awk '{print "  " $2}' | head -10
     (( sec > 0 )) && dalert "Updates: $sec security update(s) pending"
+    # "Inst NAME [OLD] (NEW REPO …)" – Plesk's own packages, from Plesk's repository
+    plesk_pending "$(apt_plesk <<<"$upg")"
     if [[ -f /var/run/reboot-required ]]; then
       echo "Reboot required (since $(date -r /var/run/reboot-required '+%Y-%m-%d'))"
       dalert "System: reboot required after updates"
@@ -2410,9 +2445,86 @@ check_updates() {   # pending (security) updates, reboot required
     upg=$(T "$CMD_TIMEOUT" dnf -q check-update 2>/dev/null | awk '/^Obsoleting/ { exit } NF == 3 && $1 ~ /\./' | grep -c . || true)
     echo "Updates available: $upg, security updates: $sec"
     (( sec > 0 )) && dalert "Updates: $sec security update(s) pending"
+    plesk_pending "$(T "$CMD_TIMEOUT" dnf -q check-update 'sw-*' 'psa*' 'plesk*' 2>/dev/null | awk '/^Obsoleting/ { exit } NF == 3 && $1 ~ /\./ { n = $1; sub(/\.[^.]*$/, "", n); print n, "-", $2 }' || true)"
     dnf_reboot_check
   fi
+  check_nginx_versions
   (( UPDATE_CHECK )) && script_update_check
+  return 0
+}
+# apt_plesk – Plesk's packages among apt's "Inst NAME [OLD] (NEW REPO …)" lines → "NAME OLD NEW"
+apt_plesk() { awk '$1 == "Inst" && $2 ~ /^(sw-|psa|plesk)/ { o = $3; gsub(/[][]/, "", o); n = $4; sub(/^\(/, "", n); print $2, (o ~ /^\(/ ? "-" : o), n }'; }
+# plesk_pending "NAME OLD NEW" lines – Plesk's own packages with an update. Plesk ships fixes for its
+# nginx (sw-nginx, and sw-cp-server for the panel) in its own packages, often before nginx.org
+# releases a new version; the package manager doesn't count them as security updates, so they would
+# get lost among the ordinary updates. A pending update of Plesk's nginx is a daily warning
+plesk_pending() {
+  local name old new ng=""
+  [[ -n $1 ]] || return 0
+  echo "Plesk packages with an update (not counted as security updates above):"
+  while read -r name old new; do
+    [[ -n $name ]] || continue
+    if [[ $old == - ]]; then echo "  $name → $new"; else echo "  $name $old → $new"; fi
+    [[ $name == sw-nginx || $name == sw-cp-server ]] && ng+="${ng:+, }$name $new"
+  done <<<"$1"
+  [[ -n $ng ]] && dalert "Updates: Plesk's nginx has an update ($ng) – Plesk ships nginx fixes in its own packages, not counted as security updates; install it (Tools & Settings → Updates, or plesk installer --select-release-latest --upgrade-installed-components)"
+  return 0
+}
+# The nginx that actually runs: for the websites and for the Plesk panel (sw-cp-server, its own
+# nginx on ports 8443/8880). Version of the running program (/proc/PID/exe -v, also when the file on
+# disk was replaced), the package it comes from – sw-nginx from Plesk carries backported fixes, a
+# distribution package gets them with the system updates, a nginx without package (compiled by hand)
+# gets none of them –, and the dynamic modules it loads with their packages: a module from elsewhere
+# is not covered by anyone's updates. An update installed while the old program keeps running (the
+# file was replaced, the process not restarted) is a warning: the fix is on disk, not in memory.
+PROC_DIR=/proc
+NGINX_MODULE_CONFS="/etc/nginx/nginx.conf /etc/nginx/modules-enabled/*.conf /etc/nginx/conf.d/*.conf /usr/share/nginx/modules/*.conf"
+pkg_of() {   # pkg_of FILE – "NAME VERSION" of the package that installed FILE, nothing if none
+  local f=$1 n
+  if command -v dpkg-query >/dev/null; then
+    n=$(T "$CMD_TIMEOUT" dpkg-query -S "$f" 2>/dev/null | awk -F': ' 'NR == 1 { print $1 }' || true)
+    [[ -z $n && -L $f ]] && n=$(T "$CMD_TIMEOUT" dpkg-query -S "$(readlink -f "$f")" 2>/dev/null | awk -F': ' 'NR == 1 { print $1 }' || true)
+    n=${n%%,*}; n=${n%%:*}
+    # shellcheck disable=SC2016   # ${Version} is dpkg-query's field, not a shell variable
+    [[ -n $n ]] && echo "$n $(T "$CMD_TIMEOUT" dpkg-query -W -f '${Version}' "$n" 2>/dev/null || true)"
+  elif command -v rpm >/dev/null; then
+    T "$CMD_TIMEOUT" rpm -qf --qf '%{NAME} %{VERSION}-%{RELEASE}\n' "$f" 2>/dev/null | grep -v 'not owned' | head -1 || true
+  fi
+  return 0
+}
+check_nginx_versions() {
+  local proc label pid exe path ver pkg any=0 m mf mods="" f
+  for proc in nginx:websites sw-cp-serverd:"the Plesk panel (sw-cp-server)"; do
+    label=${proc#*:}; proc=${proc%%:*}
+    pid=$(pgrep -o -x "$proc" 2>/dev/null || true)
+    [[ -n $pid && -e $PROC_DIR/$pid/exe ]] || continue
+    (( any++ )) || echo "nginx running (version, package):"
+    exe=$(readlink "$PROC_DIR/$pid/exe" 2>/dev/null || true); path=${exe% (deleted)}
+    ver=$(T "$CMD_TIMEOUT" "$PROC_DIR/$pid/exe" -v 2>&1 | awk -F'version: ' 'NF > 1 { print $2; exit }' || true)
+    pkg=$(pkg_of "$path")
+    if [[ -n $pkg ]]; then
+      [[ $pkg == sw-* ]] && pkg+=" (Plesk)"
+      echo "  $label: ${ver:-version unknown} – $path, package $pkg"
+    else
+      echo "  $label: ${ver:-version unknown} – $path, not from a package (compiled by hand?): no updates from the system or from Plesk"
+    fi
+    if [[ $exe == *" (deleted)" ]]; then
+      echo "  ↳ the running program was replaced on disk by an update, but not restarted – it still runs the old version"
+      dalert "Updates: nginx of $label still runs the program from before an update – the fix is on disk, not running; restart it (systemctl restart ${proc/sw-cp-serverd/sw-cp-server})"
+    fi
+  done
+  (( any )) || return 0
+  # dynamic modules (load_module …so;) of the websites' nginx
+  # shellcheck disable=SC2086   # the globs are meant to expand
+  for f in $NGINX_MODULE_CONFS; do
+    [[ -r $f ]] || continue
+    while read -r m; do
+      mf=$m; [[ $mf == /* ]] || mf=/usr/share/nginx/$mf
+      [[ " $mods " == *" ${m##*/}="* ]] && continue
+      pkg=$(pkg_of "$mf"); mods+=" ${m##*/}=${pkg%% *}"
+      echo "  module ${m##*/}: ${pkg:+package $pkg}${pkg:-not from a package – its updates are up to you}"
+    done < <(awk '$1 == "load_module" { m = $2; sub(/;$/, "", m); gsub(/["'"'"']/, "", m); print m }' "$f" 2>/dev/null)
+  done
   return 0
 }
 
@@ -3286,8 +3398,120 @@ fw_reach() {
   esac
 }
 fw_from() { if [[ $1 == all ]]; then echo everywhere; else echo "everywhere except ${1#all except: }"; fi; }
+# kfw_reach PORT – the same answer as fw_reach ("all", "none", "only: …", "all except: …"), from the
+# rules the kernel actually applies (iptables-save / ip6tables-save on stdin, table filter): whatever
+# put them there – the Plesk Firewall, fail2ban, another security tool, a script or a command by hand.
+# Follows a new TCP connection to PORT from the internet through the chain INPUT and the chains it
+# jumps to, up to the first ACCEPT, DROP or REJECT for everyone, else the policy of INPUT. Rules for
+# certain sources (-s, an ipset with -m set … src) only decide for those sources. What can't be judged
+# from the rule alone (limits, recent, tcp flags, a negation) counts as a match for ACCEPT and as no
+# match for DROP – in doubt the port is rated as more open, not less. Loopback rules (-i lo) and rules
+# only for established connections don't count. $KFW_SETS: "NAME ENTRIES" per ipset, for the labels.
+kfw_reach() {
+  awk -v port="$1" -v sets="${KFW_SETS:-}" '
+    function inports(v,   n, i, a, r) {   # "22", "1000:2000", "22,80,1000:2000"
+      n = split(v, a, ",")
+      for (i = 1; i <= n; i++) {
+        if (split(a[i], r, ":") == 2) { if (port + 0 >= r[1] + 0 && port + 0 <= r[2] + 0) return 1 }
+        else if (a[i] + 0 == port + 0) return 1
+      }
+      return 0
+    }
+    # parse RULE → M ("yes", "no", "maybe"), S (source label or ""), J (target)
+    function parse(l,   t, n, k, neg, o, v, p) {
+      gsub(/"[^"]*"/, "x", l)
+      n = split(l, t, " "); M = "yes"; S = ""; J = ""; p = ""; neg = 0
+      for (k = 3; k <= n; k++) {
+        o = t[k]
+        if (o == "!") { neg = 1; continue }
+        v = t[k + 1]
+        if (o == "-p" || o == "--protocol") { k++; if (neg) M = (M == "no" ? M : "maybe"); else if (v !~ /^(tcp|6|all|0)$/) M = "no" }
+        else if (o == "-s" || o == "--source") { k++; if (neg) { if (M != "no") M = "maybe" }
+          else if (v !~ /^(0\.0\.0\.0\/0|::\/0)$/) { sub(/\/(32|128)$/, "", v); S = v } }
+        else if (o == "-i" || o == "--in-interface") { k++; if (v == "lo" && !neg) M = "no" }
+        else if (o == "--dport" || o == "--destination-port" || o == "--dports" || o == "--destination-ports" || o == "--ports") {
+          k++; if (neg) { if (inports(v)) M = "no" } else if (!inports(v)) M = "no" }
+        else if (o == "--state" || o == "--ctstate") { k++
+          if ((v ~ /(^|,)NEW(,|$)/) == neg) M = "no" }
+        else if (o == "--match-set") { k += 2
+          if (t[k] ~ /src/) { if (neg) { if (M != "no") M = "maybe" } else S = "ipset " v } }
+        else if (o == "--syn") { if (neg) M = "no" }
+        else if (o == "--tcp-flags") { k += 2; if (M != "no") M = "maybe" }
+        else if (o == "-m" || o == "--match") { k++; if (v ~ /^(limit|hashlimit|recent|connlimit|string|time|u32|bpf|statistic|owner|geoip|xt_geoip)$/ && M != "no") M = "maybe" }
+        else if (o == "--sport" || o == "--sports" || o == "--source-port" || o == "--source-ports") { k++; if (M != "no") M = "maybe" }
+        else if (o == "-j" || o == "--jump" || o == "-g" || o == "--goto") { k++; J = v }
+        neg = 0
+      }
+    }
+    function decide(src, v) { if (!(src in dec)) { dec[src] = v; ord[++nord] = src } }
+    # ev CHAIN SRC DEPTH – for everyone (SRC ""): "ACCEPT", "DROP" or "" (fell through / RETURN);
+    # for one source: "T" when a rule decided for it, else ""
+    function ev(ch, src, d,   i, m, s, j, e, r) {
+      if (d > 20) return ""
+      for (i = 1; i <= nr[ch]; i++) {
+        parse(rl[ch, i]); m = M; s = S; j = J
+        if (m == "no" || j == "") continue
+        if (s != "" && src != "" && s != src) continue
+        e = (s != "") ? s : src
+        if (j == "ACCEPT" || j == "DROP" || j == "REJECT") {
+          if (m == "maybe" && j != "ACCEPT") continue
+          if (e == "") return (j == "ACCEPT") ? "ACCEPT" : "DROP"
+          decide(e, j == "ACCEPT" ? "ACCEPT" : "DROP")
+          if (src != "") return "T"
+          continue
+        }
+        if (j == "RETURN") { if (m == "maybe" || s != "") continue; return "" }
+        if (j in chain) {
+          r = ev(j, e, d + 1)
+          if (e == "" && r != "") return r
+          if (src != "" && r == "T") return "T"
+        }
+      }
+      return ""
+    }
+    function label(x) { return (x in setn) ? x " (" setn[x] " entries)" : x }
+    function list(v,   i, n, out) {
+      for (i = 1; i <= nord; i++) if (dec[ord[i]] == v) { n++; if (n <= 5) out = out (n > 1 ? ", " : "") label(ord[i]) }
+      if (n > 5) out = out " and " (n - 5) " more"
+      return out
+    }
+    BEGIN { n = split(sets, a, "\n"); for (i = 1; i <= n; i++) if (split(a[i], b, " ") == 2) setn["ipset " b[1]] = b[2] }
+    /^\*/ { tab = substr($0, 2); next }
+    tab != "filter" { next }
+    /^:/ { c = substr($1, 2); chain[c] = 1; pol[c] = $2; next }
+    $1 == "-A" { chain[$2] = 1; rl[$2, ++nr[$2]] = $0 }
+    END {
+      r = ev("INPUT", "", 0)
+      if (r == "") r = (pol["INPUT"] ~ /^(DROP|REJECT)$/) ? "DROP" : "ACCEPT"
+      if (r == "ACCEPT") { x = list("DROP"); print (x == "" ? "all" : "all except: " x) }
+      else { x = list("ACCEPT"); print (x == "" ? "none" : "only: " x) }
+    }'
+}
+fw_open() { [[ $1 == all || $1 == "all except:"* ]]; }   # reachable for (nearly) everyone
+# fw_kernel PORT ADDRESSES – the kernel's answer for IPv4 and, if the port listens on IPv6 and the
+# server has a global IPv6 address, for IPv6. Sets FWK_ANS to the answer that decides (the more open
+# one) and FWK_TXT to "IPv4: …; IPv6: …" when the two differ, else empty
+fw_kernel() {
+  local port=$1 addrs=$2 r4="" r6=""
+  [[ $addrs == *0.0.0.0* || $addrs == *'*'* || $addrs =~ (^|, )[0-9]+\. ]] && r4=$(kfw_reach "$port" <<<"$KFW4")
+  if [[ -n $KFW_V6 && ( $addrs == *'['* || $addrs == *'*'* || $addrs == *::* ) ]]; then
+    if [[ -n $KFW6 ]]; then r6=$(kfw_reach "$port" <<<"$KFW6"); else r6=all; fi
+  fi
+  FWK_ANS=${r4:-$r6}; FWK_TXT=""
+  if fw_open "$r6" && ! fw_open "$r4"; then FWK_ANS=$r6; fi
+  [[ -n $r4 && -n $r6 && $r4 != "$r6" ]] && FWK_TXT="IPv4: $r4; IPv6: $r6"
+  return 0
+}
+fw_say() {   # fw_say ANSWER – the answer in words: "from everywhere", "only from …", "nobody"
+  case $1 in
+    all|"all except:"*) echo "from $(fw_from "$1")" ;;
+    none)    echo "for nobody" ;;
+    only:*)  echo "${1/only:/only from}" ;;
+    IPv4:*)  local a=${1#IPv4: } b; b=${a#*; IPv6: }; a=${a%%; IPv6: *}; echo "over IPv4 $(fw_say "$a"), over IPv6 $(fw_say "$b")" ;;
+  esac
+}
 check_firewall() {
-  local ss_out fw="" e svc cls port def name procs ports addrs ext reach a loc
+  local ss_out fw="" e svc cls port def name procs ports addrs ext reach a loc src p kw
   echo ""
   if ! command -v ss >/dev/null; then echo "Reachable from outside: ss not found – not checked"; return 0; fi
   ss_out=$(T "$CMD_TIMEOUT" ss -ltnpH 2>/dev/null || T "$CMD_TIMEOUT" ss -ltnp 2>/dev/null || T "$CMD_TIMEOUT" ss -ltn 2>/dev/null)
@@ -3299,8 +3523,17 @@ check_firewall() {
       [[ -n $FW_RULES ]] && fw="Plesk Firewall"
     fi
   fi
+  # the rules the kernel applies – they win over what the Plesk Firewall has stored
+  KFW4=""; KFW6=""; KFW_SETS=""; KFW_V6=""
+  if command -v iptables-save >/dev/null; then KFW4=$(T "$CMD_TIMEOUT" iptables-save -t filter 2>/dev/null | grep -v '^#' || true); fi
+  if command -v ip6tables-save >/dev/null; then KFW6=$(T "$CMD_TIMEOUT" ip6tables-save -t filter 2>/dev/null | grep -v '^#' || true); fi
+  [[ $KFW4 == *"-A "* || $KFW4 == *":INPUT DROP"* || $KFW4 == *":INPUT REJECT"* ]] || KFW4=""
+  [[ $KFW6 == *"-A "* || $KFW6 == *":INPUT DROP"* || $KFW6 == *":INPUT REJECT"* ]] || KFW6=""
+  if command -v ipset >/dev/null; then KFW_SETS=$(T "$CMD_TIMEOUT" ipset list -t 2>/dev/null | awk '/^Name: / { n = $2 } /^Number of entries: / { print n, $4 }' || true); fi
+  if command -v ip >/dev/null; then KFW_V6=$(ip -6 -o addr show scope global 2>/dev/null | head -1 || true); fi
   e="databases"; command -v plesk >/dev/null && e+=", Plesk installer"
-  echo "Reachable from outside ($e)${fw:+ – rules of the $fw}:"
+  if [[ -n $KFW4 ]]; then src="firewall rules in the kernel (iptables)"; else src=${fw:+rules of the $fw}; fi
+  echo "Reachable from outside ($e)${src:+ – $src}:"
   for svc in $FW_SERVICES; do
     IFS=: read -r cls def name procs <<<"$svc"
     ports=$(fw_procports "$procs" <<<"$ss_out"); [[ -n $ports ]] || ports=$def
@@ -3310,12 +3543,15 @@ check_firewall() {
       ext=""; loc=""
       while IFS= read -r a; do if fw_loopback "$a"; then loc+="${loc:+, }$a"; else ext+="${ext:+, }$a"; fi; done <<<"$addrs"
       if [[ -z $ext ]]; then echo "  $name ($port): listens only locally ($loc) – not reachable from outside"; continue; fi
-      reach=""; [[ -n $fw ]] && reach=$(fw_reach "$port")
+      reach=""; kw=""
+      if [[ -n $KFW4 ]]; then
+        fw_kernel "$port" "$ext"; reach=$FWK_ANS; kw=$FWK_TXT
+      elif [[ -n $fw ]]; then reach=$(fw_reach "$port"); fi
       case $reach in
         none)  echo "  $name ($port): listens on $ext, the firewall blocks it – Recommendation: let it listen only locally, if no application connects from outside" ;;
-        only:*) echo "  $name ($port): listens on $ext, the firewall allows it ${reach/only:/only from}" ;;
+        only:*) echo "  $name ($port): listens on $ext, the firewall allows it ${kw:+$(fw_say "$kw") – }${reach/only:/only from}" ;;
         all|"all except:"*)
-          echo "  $name ($port): listens on $ext, the firewall allows it from $(fw_from "$reach") – reachable from the internet"
+          echo "  $name ($port): listens on $ext, the firewall allows it ${kw:+$(fw_say "$kw"): }from $(fw_from "$reach") – reachable from the internet"
           if [[ $cls == mysql ]]; then
             echo "  Recommendation: if no application connects from outside, let it listen only locally (Plesk: Tools & Settings → Database Servers"
             echo "  → Settings: untick \"Allow local MySQL server to accept external connections\"), else allow only the addresses that need it"
@@ -3324,27 +3560,51 @@ check_firewall() {
         *) if [[ -n $fw ]]; then e="no rule for it in the Plesk Firewall"; else e="firewall not checked (no Plesk Firewall)"; fi
            echo "  $name ($port): listens on $ext – $e: make sure port $port is filtered, if no application connects from outside" ;;
       esac
+      fw_compare "$port" "$reach"
     done
   done
   if command -v plesk >/dev/null; then
-    if [[ -z $fw ]]; then
-      echo "  Plesk installer (8447, runs only while used): Plesk Firewall not enabled or not installed – not checked"
-    else
-      reach=$(fw_reach 8447)
-      case $reach in
-        all|"all except:"*)
-          echo "  Plesk installer (8447, runs only while used): the firewall allows it from $(fw_from "$reach")"
-          (( WARN_INSTALLER_OPEN )) && {
-            echo "  Recommendation: allow it only from your own addresses (Tools & Settings → Firewall → Plesk installer), or block it"
-            echo "  and update over SSH as root: plesk installer --select-release-latest --upgrade-installed-components"
-            echo "  (it runs only while used, but then anyone can reach its login)"; } ;;
-        none)   echo "  Plesk installer (8447, runs only while used): the firewall blocks it (updates over SSH: plesk installer --select-release-latest --upgrade-installed-components)" ;;
-        only:*) echo "  Plesk installer (8447, runs only while used): the firewall allows it ${reach/only:/only from}" ;;
-        *)      echo "  Plesk installer (8447, runs only while used): no firewall rule found" ;;
-      esac
-    fi
+    p="Plesk installer (8447, runs only while used)"
+    if [[ -n $KFW4 ]]; then reach=$(kfw_reach 8447 <<<"$KFW4")
+    elif [[ -n $fw ]]; then reach=$(fw_reach 8447)
+    else reach=-; fi
+    case $reach in
+      -) echo "  $p: Plesk Firewall not enabled or not installed – not checked" ;;
+      all|"all except:"*)
+        echo "  $p: the firewall allows it from $(fw_from "$reach")"
+        (( WARN_INSTALLER_OPEN )) && {
+          echo "  Recommendation: allow it only from your own addresses (Tools & Settings → Firewall → Plesk installer), or block it"
+          echo "  and update over SSH as root: plesk installer --select-release-latest --upgrade-installed-components"
+          echo "  (it runs only while used, but then anyone can reach its login)"; } ;;
+      none)   echo "  $p: the firewall blocks it (updates over SSH: plesk installer --select-release-latest --upgrade-installed-components)" ;;
+      only:*) echo "  $p: the firewall allows it ${reach/only:/only from}" ;;
+      *)      echo "  $p: no firewall rule found" ;;
+    esac
+    [[ $reach != - ]] && fw_compare 8447 "$reach"
+  fi
+  if [[ -n $KFW4 ]]; then
+    e=$(T "$CMD_TIMEOUT" nft list tables 2>/dev/null | awk '$1 == "table" && !($2 ~ /^ip6?$/ && $3 ~ /^(filter|nat|mangle|raw|security)$/) { printf "%s%s %s", (n++ ? ", " : ""), $2, $3 }')
+    [[ -n $e ]] && echo "  (nftables has more tables: $e – their rules are not read here; nft list ruleset shows them)"
+    [[ -z $fw ]] && command -v plesk >/dev/null && echo "  (Plesk Firewall not enabled or not installed – the rules above come from elsewhere)"
+  elif command -v nft >/dev/null && [[ -n $(T "$CMD_TIMEOUT" nft list tables 2>/dev/null) ]]; then
+    echo "  (no iptables rules, but nftables has tables – their rules are not read here; nft list ruleset shows them)"
   fi
   echo "  (a firewall in front of the server, e.g. at the hosting provider, is not visible from here)"
+  return 0
+}
+# fw_compare PORT KERNEL-ANSWER – a note when the Plesk Firewall's own rule says the opposite of what
+# the kernel does (open vs. closed): another program or a command by hand changed the rules, or the
+# Plesk Firewall's changes were never applied. Banned IPs (fail2ban) alone are no difference.
+fw_compare() {
+  local p
+  [[ -n $KFW4 && -n $FW_RULES ]] || return 0
+  p=$(fw_reach "$1")
+  [[ -n $p ]] || return 0
+  if fw_open "$p" && ! fw_open "$2"; then
+    echo "  note: the Plesk Firewall's rule allows port $1 from $(fw_from "$p"), but the kernel's rules don't – changed by another program or by hand?"
+  elif ! fw_open "$p" && fw_open "$2"; then
+    echo "  note: the Plesk Firewall's rule $( [[ $p == none ]] && echo "blocks port $1" || echo "allows port $1 ${p/only:/only from}" ), but the kernel's rules let everyone in – changed by another program or by hand, or the Plesk Firewall's changes not applied?"
+  fi
   return 0
 }
 # Mail forwarding to other providers (Plesk). A forwarded spam mail leaves from this server: Gmail,
@@ -3738,7 +3998,7 @@ alert_severity() {
     "Web: "*"brute force succeeded?"*|\
     "Web: "*" new PHP file(s) in wp-content/uploads"*|"Web: suspicious "*|\
     "Web: "*" served the sensitive file "*|"Web: "*" exposes "*" publicly"*|\
-    "Access: new SSH key "*|"Access: account "*" has UID 0"*|"Access: /etc/ld.so.preload "*|\
+    "Login: SSH login as "*" – not meant for SSH: "*|"Access: new SSH key "*|"Access: account "*" has UID 0"*|"Access: /etc/ld.so.preload "*|\
     "Cron: "*"suspicious"*|"Process: "*|\
     "Service(s) failed: "*|"fail2ban is not running"*|"Crash: "*"nginx "*|"Crash: "*"apache "*|"Crash: "*"plesk-panel "*|"RAM: the kernel killed processes"*|\
     "DNS: "*" does not resolve"*|"TLS: mail certificate on port "*" has expired"*) echo critical ;;
