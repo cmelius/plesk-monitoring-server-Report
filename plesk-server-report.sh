@@ -3405,8 +3405,8 @@ fw_from() { if [[ $1 == all ]]; then echo everywhere; else echo "everywhere exce
 # jumps to, up to the first ACCEPT, DROP or REJECT for everyone, else the policy of INPUT. Rules for
 # certain sources (-s, an ipset with -m set … src) only decide for those sources. What can't be judged
 # from the rule alone (limits, recent, tcp flags, a negation) counts as a match for ACCEPT and as no
-# match for DROP – in doubt the port is rated as more open, not less. Loopback rules (-i lo) and rules
-# only for established connections don't count. $KFW_SETS: "NAME ENTRIES" per ipset, for the labels.
+# match for DROP – in doubt the port is rated as more open, not less. Loopback rules (-i lo), rules
+# only for established connections and the bans of fail2ban (chains and ipsets f2b-…) don't count. $KFW_SETS: "NAME ENTRIES" per ipset, for the labels.
 kfw_reach() {
   awk -v port="$1" -v sets="${KFW_SETS:-}" '
     function inports(v,   n, i, a, r) {   # "22", "1000:2000", "22,80,1000:2000"
@@ -3456,6 +3456,8 @@ kfw_reach() {
         if (j == "ACCEPT" || j == "DROP" || j == "REJECT") {
           if (m == "maybe" && j != "ACCEPT") continue
           if (e == "") return (j == "ACCEPT") ? "ACCEPT" : "DROP"
+          # bans of fail2ban (its chains f2b-…, its ipsets f2b-…) are no rule about the port
+          if (j != "ACCEPT" && (ch ~ /^f2b-/ || e ~ /^ipset f2b-/)) { if (src != "") return "T"; continue }
           decide(e, j == "ACCEPT" ? "ACCEPT" : "DROP")
           if (src != "") return "T"
           continue
@@ -3583,10 +3585,13 @@ check_firewall() {
     [[ $reach != - ]] && fw_compare 8447 "$reach"
   fi
   if [[ -n $KFW4 ]]; then
-    e=$(T "$CMD_TIMEOUT" nft list tables 2>/dev/null | awk '$1 == "table" && !($2 ~ /^ip6?$/ && $3 ~ /^(filter|nat|mangle|raw|security)$/) { printf "%s%s %s", (n++ ? ", " : ""), $2, $3 }')
+    e=""
+    if command -v nft >/dev/null; then
+      e=$(T "$CMD_TIMEOUT" nft list tables 2>/dev/null | awk '$1 == "table" && !($2 ~ /^ip6?$/ && $3 ~ /^(filter|nat|mangle|raw|security)$/) { printf "%s%s %s", (n++ ? ", " : ""), $2, $3 }' || true)
+    fi
     [[ -n $e ]] && echo "  (nftables has more tables: $e – their rules are not read here; nft list ruleset shows them)"
     [[ -z $fw ]] && command -v plesk >/dev/null && echo "  (Plesk Firewall not enabled or not installed – the rules above come from elsewhere)"
-  elif command -v nft >/dev/null && [[ -n $(T "$CMD_TIMEOUT" nft list tables 2>/dev/null) ]]; then
+  elif command -v nft >/dev/null && [[ -n $(T "$CMD_TIMEOUT" nft list tables 2>/dev/null || true) ]]; then
     echo "  (no iptables rules, but nftables has tables – their rules are not read here; nft list ruleset shows them)"
   fi
   echo "  (a firewall in front of the server, e.g. at the hosting provider, is not visible from here)"

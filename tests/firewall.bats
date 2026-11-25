@@ -218,13 +218,16 @@ PY
   [[ $output == *"Database: MySQL/MariaDB listens on 0.0.0.0 and the firewall allows port 3307 from everywhere"* ]]
 }
 
-@test "kfw_reach: the kernel's rules – catch-all DROP, a port allowed, fail2ban bans, loopback and state rules don't count" {
+@test "kfw_reach: the kernel's rules of a real server – catch-all DROP, ports allowed; fail2ban bans, loopback and state rules don't count" {
   KFW_SETS=""
   [ "$(kfw_reach 3306 <"$FIX/firewall/iptables-save.txt")" = none ]
   [ "$(kfw_reach 8447 <"$FIX/firewall/iptables-save.txt")" = all ]
-  [ "$(kfw_reach 22 <"$FIX/firewall/iptables-save.txt")" = "all except: 192.0.2.66, 192.0.2.67" ]
-  [ "$(kfw_reach 8443 <"$FIX/firewall/iptables-save.txt")" = all ]     # through f2b-plesk-panel and its RETURN
+  [ "$(kfw_reach 22 <"$FIX/firewall/iptables-save.txt")" = all ]       # through f2b-recidive and f2b-ssh, bans ignored
+  [ "$(kfw_reach 993 <"$FIX/firewall/iptables-save.txt")" = all ]
+  [ "$(kfw_reach 50000 <"$FIX/firewall/iptables-save.txt")" = none ]   # inside 49152:65535
   [ "$(kfw_reach 4000 <"$FIX/firewall/iptables-save.txt")" = none ]    # no rule: the last DROP
+  # a ban outside fail2ban (a rule by hand) is a rule about the port
+  [ "$(kfw_reach 22 <<<"$(sed 's/^-A INPUT -p tcp -j f2b-recidive$/&\n-A INPUT -s 203.0.113.5\/32 -j DROP/' "$FIX/firewall/iptables-save.txt")")" = "all except: 203.0.113.5" ]
 }
 
 @test "kfw_reach: sources and ipsets decide only for themselves, a range, policy ACCEPT without rules" {
@@ -293,4 +296,13 @@ PY
   check_firewall >"$BODY"
   run report
   [[ $output == *"(nftables has more tables: inet firewalld – their rules are not read here; nft list ruleset shows them)"* ]]
+}
+
+@test "kernel rules without nft installed (Debian with iptables-nft): no error, no nftables line" {
+  ipt; unset -f nft
+  command() { if [[ $1 == -v && $2 == nft ]]; then return 1; fi; builtin command "$@"; }
+  check_firewall >"$BODY"
+  run report
+  [[ $output == *"Plesk installer (8447, runs only while used): the firewall allows it from everywhere"* ]]
+  [[ $output != *nftables* ]]
 }
