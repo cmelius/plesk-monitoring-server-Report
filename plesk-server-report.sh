@@ -84,7 +84,7 @@
 # License: MIT. No warranty – read the code before running it as root.
 # =============================================================================
 
-VERSION=1.22.0
+VERSION=1.22.1
 
 set -uo pipefail
 export LC_ALL=C
@@ -3575,8 +3575,8 @@ check_firewall() {
       all|"all except:"*)
         echo "  $p: the firewall allows it from $(fw_from "$reach")"
         (( WARN_INSTALLER_OPEN )) && {
-          echo "  Recommendation: allow it only from your own addresses (Tools & Settings → Firewall → Plesk installer), or block it"
-          echo "  and update over SSH as root: plesk installer --select-release-latest --upgrade-installed-components"
+          echo "  Recommendation: allow it only from your own addresses, or block it – Tools & Settings → Firewall → rule"
+          echo "  \"Plesk installer\": Sources, or Action \"Deny\" – and update over SSH as root: plesk installer --select-release-latest --upgrade-installed-components"
           echo "  (it runs only while used, but then anyone can reach its login)"; } ;;
       none)   echo "  $p: the firewall blocks it (updates over SSH: plesk installer --select-release-latest --upgrade-installed-components)" ;;
       only:*) echo "  $p: the firewall allows it ${reach/only:/only from}" ;;

@@ -77,6 +77,7 @@ listen() {   # listen ADDRESS:PORT … – ss output with these listening socket
   [[ $output == *"PostgreSQL (5432): not listening"* ]]
   [[ $output == *"Plesk installer (8447, runs only while used): the firewall allows it from everywhere"* ]]
   [[ $output == *"Recommendation: allow it only from your own addresses"* ]]
+  [[ $output == *'rule'*'"Plesk installer": Sources, or Action "Deny"'* ]]
   [[ $output == *"update over SSH as root: plesk installer --select-release-latest --upgrade-installed-components"* ]]
   [[ $output == *"not visible from here"* ]]
   run alerts

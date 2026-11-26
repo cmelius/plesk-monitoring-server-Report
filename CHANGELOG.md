@@ -2,6 +2,11 @@
 
 All notable changes to `plesk-server-report.sh`. The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [Semantic Versioning](https://semver.org/). Released versions are on the [releases page](https://github.com/cmelius/plesk-monitoring-server-Report/releases); the version of a running script is shown in the first line of every report and with `--version`.
 
+## [1.22.1] – not yet released (on `main`)
+
+### Changed
+- **Plesk installer open to everyone: the recommendation says how to restrict or block it** – in the Plesk Firewall's rule *Plesk installer*: your own addresses under *Sources* (only they get in), or *Action* "Deny".
+
 ## [1.22.0] – 2026-11-26
 
 Three changes that came out of a discussion on the Plesk forum: the firewall check reads what the kernel does instead of what the Plesk Firewall has stored, SSH logins are checked against the account, and the report shows which nginx actually runs.
