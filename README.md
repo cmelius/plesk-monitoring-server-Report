@@ -153,7 +153,7 @@ The report is ordered by theme – **MAIL, ACCESS, WEB, SYSTEM** –, the alerts
 | SYSTEM | load, CPU, RAM, filesystems, services, backups | updates and script version, kernel modules, PHP versions, rc.local |
 
 ```
-Server report host.example.com – 2026-10-26 10:05 UTC – plesk-server-report v1.21.0
+Server report host.example.com – 2026-10-26 10:05 UTC – plesk-server-report v1.22.0
 STATUS: WARNING (14)
 MAIL (7):
  ! Mail: mailbox info@shop.example submitted 140 mails after logins from outside DE AT CH: 192.0.2.15 (BR, Example Cloud Ltd [datacenter]) 203.0.113.99 (VN, Example Telecom) – password compromised?
@@ -446,7 +446,7 @@ Updates available: 11, security updates: 3
 nginx running (version, package):
   websites: nginx/1.30.7 – /usr/sbin/nginx, package sw-nginx 1.30.7-v.debian.13+p18.0.75.0 (Plesk)
   the Plesk panel (sw-cp-server): nginx/1.30.7 – /usr/sbin/sw-cp-serverd, package sw-cp-server 2:1.30.7-v.debian.13+p18.0.75.0 (Plesk)
-Script version: 1.21.0 (latest release)
+Script version: 1.22.0 (latest release)
 
 Kernel modules of rarely used network protocols: sctp blocked, dccp blocked, tipc blocked, rds not installed
 
@@ -468,7 +468,7 @@ The report above is what a hijacked mailbox and a hacked WordPress site look lik
 <summary><b>Example <code>summary.txt</code></b> (the same day, condensed from all reports of the last 24 hours – 24 with the hourly cron job, 12 if it runs every 2 hours; fictional data, shortened)</summary>
 
 ```
-Server summary host.example.com – last 24 h: 24 report(s), 2026-10-25 11:05 UTC to 2026-10-26 10:05 UTC – plesk-server-report v1.21.0
+Server summary host.example.com – last 24 h: 24 report(s), 2026-10-25 11:05 UTC to 2026-10-26 10:05 UTC – plesk-server-report v1.22.0
 Built from the reports of this period, in their themes: MAIL, ACCESS, WEB, SYSTEM – totals and peaks of the hourly checks, and the newest results of the daily checks. Details of a run: report-<date>-<time>.txt
 
 == RUNS (time, status) ==
